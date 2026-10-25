@@ -1,3 +1,29 @@
+const nahjArabic: Record<string, string> = {
+    "Add Row": "إضافة صف",
+    "Clearance Summary": "ملخص التسوية",
+    "Click to change the closing balance as per statement": "اضغط لتعديل الرصيد الختامي حسب كشف الحساب",
+    "Closing (statement)": "الرصيد الختامي (الكشف)",
+    "Closing (system)": "الرصيد الختامي (النظام)",
+    "Drag to reorder": "اسحب لإعادة الترتيب",
+    "FY": "السنة المالية",
+    "Import 1 transaction": "استيراد معاملة واحدة",
+    "Importing 1 transaction": "جارٍ استيراد معاملة واحدة",
+    "Importing {0} of {1} transactions": "جارٍ استيراد {0} من {1} معاملة",
+    "Incorrectly Cleared": "تمت تسويتها بشكل غير صحيح",
+    "Matched": "مطابق",
+    "Matched date": "تاريخ المطابقة",
+    "No results found": "لا توجد نتائج",
+    "Payment Details": "تفاصيل الدفع",
+    "Preferences": "التفضيلات",
+    "Reconciliation Statement": "كشف التسوية",
+    "Shortcut": "اختصار",
+    "e.g. Last 3 weeks, Q1, May 2025": "مثلًا: آخر 3 أسابيع، الربع الأول، مايو 2025",
+
+    "Nahj Blue": "نهج الأزرق",
+    "A calm workspace, designed for clarity.": "مساحة عمل هادئة، مصممة للوضوح.",
+    "Language": "اللغة",
+    "Could not update language. Please try again.": "تعذر تغيير اللغة. حاول مرة أخرى.",
+}
 function _(txt: string, replace?: string[], context = null) {
     if (!txt) return txt;
     if (typeof txt != "string") return txt;
@@ -18,6 +44,9 @@ function _(txt: string, replace?: string[], context = null) {
         translated_text = txt;
     }
 
+    if (document.documentElement.lang.startsWith('ar') && nahjArabic[key]) {
+        translated_text = nahjArabic[key]
+    }
     if (replace && typeof replace === "object") {
         translated_text = format(translated_text, replace);
     }

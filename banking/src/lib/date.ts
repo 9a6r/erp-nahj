@@ -1,4 +1,5 @@
 import dayjs from 'dayjs';
+import 'dayjs/locale/ar';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import advancedFormat from 'dayjs/plugin/advancedFormat';
@@ -153,7 +154,7 @@ const toUserTimezone = (timestamp: string) => {
 export const getTimeago = (date?: string) => {
     if (date) {
         const userDate = toUserTimezone(date)
-        return userDate.fromNow()
+        return userDate.locale(document.documentElement.lang.startsWith('ar') ? 'ar' : 'en').fromNow()
     }
     return ''
 }

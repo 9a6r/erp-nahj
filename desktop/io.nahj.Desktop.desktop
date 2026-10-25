@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Nahj
+Name[ar]=نهج
+Comment=ERPNext workspace
+Comment[ar]=مساحة عمل نهج لإدارة الأعمال
+Exec=nahj-desktop
+Icon=io.nahj.Desktop
+Terminal=false
+Categories=Office;Finance;
+StartupNotify=true

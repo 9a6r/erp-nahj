@@ -1,0 +1,3 @@
+#!/bin/sh
+export PYTHONPATH="/usr/share/nahj-desktop${PYTHONPATH:+:$PYTHONPATH}"
+exec /usr/bin/python3 -m nahj_desktop "$@"

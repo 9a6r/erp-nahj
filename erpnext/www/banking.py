@@ -50,15 +50,21 @@ def get_context_for_dev():
 	return {
 		"boot": json.loads(get_boot()),
 		"layout_direction": "rtl" if is_rtl() else "ltr",
+		"lang": frappe.local.lang,
 	}
 
 
 def get_boot():
+	language = frappe.local.lang
 	try:
 		boot = frappe.sessions.get()
 	except Exception as e:
 		raise frappe.SessionBootFailed from e
 
+	# Session boot may restore the account language; preserve this request choice.
+	frappe.local.lang = language
+	boot.lang = language
+	boot.layout_direction = "rtl" if is_rtl() else "ltr"
 	boot_json = frappe.as_json(boot, indent=None, separators=(",", ":"))
 	boot_json = SCRIPT_TAG_PATTERN.sub("", boot_json)
 
@@ -66,3 +72,15 @@ def get_boot():
 	boot_json = json.dumps(boot_json)
 
 	return boot_json
+
+
+@frappe.whitelist(methods=["POST"])
+def set_language(language: str):
+	"""Change only the authenticated user's language and refresh their boot cache."""
+	if language not in ("ar", "en"):
+		frappe.throw(_("Unsupported language"), frappe.ValidationError)
+	if frappe.session.user == "Guest":
+		frappe.throw(_("Please login"), frappe.PermissionError)
+	frappe.db.set_value("User", frappe.session.user, "language", language)
+	frappe.clear_cache(user=frappe.session.user)
+	return {"language": language, "direction": "rtl" if language == "ar" else "ltr"}
