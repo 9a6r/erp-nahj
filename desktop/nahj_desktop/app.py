@@ -1,47 +1,34 @@
-"""GTK4 / WebKitGTK client. No native bridge is exposed to web content."""
+"""Native GTK4 workspace with isolated WebKit sessions per server."""
 import hashlib
-import json
 import os
 from pathlib import Path
 import threading
 from urllib.parse import urlsplit
-from urllib.request import urlopen
 
 import gi
 gi.require_version('Gtk', '4.0')
 gi.require_version('WebKit', '6.0')
 from gi.repository import Gtk, Gdk, Gio, GLib, WebKit
 from . import config
+from .connection import probe, ConnectionFailure
+from .theme import CSS, WEB_CSS
 
-CSS = b'''
-window { background: #0c1524; color: #e7f1ff; }
-headerbar { background: #101e33; color: #e7f1ff; box-shadow: none; }
-.card { background: #14253c; border: 1px solid #2a4260; border-radius: 24px; padding: 36px; }
-.hero-title { font-size: 34px; font-weight: 800; }
-.subtitle { color: #a5bbd6; font-size: 15px; }
-button { background-image: none; background-color: #192b43; color: #e0edfa; border: 1px solid #35516e; border-radius: 12px; padding: 10px 18px; }
-button:hover { background-color: #243c58; }
-button:disabled { opacity: .55; }
-headerbar button { background: transparent; border-color: transparent; }
-headerbar button:hover { background: #243c58; }
-headerbar .title { font-size: 16px; }
-dropdown popover contents { background: #14253c; color: #e0edfa; }
-window { font-family: 'Noto Sans Arabic', sans-serif; }
-
-button.suggested-action { background: #96c9ff; color: #0c1524; }
-entry { background: #0e1c30; color: #e7f1ff; border: 1px solid #385578; border-radius: 12px; padding: 12px; }
-.status { color: #a5d4ff; }
-'''
 
 class Nahj(Gtk.Application):
     def __init__(self):
         super().__init__(application_id='io.nahj.Desktop')
         self.settings = config.load()
         self.web = None
+        self.active_server = ''
+        self.probe_generation = 0
         self.connect('activate', self.activate)
+        self.connect('shutdown', lambda *_: self.cancel_probe())
 
     def t(self, ar, en):
         return en if self.settings['language'] == 'en' else ar
+
+    def cancel_probe(self):
+        self.probe_generation += 1
 
     def activate(self, *_):
         if hasattr(self, 'window'):
@@ -51,108 +38,187 @@ class Nahj(Gtk.Application):
         provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.window = Gtk.ApplicationWindow(application=self, title='نهج · Nahj', default_width=1280, default_height=820)
-        self.layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self.window.set_child(self.layout)
+        self.window.set_size_request(560, 400)
         self.header = Gtk.HeaderBar()
         self.window.set_titlebar(self.header)
+        self.layout = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.window.set_child(self.layout)
+        self.progress = Gtk.ProgressBar()
+        self.progress.set_visible(False)
+        self.layout.append(self.progress)
+        self.error_banner = Gtk.Box(spacing=12)
+        self.error_banner.add_css_class('error-banner')
+        self.error_text = Gtk.Label(wrap=True, hexpand=True)
+        self.error_banner.append(self.error_text)
+        self.error_retry = Gtk.Button(icon_name='view-refresh-symbolic')
+        self.error_retry.connect('clicked', lambda *_: self.reload())
+        self.error_banner.append(self.error_retry)
+        self.layout.append(self.error_banner)
+        self.error_banner.set_visible(False)
         self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, vexpand=True)
         self.layout.append(self.content)
+        for name, callback, keys in [
+            ('reload', self.reload, ['<Primary>r']),
+            ('back', lambda: self.web.go_back() if self.web else None, ['<Alt>Left']),
+            ('forward', lambda: self.web.go_forward() if self.web else None, ['<Alt>Right']),
+            ('settings', self.show_settings, ['<Primary>comma']),
+        ]:
+            action = Gio.SimpleAction.new(name, None)
+            action.connect('activate', lambda *_, fn=callback: fn())
+            self.add_action(action)
+            self.set_accels_for_action('app.' + name, keys)
         self.update_header()
         self.show_settings()
         self.window.present()
         if self.settings['server']:
-            self.connect_server(None)
+            self.connect_server()
 
     def update_header(self):
-        self.window.set_direction(Gtk.TextDirection.RTL if self.settings['language'] == 'ar' else Gtk.TextDirection.LTR)
-        for name in ('settings_button', 'home_button', 'bank_button', 'reload_button'):
-            old = getattr(self, name, None)
-            if old:
-                self.header.remove(old)
-        actions = [('home_button', self.t('مساحة العمل', 'Workspace'), lambda *_: self.navigate('/app')),
-                   ('bank_button', self.t('المعاملات البنكية', 'Banking'), lambda *_: self.navigate('/banking')),
-                   ('reload_button', self.t('تحديث', 'Reload'), lambda *_: self.web.reload() if self.web else None),
-                   ('settings_button', self.t('الإعدادات', 'Settings'), lambda *_: self.show_settings())]
-        for name, label, callback in actions:
-            button = Gtk.Button(label=label)
-            button.connect('clicked', callback)
-            setattr(self, name, button)
+        direction = Gtk.TextDirection.RTL if self.settings['language'] == 'ar' else Gtk.TextDirection.LTR
+        self.window.set_direction(direction)
+        for button in getattr(self, 'header_buttons', []):
+            self.header.remove(button)
+        self.header_buttons = []
+        actions = [
+            ('go-previous-symbolic', self.t('رجوع', 'Back'), lambda: self.web.go_back() if self.web else None),
+            ('go-next-symbolic', self.t('تقدم', 'Forward'), lambda: self.web.go_forward() if self.web else None),
+            ('go-home-symbolic', self.t('مساحة العمل', 'Workspace'), lambda: self.navigate('/app')),
+            ('x-office-spreadsheet-symbolic', self.t('المعاملات البنكية', 'Banking'), lambda: self.navigate('/banking')),
+            ('view-refresh-symbolic', self.t('تحديث', 'Reload'), self.reload),
+        ]
+        for icon, label, callback in actions:
+            button = Gtk.Button(icon_name=icon, tooltip_text=label)
+            button.update_property([Gtk.AccessibleProperty.LABEL], [label])
+            button.connect('clicked', lambda *_, fn=callback: fn())
             self.header.pack_start(button)
+            self.header_buttons.append(button)
+        button = Gtk.Button(icon_name='emblem-system-symbolic', tooltip_text=self.t('الإعدادات', 'Settings'))
+        button.update_property([Gtk.AccessibleProperty.LABEL], [self.t('الإعدادات', 'Settings')])
+        button.connect('clicked', lambda *_: self.show_settings())
+        self.header.pack_end(button)
+        self.header_buttons.append(button)
+        self.error_retry.set_tooltip_text(self.t('إعادة المحاولة', 'Retry'))
 
     def clear(self):
         while child := self.content.get_first_child():
             self.content.remove(child)
 
-    def show_settings(self):
+    def show_settings(self, draft=None):
+        self.cancel_probe()
         self.clear()
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER, vexpand=True)
+        self.progress.set_visible(False)
+        self.error_banner.set_visible(False)
+        scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
+        for side in ('top', 'bottom', 'start', 'end'):
+            getattr(wrapper, 'set_margin_' + side)(24)
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         card.add_css_class('card')
-        card.set_size_request(500, -1)
-        title = Gtk.Label(label=self.t('نهج، مساحة أعمالك', 'Nahj, your workspace'))
+        card.set_size_request(440, -1)
+        card.set_direction(self.window.get_direction())
+        brand = Gtk.Label(label='N A H J')
+        brand.add_css_class('brand-mark'); card.append(brand)
+        title = Gtk.Label(label=self.t('مساحة أعمالك', 'Your workspace'))
         title.add_css_class('hero-title'); card.append(title)
-        subtitle = Gtk.Label(label=self.t('كل أعمالك في مكان هادئ وواضح.', 'A calm, clear place for your business.'))
+        subtitle = Gtk.Label(label=self.t('أعمال مترابطة. تجربة واضحة.', 'Connected business. Clear perspective.'))
         subtitle.add_css_class('subtitle'); card.append(subtitle)
-        label = Gtk.Label(label=self.t('رابط خادم ERPNext', 'ERPNext server address'), xalign=0)
-        card.append(label)
-        self.address = Gtk.Entry(text=self.settings['server'], placeholder_text='https://erp.example.com')
+        label = Gtk.Label(label=self.t('خادم المؤسسة', 'Organization server'), xalign=1 if self.settings['language'] == 'ar' else 0)
+        label.add_css_class('field-label'); card.append(label)
+        self.address = Gtk.Entry(text=self.settings['server'] if draft is None else draft, placeholder_text='https://erp.example.com')
         self.address.set_direction(Gtk.TextDirection.LTR)
+        self.address.set_input_purpose(Gtk.InputPurpose.URL)
+        self.address.update_property([Gtk.AccessibleProperty.LABEL], [self.t('رابط خادم المؤسسة', 'Organization server URL')])
+        self.address.connect('activate', self.connect_server)
         card.append(self.address)
         self.language = Gtk.DropDown.new_from_strings(['العربية', 'English'])
+        self.language.update_property([Gtk.AccessibleProperty.LABEL], [self.t('لغة التطبيق', 'Application language')])
         self.language.set_selected(1 if self.settings['language'] == 'en' else 0)
         self.language.connect('notify::selected', self.change_language)
         card.append(self.language)
-        note = Gtk.Label(label=self.t('أدخل رابط خادمك، ثم سجّل الدخول بحسابك.\nلا تحتاج إلى مفاتيح قاعدة البيانات أو توكن.', 'Enter your server address, then sign in.\nNo database keys or token required.'), wrap=True)
+        note = Gtk.Label(label=self.t('اتصل بمؤسستك وسجّل الدخول بحساب العمل.', 'Connect to your organization and sign in with your work account.'), wrap=True, max_width_chars=42)
         note.add_css_class('subtitle'); card.append(note)
-        self.status = Gtk.Label(wrap=True)
+        self.status = Gtk.Label(wrap=True, max_width_chars=42)
         self.status.add_css_class('status'); card.append(self.status)
-        self.connect_button = Gtk.Button(label=self.t('فحص الاتصال وفتح التطبيق', 'Connect and open workspace'))
+        self.connect_button = Gtk.Button(label=self.t('اتصال وفتح مساحة العمل', 'Connect to workspace'))
         self.connect_button.add_css_class('suggested-action')
         self.connect_button.connect('clicked', self.connect_server)
         card.append(self.connect_button)
-        self.content.append(card)
+        if self.web:
+            resume = Gtk.Button(label=self.t('العودة إلى العمل', 'Return to workspace'))
+            resume.add_css_class('flat')
+            resume.connect('clicked', lambda *_: self.show_web())
+            card.append(resume)
+        wrapper.append(card)
+        scroll.set_child(wrapper)
+        self.content.append(scroll)
 
     def change_language(self, dropdown, *_):
-        self.settings['server'] = self.address.get_text()
+        draft = self.address.get_text()
+        old = self.settings['language']
         self.settings['language'] = 'en' if dropdown.get_selected() else 'ar'
-        self.update_header()
-        self.show_settings()
-
-    def connect_server(self, *_):
-        try:
-            server = config.server_url(self.address.get_text())
-        except ValueError:
-            self.status.set_label(self.t('أدخل رابط HTTPS صحيحًا بدون مسار أو بيانات دخول. يسمح بـHTTP للخادم المحلي فقط.', 'Enter a valid HTTPS origin without a path or credentials. HTTP is allowed for localhost only.'))
-            return
-        self.connect_button.set_sensitive(False)
-        self.address.set_sensitive(False)
-        self.language.set_sensitive(False)
-        self.status.set_label(self.t('جارٍ التحقق من الخادم…', 'Checking your server…'))
-        def check():
-            try:
-                with urlopen(server + '/api/method/ping', timeout=12) as response:
-                    if json.load(response).get('message') != 'pong':
-                        raise ValueError('Not a Frappe server')
-                GLib.idle_add(self.connected, server, None)
-            except Exception:
-                GLib.idle_add(self.connected, server, self.t('تعذّر الاتصال. راجع الرابط والشبكة وشهادة الخادم، ثم أعد المحاولة.', 'Connection failed. Check the address, network and server certificate, then retry.'))
-        threading.Thread(target=check, daemon=True).start()
-
-    def connected(self, server, error):
-        self.connect_button.set_sensitive(True)
-        self.address.set_sensitive(True)
-        self.language.set_sensitive(True)
-        if error:
-            self.status.set_label(error)
-            return False
-        self.settings['server'] = server
         try:
             config.save(self.settings)
         except OSError:
+            self.settings['language'] = old
             self.status.set_label(self.t('تعذر حفظ الإعدادات.', 'Could not save settings.'))
+            return
+        self.update_header()
+        self.show_settings(draft)
+
+    def connect_server(self, *_):
+        if not self.connect_button.get_sensitive():
+            return
+        try:
+            server = config.server_url(self.address.get_text())
+        except ValueError:
+            self.status.set_label(self.t('أدخل رابط HTTPS لخادمك، مثل https://erp.example.com', 'Enter your HTTPS server address, such as https://erp.example.com'))
+            self.status.add_css_class('error')
+            return
+        self.cancel_probe()
+        generation = self.probe_generation
+        for widget in (self.connect_button, self.address, self.language):
+            widget.set_sensitive(False)
+        self.status.remove_css_class('error')
+        self.status.set_label(self.t('جارٍ الاتصال…', 'Connecting…'))
+        def check():
+            error = None
+            try:
+                probe(server)
+            except ConnectionFailure as failure:
+                error = str(failure)
+            GLib.idle_add(self.connected, generation, server, error)
+        threading.Thread(target=check, daemon=True).start()
+
+    def connected(self, generation, server, error):
+        if generation != self.probe_generation:
+            return False
+        for widget in (self.connect_button, self.address, self.language):
+            widget.set_sensitive(True)
+        errors = {
+            'tls': ('شهادة الخادم غير موثوقة. راجع مسؤول النظام.', 'The server certificate is not trusted. Contact your administrator.'),
+            'access': ('الخادم رفض الاتصال. راجع صلاحيات الوصول أو شبكة المؤسسة.', 'The server denied access. Check your organization network or access policy.'),
+            'invalid': ('الرابط لا يشير إلى خادم Frappe متوافق.', 'This address does not identify a compatible Frappe server.'),
+            'redirect': ('الخادم يعيد التوجيه إلى عنوان آخر. أدخل عنوانه النهائي.', 'The server redirects to another address. Enter its final address.'),
+            'offline': ('تعذر الاتصال. تحقق من العنوان والشبكة ثم حاول مجددًا.', 'Could not connect. Check the address and network, then retry.'),
+        }
+        if error:
+            self.status.set_label(self.t(*errors.get(error, errors['offline'])))
+            self.status.add_css_class('error')
+            return False
+        updated = {**self.settings, 'server': server}
+        try:
+            config.save(updated)
+        except OSError:
+            self.status.set_label(self.t('تعذر حفظ الإعدادات.', 'Could not save settings.'))
+            return False
+        self.settings = updated
+        if self.web and server == self.active_server:
+            self.show_web()
             return False
         if self.web:
             self.web.stop_loading()
-        # A separate cookie/data store for each server, never a shared credential store.
+        self.active_server = server
         identity = hashlib.sha256(server.encode()).hexdigest()[:24]
         root = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'nahj' / identity
         root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -160,49 +226,83 @@ class Nahj(Gtk.Application):
         network.get_cookie_manager().set_persistent_storage(str(root / 'cookies.sqlite'), WebKit.CookiePersistentStorage.SQLITE)
         network.connect('download-started', self.download)
         self.web = WebKit.WebView(network_session=network)
-        sheet = WebKit.UserStyleSheet.new(
-            ":root, [data-theme] { --bg-color:#0c1524; --fg-color:#14253c; --navbar-bg:#101e33; "
-            "--card-bg:#14253c; --control-bg:#192b43; --text-color:#e0edfa; --heading-color:#e0edfa; "
-            "--text-muted:#aec4da; --border-color:#2a4260; --primary:#96c9ff; --primary-color:#96c9ff; } "
-            "body { font-family: 'Noto Sans Arabic', system-ui, sans-serif; } "
-            "@media(prefers-reduced-motion:reduce) { * { transition:none!important; animation:none!important; } }",
-            WebKit.UserContentInjectedFrames.TOP_FRAME, WebKit.UserStyleLevel.USER,
-            [server + "/*"], None)
+        sheet = WebKit.UserStyleSheet.new(WEB_CSS, WebKit.UserContentInjectedFrames.TOP_FRAME, WebKit.UserStyleLevel.USER, [server + '/*'], None)
         self.web.get_user_content_manager().add_style_sheet(sheet)
-        self.web.get_settings().set_enable_developer_extras(False)
         self.web.connect('decide-policy', self.policy)
         self.web.connect('load-failed', self.load_failed)
-        self.navigate('/banking')
+        self.web.connect('load-changed', self.load_changed)
+        self.web.connect('notify::estimated-load-progress', self.load_progress)
+        self.web.connect('print', self.print_page)
+        self.navigate('/app')
         return False
+
+    def show_web(self):
+        if not self.web:
+            return
+        self.cancel_probe()
+        self.clear()
+        self.content.append(self.web)
 
     def navigate(self, path):
         if not self.web:
             return self.show_settings()
-        self.clear()
-        self.content.append(self.web)
-        self.web.load_uri(self.settings['server'] + path + '?_lang=' + self.settings['language'])
+        self.show_web()
+        self.web.load_uri(self.active_server + path + '?_lang=' + self.settings['language'])
+
+    def reload(self):
+        if self.web:
+            self.show_web()
+            self.web.reload()
+
+    def load_changed(self, view, event):
+        if view is not self.web:
+            return
+        if event == WebKit.LoadEvent.STARTED:
+            self.error_banner.set_visible(False)
+            self.progress.set_visible(True)
+        elif event == WebKit.LoadEvent.FINISHED:
+            self.progress.set_visible(False)
+
+    def load_progress(self, view, *_):
+        if view is self.web:
+            self.progress.set_fraction(view.get_estimated_load_progress())
 
     def policy(self, view, decision, kind):
         if kind not in (WebKit.PolicyDecisionType.NAVIGATION_ACTION, WebKit.PolicyDecisionType.NEW_WINDOW_ACTION):
             return False
         action = decision.get_navigation_action()
         uri = action.get_request().get_uri()
-        target, origin = urlsplit(uri), urlsplit(self.settings['server'])
+        if uri.startswith('blob:' + self.active_server + '/'):
+            return False
+        target, origin = urlsplit(uri), urlsplit(self.active_server)
         if (target.scheme, target.netloc) == (origin.scheme, origin.netloc):
             if kind == WebKit.PolicyDecisionType.NEW_WINDOW_ACTION:
                 decision.ignore(); view.load_uri(uri); return True
             return False
         decision.ignore()
-        if target.scheme in ('https', 'http') and action.is_user_gesture():
-            Gio.AppInfo.launch_default_for_uri(uri, None)
+        if target.scheme in ('https', 'http', 'mailto', 'tel') and action.is_user_gesture():
+            try:
+                Gio.AppInfo.launch_default_for_uri(uri, None)
+            except GLib.Error:
+                self.show_error(self.t('تعذر فتح الرابط في تطبيق خارجي.', 'Could not open the link in an external application.'))
+        elif target.scheme in ('https', 'http'):
+            self.show_error(self.t('يتطلب تسجيل الدخول الخارجي استخدام متصفح المؤسسة.', 'External sign-in requires your organization browser.'))
         return True
 
+    def show_error(self, message):
+        self.error_text.set_label(message)
+        self.error_banner.set_visible(True)
+        self.progress.set_visible(False)
+
     def load_failed(self, view, event, uri, error):
-        # Cancellation during normal navigation must not replace the new page.
         if error.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CANCELLED) or error.code == 302:
             return False
-        self.show_settings()
-        self.status.set_label(self.t('تعذر تحميل الصفحة. تحقق من اتصالك وأعد المحاولة.', 'Page could not load. Check your connection and reconnect.'))
+        if view is self.web:
+            self.show_error(self.t('تعذر تحميل الصفحة. تحقق من الشبكة وأعد المحاولة.', 'Could not load the page. Check your network and retry.'))
+        return True
+
+    def print_page(self, view, operation):
+        operation.run_dialog(self.window)
         return True
 
     def download(self, session, download):
@@ -210,7 +310,7 @@ class Nahj(Gtk.Application):
             dialog = Gtk.FileChooserNative(title=self.t('حفظ الملف', 'Save file'), transient_for=self.window, action=Gtk.FileChooserAction.SAVE)
             dialog.set_current_name(Path(suggested).name)
             def response(chooser, result):
-                if result == Gtk.ResponseType.ACCEPT:
+                if result == Gtk.ResponseType.ACCEPT and chooser.get_file():
                     item.set_destination(chooser.get_file().get_uri())
                     item.set_allow_overwrite(True)
                 else:
@@ -220,6 +320,10 @@ class Nahj(Gtk.Application):
             dialog.show()
             return True
         download.connect('decide-destination', choose)
+        def failed(item, error):
+            if not error.matches(WebKit.download_error_quark(), WebKit.DownloadError.CANCELLED_BY_USER):
+                self.show_error(self.t('لم يكتمل تنزيل الملف. أعد المحاولة.', 'The file download did not finish. Please retry.'))
+        download.connect('failed', failed)
 
 
 def main():

@@ -1,3 +1,23 @@
+# نهج لإدارة الأعمال
+
+واجهة سطح مكتب عربية لـERPNext على Linux، مع دعم الإنجليزية وتصميم أزرق متناسق مع هوية نهج. يتصل التطبيق بخادم المؤسسة ويتيح وحدات ERPNext وفق صلاحيات الحساب.
+
+### التثبيت على Arch Linux
+
+```bash
+sudo pacman -Syu --needed git
+git clone --branch develop https://github.com/9a6r/erp-nahj.git
+cd erp-nahj
+./desktop/install.sh
+nahj-desktop
+```
+
+[دليل التطبيق والتحديث](desktop/README.md) · [دليل التطوير والاختبارات](desktop/DEVELOPMENT.md)
+
+يلزم خادم ERPNext/Frappe 17. تعليمات الخادم والمشروع الأساسي أدناه.
+
+---
+
 
 <div align="center">
     <a href="https://frappe.io/erpnext">

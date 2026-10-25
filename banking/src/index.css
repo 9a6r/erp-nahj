@@ -1211,48 +1211,48 @@ body {
    No animated blur layers; large tables keep their existing virtualization. */
 :root.nahj-blue {
   color-scheme: dark;
-  --gray-950: #0c1524;
-  --gray-900: #101c2e;
-  --gray-850: #142238;
-  --gray-800: #192b43;
-  --gray-700: #243c58;
-  --gray-600: #35516e;
-  --gray-500: #597794;
-  --gray-450: #7390ab;
-  --gray-400: #8fa9c2;
-  --gray-300: #aec4da;
-  --gray-200: #caddef;
-  --gray-100: #e0edfa;
-  --gray-50: #f1f7ff;
-  --blue-500: #71b7ff;
-  --blue-400: #96c9ff;
-  --blue-300: #b8dcff;
-  --blue-900: #183b61;
-  --blue-950: #102840;
-  --primary: #96c9ff;
-  --primary-foreground: #0c1524;
-  --background: #0c1524;
-  --foreground: #e0edfa;
-  --card: #101e33;
-  --card-foreground: #e0edfa;
-  --popover: #14253c;
-  --popover-foreground: #e0edfa;
-  --muted: #192b43;
-  --muted-foreground: #aec4da;
-  --accent: #243c58;
-  --accent-foreground: #e0edfa;
-  --border: #2a4260;
-  --input: #2a4260;
-  --ring: #96c9ff;
+  --gray-950: #071b26;
+  --gray-900: #0b2330;
+  --gray-850: #10303e;
+  --gray-800: #163747;
+  --gray-700: #214b5d;
+  --gray-600: #365967;
+  --gray-500: #527989;
+  --gray-450: #7097a5;
+  --gray-400: #8db3bf;
+  --gray-300: #a7c4cd;
+  --gray-200: #c5dfe6;
+  --gray-100: #e6f4f7;
+  --gray-50: #f2fbfd;
+  --blue-500: #70bed3;
+  --blue-400: #9bd6e5;
+  --blue-300: #c5eaf2;
+  --blue-900: #164658;
+  --blue-950: #0d2f40;
+  --primary: #9bd6e5;
+  --primary-foreground: #071b26;
+  --background: #071b26;
+  --foreground: #e6f4f7;
+  --card: #0b2330;
+  --card-foreground: #e6f4f7;
+  --popover: #10303e;
+  --popover-foreground: #e6f4f7;
+  --muted: #163747;
+  --muted-foreground: #a7c4cd;
+  --accent: #214b5d;
+  --accent-foreground: #e6f4f7;
+  --border: #2c5362;
+  --input: #2c5362;
+  --ring: #9bd6e5;
   --radius: .85rem;
 }
-.nahj-blue body { background: #0c1524; }
-.nahj-blue :focus-visible { outline: 2px solid #96c9ff; outline-offset: 3px; }
-.nahj-blue ::selection { background: #355d87; color: #fff; }
+.nahj-blue body { background: #071b26; }
+.nahj-blue :focus-visible { outline: 2px solid #9bd6e5; outline-offset: 3px; }
+.nahj-blue ::selection { background: #2b6379; color: #fff; }
 .nahj-blue [role="dialog"] { box-shadow: 0 24px 80px #030a1666; }
-.nahj-theme-card { display: flex; align-items: center; gap: 18px; padding: 22px; border: 1px solid #35516e; border-radius: 18px; background: linear-gradient(120deg, #1b3653, #101e33); }
-.nahj-theme-card p { margin-block-start: 6px; color: #aec4da; }
-.nahj-theme-orb { width: 42px; height: 42px; flex-shrink: 0; border-radius: 50%; background: radial-gradient(circle at 30% 25%, #e0edfa, #96c9ff 35%, #355d87); box-shadow: 0 0 24px #71b7ff22; }
+.nahj-theme-card { display: flex; align-items: center; gap: 18px; padding: 22px; border: 1px solid #365967; border-radius: 18px; background: linear-gradient(120deg, #174455, #0b2330); }
+.nahj-theme-card p { margin-block-start: 6px; color: #a7c4cd; }
+.nahj-theme-orb { width: 42px; height: 42px; flex-shrink: 0; border-radius: 50%; background: radial-gradient(circle at 30% 25%, #e6f4f7, #9bd6e5 35%, #2b6379); box-shadow: 0 0 24px #70bed322; }
 html[lang="ar"] { --font-sans: "Noto Sans Arabic", "Noto Sans", Tahoma, system-ui, sans-serif; }
 html[lang="ar"] body { letter-spacing: 0; }
 @media (prefers-reduced-motion: reduce) {

@@ -24,4 +24,21 @@ class ConfigTests(unittest.TestCase):
             config.config_path().write_text('invalid')
             self.assertEqual(config.load()['server'], '')
 
+
+class PreferenceTests(unittest.TestCase):
+    def test_canonical_origins(self):
+        self.assertEqual(config.server_url('HTTPS://ERP.Example.com:443/'), 'https://erp.example.com')
+        self.assertEqual(config.server_url('http://[::1]:8000'), 'http://[::1]:8000')
+        self.assertEqual(config.server_url('http://LOCALHOST.:80'), 'http://localhost')
+        for address in ['https://host:0', 'https://host name', 'https://host\\evil', 'http://localhost.evil.example', 'https://@host']:
+            with self.subTest(address=address), self.assertRaises(ValueError):
+                config.server_url(address)
+
+    def test_language_can_be_saved_before_connection(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {'XDG_CONFIG_HOME': root}):
+            config.save({'server': '', 'language': 'en'})
+            self.assertEqual(config.load(), {'server': '', 'language': 'en'})
+            config.config_path().write_text('[]')
+            self.assertEqual(config.load()['server'], '')
+
 if __name__ == '__main__': unittest.main()
