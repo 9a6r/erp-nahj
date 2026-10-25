@@ -9,9 +9,43 @@ if ! command -v pacman >/dev/null; then
     printf 'This installer supports Arch Linux and pacman-based distributions.\n' >&2
     exit 1
 fi
-printf 'Installing Nahj Desktop and its system dependencies with pacman.\n'
-sudo pacman -Syu --needed base-devel python python-gobject gtk4 webkitgtk-6.0 noto-fonts adwaita-icon-theme
+if [[ -e /var/lib/pacman/db.lck ]]; then
+    printf 'Pacman is locked. Wait for any running package operation to finish.\nDo not remove the lock while pacman is running.\n' >&2
+    exit 1
+fi
+
+dependencies=(base-devel python python-gobject gtk4 webkitgtk-6.0 noto-fonts adwaita-icon-theme)
+missing=()
+for dependency in "${dependencies[@]}"; do
+    if ! pacman -Q "$dependency" >/dev/null 2>&1; then
+        missing+=("$dependency")
+    fi
+done
+if (( ${#missing[@]} )); then
+    printf 'Installing missing dependencies: %s\n' "${missing[*]}"
+    # Use the existing sync databases. Never refresh them without a full upgrade.
+    # System upgrades are a separate, deliberate operation owned by the user.
+    if sudo pacman -S --needed "${missing[@]}"; then
+        :
+    else
+        status=$?
+        printf '\nDependency installation stopped (exit %s). Nahj has not been installed.\n' "$status" >&2
+        if (( status == 137 )); then
+            printf 'The process was killed. Check available memory and disk space, and system logs.\n' >&2
+        fi
+        printf 'If mirrors report missing/outdated packages, finish a full system upgrade with sudo pacman -Syu, then rerun this installer.\nDo not use pacman -Sy alone or remove an active pacman lock.\n' >&2
+        exit "$status"
+    fi
+fi
+printf 'Building and installing Nahj Desktop.\n'
 ./package.sh
 cd dist
-makepkg --syncdeps --install --needed --force
+if makepkg --install --needed --force; then
+    :
+else
+    status=$?
+    printf '\nPackage installation stopped (exit %s). Resolve the error above, then rerun this installer.\n' "$status" >&2
+    exit "$status"
+fi
+nahj-desktop --check
 printf '\nNahj is installed. Open it from the application menu or run nahj-desktop.\n'

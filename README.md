@@ -5,7 +5,6 @@
 ### التثبيت على Arch Linux
 
 ```bash
-sudo pacman -Syu --needed git
 git clone --branch develop https://github.com/9a6r/erp-nahj.git
 cd erp-nahj
 ./desktop/install.sh

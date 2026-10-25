@@ -11,7 +11,7 @@ checksum=$(sha256sum "dist/nahj-desktop-$version.tar.gz" | cut -d' ' -f1)
 cat > dist/PKGBUILD <<EOF
 pkgname=nahj-desktop
 pkgver=$version
-pkgrel=1
+pkgrel=2
 pkgdesc='Nahj business workspace for ERPNext'
 arch=('any')
 url='https://github.com/9a6r/erp-nahj'
