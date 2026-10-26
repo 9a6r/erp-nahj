@@ -4,10 +4,23 @@
 
 ## التثبيت على Arch Linux
 
-افتح الطرفية داخل جلستك المعتادة:
+### الحزمة الجاهزة — Arch وEndeavourOS
+
+افتح الطرفية في النظام المثبّت على القرص. هذه الطريقة لا تحتاج إلى Git أو أدوات بناء:
 
 ```bash
-git clone --branch develop https://github.com/9a6r/erp-nahj.git
+curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.2.1/nahj-desktop-0.2.1-1-any.pkg.tar.zst
+curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.2.1/SHA256SUMS
+sha256sum -c SHA256SUMS && sudo pacman -U ./nahj-desktop-0.2.1-1-any.pkg.tar.zst
+nahj-desktop
+```
+
+يتحقق الأمر من سلامة الملف ثم يثبّت التطبيق واعتمادياته باستخدام pacman. راجع حجم التنزيل والمساحة التي يعرضها pacman قبل الموافقة؛ حجم مكتبات النظام الناقصة يعتمد على الموجود في جهازك. تحتفظ الحزمة بخطوط العربية ومحرك العرض الكامل، وتستخدم المكتبات المشتركة بدل تضمين نسخ مكررة منها.
+
+### البناء من المصدر
+
+```bash
+git clone --depth 1 --branch develop https://github.com/9a6r/erp-nahj.git
 cd erp-nahj
 ./desktop/install.sh
 nahj-desktop
@@ -60,7 +73,7 @@ journalctl -k -b --no-pager | tail -n 80
 
 ## التحديث والإزالة
 
-من مجلد المشروع:
+للحزمة الجاهزة، نزّل الحزمة الجديدة وبصمتها من [صفحة الإصدارات](https://github.com/9a6r/erp-nahj/releases)، ثم ثبّتها بـ`sudo pacman -U` بعد التحقق من البصمة. للبناء من المصدر، من مجلد المشروع:
 
 ```bash
 git pull --ff-only origin develop
@@ -82,6 +95,14 @@ nahj-desktop --check
 nahj-desktop --version
 ```
 
+إذا ظهرت مساحة بيضاء داخل VirtualBox أو مع تعريف رسومي قديم، جرّب:
+
+```bash
+nahj-desktop --graphics-compatibility
+```
+
+يمكن حفظ هذا الاختيار من إعدادات التطبيق بتفعيل **توافق الرسوميات للأجهزة الافتراضية**، ثم إعادة تشغيله. يغيّر هذا الخيار طريقة نقل الصورة إلى النافذة، ويحافظ على عزل WebKit والتحقق من الشهادات. الوضع الافتراضي يستخدم مسار الرسوميات المعتاد.
+
 - **تعذر الاتصال:** تأكد من تشغيل الخادم وصحة العنوان والوصول لشبكة المؤسسة.
 - **شهادة غير موثوقة:** راجع مسؤول النظام لتثبيت شهادة صحيحة أو إعداد شهادة المؤسسة على النظام.
 - **رفض الوصول:** تحقق من VPN أو سياسة الوصول لدى المؤسسة.
@@ -92,7 +113,7 @@ nahj-desktop --version
 على Debian/Ubuntu التي توفر WebKitGTK 6:
 
 ```bash
-sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 fonts-noto-core adwaita-icon-theme
+sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-webkit-6.0 gstreamer1.0-plugins-good fonts-noto-core adwaita-icon-theme
 cd desktop
 /usr/bin/python3 -m nahj_desktop
 ```

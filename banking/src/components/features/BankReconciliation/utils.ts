@@ -311,7 +311,7 @@ export const useGetBankAccounts = (onSuccess?: (data?: Omit<SelectedBank, 'logo'
 
     const { data, isLoading, error } = useFrappeGetCall<{ message: BankAccountWithCurrency[] }>('erpnext.accounts.doctype.bank_account.bank_account.get_list', {
         company: company
-    }, undefined, {
+    }, company ? `bank_accounts_${company}` : null, {
         revalidateOnFocus: false,
         revalidateIfStale: false,
         onSuccess: (data) => {

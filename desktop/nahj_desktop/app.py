@@ -82,7 +82,7 @@ class Nahj(Gtk.Application):
         actions = [
             ('go-previous-symbolic', self.t('رجوع', 'Back'), lambda: self.web.go_back() if self.web else None),
             ('go-next-symbolic', self.t('تقدم', 'Forward'), lambda: self.web.go_forward() if self.web else None),
-            ('go-home-symbolic', self.t('مساحة العمل', 'Workspace'), lambda: self.navigate('/app')),
+            ('go-home-symbolic', self.t('مساحة العمل', 'Workspace'), lambda: self.navigate('/desk')),
             ('x-office-spreadsheet-symbolic', self.t('المعاملات البنكية', 'Banking'), lambda: self.navigate('/banking')),
             ('view-refresh-symbolic', self.t('تحديث', 'Reload'), self.reload),
         ]
@@ -136,6 +136,11 @@ class Nahj(Gtk.Application):
         self.language.set_selected(1 if self.settings['language'] == 'en' else 0)
         self.language.connect('notify::selected', self.change_language)
         card.append(self.language)
+        self.graphics = Gtk.CheckButton(label=self.t('توافق الرسوميات للأجهزة الافتراضية', 'Graphics compatibility for virtual machines'))
+        self.graphics.set_active(self.settings['graphics_compatibility'])
+        self.graphics.set_tooltip_text(self.t('فعّله إذا ظهرت صفحات فارغة. يطبّق بعد إعادة تشغيل التطبيق.', 'Enable if pages appear blank. Applies after restarting the app.'))
+        self.graphics_handler = self.graphics.connect('toggled', self.change_graphics)
+        card.append(self.graphics)
         note = Gtk.Label(label=self.t('اتصل بمؤسستك وسجّل الدخول بحساب العمل.', 'Connect to your organization and sign in with your work account.'), wrap=True, max_width_chars=42)
         note.add_css_class('subtitle'); card.append(note)
         self.status = Gtk.Label(wrap=True, max_width_chars=42)
@@ -152,6 +157,19 @@ class Nahj(Gtk.Application):
         wrapper.append(card)
         scroll.set_child(wrapper)
         self.content.append(scroll)
+
+    def change_graphics(self, checkbox):
+        old = self.settings['graphics_compatibility']
+        self.settings['graphics_compatibility'] = checkbox.get_active()
+        try:
+            config.save(self.settings)
+            self.status.set_label(self.t('أعد تشغيل التطبيق لتطبيق إعداد الرسوميات.', 'Restart the app to apply the graphics setting.'))
+        except OSError:
+            self.settings['graphics_compatibility'] = old
+            checkbox.handler_block(self.graphics_handler)
+            checkbox.set_active(old)
+            checkbox.handler_unblock(self.graphics_handler)
+            self.status.set_label(self.t('تعذر حفظ الإعدادات.', 'Could not save settings.'))
 
     def change_language(self, dropdown, *_):
         draft = self.address.get_text()
@@ -207,10 +225,32 @@ class Nahj(Gtk.Application):
             self.status.add_css_class('error')
             return False
         updated = {**self.settings, 'server': server}
+        web = self.web
         try:
+            if not web or server != self.active_server:
+                identity = hashlib.sha256(server.encode()).hexdigest()[:24]
+                root = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'nahj' / identity
+                root.mkdir(parents=True, exist_ok=True, mode=0o700)
+                network = WebKit.NetworkSession.new(str(root), str(root / 'cache'))
+                network.get_cookie_manager().set_persistent_storage(str(root / 'cookies.sqlite'), WebKit.CookiePersistentStorage.SQLITE)
+                network.connect('download-started', self.download)
+                web = WebKit.WebView(network_session=network, hexpand=True, vexpand=True)
+                web.get_settings().set_default_font_family('Noto Sans Arabic')
+                web.get_settings().set_sans_serif_font_family('Noto Sans Arabic')
+                # Navigation policy already confines this view to the server origin.
+                # WebKit match patterns reject explicit ports (common on local servers).
+                sheet = WebKit.UserStyleSheet.new(WEB_CSS, WebKit.UserContentInjectedFrames.TOP_FRAME, WebKit.UserStyleLevel.USER, None, None)
+                web.get_user_content_manager().add_style_sheet(sheet)
+                web.connect('decide-policy', self.policy)
+                web.connect('load-failed', self.load_failed)
+                web.connect('load-changed', self.load_changed)
+                web.connect('notify::estimated-load-progress', self.load_progress)
+                web.connect('print', self.print_page)
+                web.connect('web-process-terminated', self.process_terminated)
             config.save(updated)
-        except OSError:
-            self.status.set_label(self.t('تعذر حفظ الإعدادات.', 'Could not save settings.'))
+        except (OSError, GLib.Error):
+            self.status.set_label(self.t('تعذر تجهيز مساحة التطبيق. تحقق من المساحة المتاحة وصلاحيات مجلد المستخدم.', 'Could not prepare app storage. Check free space and your user folder permissions.'))
+            self.status.add_css_class('error')
             return False
         self.settings = updated
         if self.web and server == self.active_server:
@@ -219,21 +259,8 @@ class Nahj(Gtk.Application):
         if self.web:
             self.web.stop_loading()
         self.active_server = server
-        identity = hashlib.sha256(server.encode()).hexdigest()[:24]
-        root = Path(os.environ.get('XDG_DATA_HOME', Path.home() / '.local/share')) / 'nahj' / identity
-        root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        network = WebKit.NetworkSession.new(str(root), str(root / 'cache'))
-        network.get_cookie_manager().set_persistent_storage(str(root / 'cookies.sqlite'), WebKit.CookiePersistentStorage.SQLITE)
-        network.connect('download-started', self.download)
-        self.web = WebKit.WebView(network_session=network)
-        sheet = WebKit.UserStyleSheet.new(WEB_CSS, WebKit.UserContentInjectedFrames.TOP_FRAME, WebKit.UserStyleLevel.USER, [server + '/*'], None)
-        self.web.get_user_content_manager().add_style_sheet(sheet)
-        self.web.connect('decide-policy', self.policy)
-        self.web.connect('load-failed', self.load_failed)
-        self.web.connect('load-changed', self.load_changed)
-        self.web.connect('notify::estimated-load-progress', self.load_progress)
-        self.web.connect('print', self.print_page)
-        self.navigate('/app')
+        self.web = web
+        self.navigate('/desk')
         return False
 
     def show_web(self):
@@ -305,14 +332,23 @@ class Nahj(Gtk.Application):
         operation.run_dialog(self.window)
         return True
 
+    def process_terminated(self, view, reason):
+        if view is self.web:
+            self.show_error(self.t('توقفت صفحة العمل. اضغط إعادة المحاولة لتحميلها مجددًا.', 'The workspace page stopped. Select Retry to load it again.'))
+
     def download(self, session, download):
         def choose(item, suggested):
             dialog = Gtk.FileChooserNative(title=self.t('حفظ الملف', 'Save file'), transient_for=self.window, action=Gtk.FileChooserAction.SAVE)
             dialog.set_current_name(Path(suggested).name)
             def response(chooser, result):
                 if result == Gtk.ResponseType.ACCEPT and chooser.get_file():
-                    item.set_destination(chooser.get_file().get_uri())
-                    item.set_allow_overwrite(True)
+                    destination = chooser.get_file().get_path()
+                    if destination:
+                        item.set_destination(destination)
+                        item.set_allow_overwrite(True)
+                    else:
+                        item.cancel()
+                        self.show_error(self.t('اختر مجلدًا محليًا لحفظ الملف.', 'Choose a local folder to save the file.'))
                 else:
                     item.cancel()
                 chooser.destroy()

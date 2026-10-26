@@ -2,6 +2,7 @@
 import os
 import tempfile
 import threading
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from nahj_desktop.app import Nahj, GLib
 from nahj_desktop import config
@@ -25,14 +26,34 @@ with tempfile.TemporaryDirectory() as root:
         app.address.set_text(f'http://127.0.0.1:{server.server_port}')
         app.language.set_selected(1)
         assert config.load()['language'] == 'en'
+        app.graphics.set_active(True)
+        assert config.load()['graphics_compatibility'] is True
+        app.graphics.set_active(False)
+        assert config.load()['graphics_compatibility'] is False
         # Changing UI language must not persist an unverified address.
         assert config.load()['server'] == ''
         app.connect_server()
         GLib.timeout_add(100, inspect)
+    def styled(view, response, *_):
+        try:
+            color = view.evaluate_javascript_finish(response).to_string().strip()
+            assert color == '#071b26', f'workspace stylesheet missing: {color!r}'
+            result['styled'] = True
+        except Exception as error:
+            result['error'] = repr(error)
+            app.quit()
     def inspect():
         try:
             if not app.web or app.web.get_title() != 'Nahj smoke':
                 return True
+            if not result.get('styled'):
+                if not result.get('styling'):
+                    result['styling'] = True
+                    app.web.evaluate_javascript(
+                        'getComputedStyle(document.documentElement).getPropertyValue("--surface-base")',
+                        -1, None, None, None, styled, None)
+                return True
+            assert app.web.get_width() >= 500 and app.web.get_height() >= 300, 'web content is loaded but not visible'
             assert config.load()['server'].endswith(str(server.server_port))
             web, uri = app.web, app.web.get_uri()
             app.show_settings()
@@ -43,6 +64,12 @@ with tempfile.TemporaryDirectory() as root:
             assert config.load()['server'] == app.active_server
             app.connected(old_generation, 'https://unverified.invalid', None)
             assert app.active_server.endswith(str(server.server_port)), 'stale callback changed server'
+            saved = config.load()
+            with patch('nahj_desktop.app.Path.mkdir', side_effect=PermissionError('read only')):
+                app.connected(app.probe_generation, 'https://storage-test.invalid', None)
+            assert app.web is web and app.active_server == saved['server'], 'storage failure discarded workspace'
+            assert config.load() == saved, 'storage failure persisted an unusable server'
+            assert app.status.get_label(), 'storage failure did not explain recovery'
             app.show_web()
             assert app.web is web and app.web.get_uri() == uri, 'settings reloaded the current page'
             assert app.lookup_action('back') and app.lookup_action('reload')
@@ -52,8 +79,8 @@ with tempfile.TemporaryDirectory() as root:
         app.quit()
         return False
     app.connect('activate', begin)
-    GLib.timeout_add_seconds(25, lambda: (app.quit(), False)[1])
+    GLib.timeout_add_seconds(int(os.environ.get('NAHJ_TEST_TIMEOUT', '90')), lambda: (app.quit(), False)[1])
     app.run([])
     server.shutdown(); server.server_close()
     assert result['passed'], result['error'] or 'Native WebKit page did not finish loading'
-    print('PASS: window, language, connection, session, navigation, stale callbacks and draft preservation')
+    print('PASS: window, language, connection, session, navigation, storage recovery, stale callbacks and draft preservation')

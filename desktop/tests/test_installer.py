@@ -47,6 +47,9 @@ esac
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn('sudo ', calls)
         self.assertIn('nahj-desktop --check', calls)
+        # Rebuilding a checkout must install its changes even at the same version.
+        install = next(line for line in calls.splitlines() if line.startswith('makepkg '))
+        self.assertNotIn('--needed', install)
 
     def test_installs_only_missing_dependency_without_refresh_or_upgrade(self):
         result, calls = self.run_installer(missing='python-gobject')

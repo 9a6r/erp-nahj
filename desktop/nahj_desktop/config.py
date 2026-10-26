@@ -34,14 +34,15 @@ def config_path():
 
 def normalize(value):
     return {'server': server_url(value['server']) if value.get('server') else '',
-            'language': 'en' if value.get('language') == 'en' else 'ar'}
+            'language': 'en' if value.get('language') == 'en' else 'ar',
+            'graphics_compatibility': value.get('graphics_compatibility') is True}
 
 
 def load():
     try:
         return normalize(json.loads(config_path().read_text()))
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
-        return {'server': '', 'language': 'ar'}
+        return {'server': '', 'language': 'ar', 'graphics_compatibility': False}
 
 
 def save(value):

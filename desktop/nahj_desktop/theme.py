@@ -38,3 +38,49 @@ body { font-family:'Noto Sans Arabic',system-ui,sans-serif; }
  * { transition:none!important; animation:none!important; }
 }
 '''
+
+# Frappe 17 uses Espresso tokens. User-origin important declarations keep the
+# native workspace palette consistent with account themes, without changing
+# server preferences or the separate Banking palette. Printed reports retain
+# the server's print stylesheet.
+WEB_CSS += '''
+@media screen {
+ html:not(.nahj-blue), html:not(.nahj-blue) [data-theme] {
+  color-scheme: dark !important;
+  --surface-base: #071b26 !important;
+  --surface-sidebar: #0b2330 !important;
+  --surface-elevation-1: #10303e !important;
+  --surface-elevation-2: #163747 !important;
+  --surface-elevation-3: #214b5d !important;
+  --surface-gray-1: #0b2330 !important;
+  --surface-gray-2: #163747 !important;
+  --surface-gray-3: #214b5d !important;
+  --surface-gray-4: #365967 !important;
+  --surface-gray-5: #527989 !important;
+  --surface-gray-6: #7097a5 !important;
+  --surface-gray-7: #8db3bf !important;
+  --surface-gray-8: #a7c4cd !important;
+  --surface-gray-9: #c5dfe6 !important;
+  --surface-gray-10: #9bd6e5 !important;
+  --ink-base: #071b26 !important;
+  --ink-gray-1: #365967 !important;
+  --ink-gray-2: #527989 !important;
+  --ink-gray-3: #7097a5 !important;
+  --ink-gray-4: #8db3bf !important;
+  --ink-gray-5: #a7c4cd !important;
+  --ink-gray-6: #a7c4cd !important;
+  --ink-gray-7: #c5dfe6 !important;
+  --ink-gray-8: #e6f4f7 !important;
+  --ink-gray-9: #f2fbfd !important;
+  --outline-gray-1: #234451 !important;
+  --outline-gray-2: #365967 !important;
+  --outline-gray-3: #527989 !important;
+  --outline-gray-4: #7097a5 !important;
+  --outline-gray-5: #8db3bf !important;
+  --outline-gray-6: #a7c4cd !important;
+  --outline-gray-7: #c5dfe6 !important;
+  --outline-gray-8: #e6f4f7 !important;
+  --outline-gray-9: #f2fbfd !important;
+ }
+}
+'''

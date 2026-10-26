@@ -14,7 +14,7 @@ if [[ -e /var/lib/pacman/db.lck ]]; then
     exit 1
 fi
 
-dependencies=(base-devel python python-gobject gtk4 webkitgtk-6.0 noto-fonts adwaita-icon-theme)
+dependencies=(base-devel python python-gobject gtk4 webkitgtk-6.0 gst-plugins-good noto-fonts adwaita-icon-theme)
 missing=()
 for dependency in "${dependencies[@]}"; do
     if ! pacman -Q "$dependency" >/dev/null 2>&1; then
@@ -40,7 +40,7 @@ fi
 printf 'Building and installing Nahj Desktop.\n'
 ./package.sh
 cd dist
-if makepkg --install --needed --force; then
+if makepkg --install --force; then
     :
 else
     status=$?

@@ -4,16 +4,22 @@
 
 ### التثبيت على Arch Linux
 
+حمّل حزمة سطح المكتب الجاهزة؛ لا تحتاج إلى تنزيل المستودع أو أدوات البناء:
+
 ```bash
-git clone --branch develop https://github.com/9a6r/erp-nahj.git
-cd erp-nahj
-./desktop/install.sh
+curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.2.1/nahj-desktop-0.2.1-1-any.pkg.tar.zst
+curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.2.1/SHA256SUMS
+sha256sum -c SHA256SUMS && sudo pacman -U ./nahj-desktop-0.2.1-1-any.pkg.tar.zst
 nahj-desktop
 ```
 
-[دليل التطبيق والتحديث](desktop/README.md) · [دليل التطوير والاختبارات](desktop/DEVELOPMENT.md)
+[دليل التطبيق والتحديث](desktop/README.md) · [دليل التطوير والاختبارات](desktop/DEVELOPMENT.md) · [تقرير التحقق](desktop/VERIFICATION.md)
 
 يلزم خادم ERPNext/Frappe 17. تعليمات الخادم والمشروع الأساسي أدناه.
+
+![إعدادات نهج بالعربية على Arch Linux](desktop/screenshots/settings-ar.png)
+
+[مساحة العمل بالعربية](desktop/screenshots/workspace-ar.png) · [البنك بالعربية](desktop/screenshots/banking-ar.png) · [الواجهة بالإنجليزية](desktop/screenshots/settings-en.png)
 
 ---
 

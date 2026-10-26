@@ -18,7 +18,7 @@ class ConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {'XDG_CONFIG_HOME': root}):
             self.assertEqual(config.load()['language'], 'ar')
             config.save({'server':'https://erp.example.com', 'language':'en', 'token':'never persist'})
-            self.assertEqual(config.load(), {'server':'https://erp.example.com', 'language':'en'})
+            self.assertEqual(config.load(), {'server':'https://erp.example.com', 'language':'en', 'graphics_compatibility': False})
             self.assertNotIn('token', json.loads(config.config_path().read_text()))
             self.assertEqual(config.config_path().stat().st_mode & 0o777, 0o600)
             config.config_path().write_text('invalid')
@@ -37,8 +37,15 @@ class PreferenceTests(unittest.TestCase):
     def test_language_can_be_saved_before_connection(self):
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {'XDG_CONFIG_HOME': root}):
             config.save({'server': '', 'language': 'en'})
-            self.assertEqual(config.load(), {'server': '', 'language': 'en'})
+            self.assertEqual(config.load(), {'server': '', 'language': 'en', 'graphics_compatibility': False})
             config.config_path().write_text('[]')
             self.assertEqual(config.load()['server'], '')
+
+    def test_graphics_compatibility_is_explicit_and_persistent(self):
+        with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {'XDG_CONFIG_HOME': root}):
+            config.save({'server': '', 'language': 'ar', 'graphics_compatibility': True})
+            self.assertTrue(config.load()['graphics_compatibility'])
+            config.save({'server': '', 'graphics_compatibility': 'false'})
+            self.assertFalse(config.load()['graphics_compatibility'])
 
 if __name__ == '__main__': unittest.main()

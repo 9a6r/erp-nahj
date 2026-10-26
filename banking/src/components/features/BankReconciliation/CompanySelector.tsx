@@ -24,7 +24,6 @@ import ErrorBanner from "@/components/ui/error-banner"
 
 const CompanySelector = ({ onChange }: { onChange?: (company: string) => void }) => {
     const [open, setOpen] = useState(false)
-    const [searchQuery, setSearchQuery] = useState("")
 
     const { data: companies, error } = useFrappeGetDocList("Company", {
         limit: 0,
@@ -42,7 +41,6 @@ const CompanySelector = ({ onChange }: { onChange?: (company: string) => void })
 
     const handleSelectCompany = (company: string) => {
         setSelectedCompany(company)
-        setSearchQuery("")
         setOpen(false)
         // Only reset bank account if the company is changed
         if (selectedCompany !== company) {
@@ -67,7 +65,7 @@ const CompanySelector = ({ onChange }: { onChange?: (company: string) => void })
             >
                 <div className="flex items-center gap-2">
                     <Building2 />
-                    {selectedCompany}
+                    {selectedCompany || _("Select a company")}
                 </div>
                 <ChevronDown className="text-ink-gray-4" />
             </Button>
@@ -90,7 +88,7 @@ const CompanySelector = ({ onChange }: { onChange?: (company: string) => void })
                                 <Check
                                     className={cn(
                                         "ms-auto",
-                                        searchQuery === option ? "opacity-100" : "opacity-0"
+                                        selectedCompany === option ? "opacity-100" : "opacity-0"
                                     )}
                                 />
                             </CommandItem>

@@ -10,13 +10,21 @@ PYTHONPATH=. python3 -m unittest discover -s tests -v
 python3 -m nahj_desktop --check
 ```
 
-On Arch install `xorg-server-xvfb xorg-xauth dbus` for headless GUI tests:
+On Arch install `xorg-server-xvfb xorg-xauth dbus openbox xdotool imagemagick` for X11 GUI tests:
 
 ```bash
-PYTHONPATH=. dbus-run-session -- xvfb-run -a python3 tests/smoke_gui.py
+PYTHONPATH=. xvfb-run -a -s '-screen 0 1280x820x24' dbus-run-session -- bash -c '
+openbox >/tmp/nahj-test-window-manager.log 2>&1 & wm=$!
+trap "kill $wm" EXIT
+python3 tests/smoke_gui.py && python3 tests/smoke_download.py
+'
 ```
 
-The native smoke test exercises connection discovery, settings persistence, WebKit rendering, navigation, cancellation of stale requests and preservation of the current page when opening settings. Run it as an ordinary user in an environment that permits WebKit sandbox namespaces. Some restricted containers do not support these namespaces; such containers cannot validate the production sandbox.
+The native smoke test exercises connection discovery, settings persistence, visible WebKit allocation, navigation, recovery from storage errors, cancellation of stale requests and preservation of the current page when opening settings. The download test drives the native file chooser with keyboard events, checks the saved bytes and cancels a second download. Run as an ordinary user in an environment that permits WebKit sandbox namespaces. Some restricted containers do not support these namespaces; such containers cannot validate the production sandbox.
+
+X11 captures need a window manager: without one, GTK can position an RTL window outside the visible screen. Use the same Xvfb/Openbox session with `python3 tests/capture_settings.py screenshot.png --language ar`. A virtual display without DMA-BUF support may require `WEBKIT_DISABLE_DMABUF_RENDERER=1`, the same rendering option exposed by `nahj-desktop --graphics-compatibility`. This does not disable the WebKit sandbox.
+
+For Wayland, run the smoke test inside a compositor session with `GDK_BACKEND=wayland`. A headless Weston session can use its `headless` backend and `pixman` renderer. This checks the Wayland path; it does not measure hardware performance or cover every compositor.
 
 ## Package checks
 

@@ -1,4 +1,6 @@
 const nahjArabic: Record<string, string> = {
+    "Select a company": "اختر شركة",
+    "Choose a company above to view its bank accounts and transactions.": "اختر الشركة من الأعلى لعرض حساباتها البنكية ومعاملاتها.",
     "Add Row": "إضافة صف",
     "Clearance Summary": "ملخص التسوية",
     "Click to change the closing balance as per statement": "اضغط لتعديل الرصيد الختامي حسب كشف الحساب",

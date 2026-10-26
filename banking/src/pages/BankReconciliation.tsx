@@ -3,6 +3,7 @@ import BankPicker from "@/components/features/BankReconciliation/BankPicker"
 import BankRecDateFilter from "@/components/features/BankReconciliation/BankRecDateFilter"
 import BankTransactionUnreconcileModal from "@/components/features/BankReconciliation/BankTransactionUnreconcileModal"
 import CompanySelector from "@/components/features/BankReconciliation/CompanySelector"
+import { useCurrentCompany } from "@/hooks/useCurrentCompany"
 import MatchAndReconcile from "@/components/features/BankReconciliation/MatchAndReconcile"
 import Settings from "@/components/features/Settings/Settings"
 import ActionLog from "@/components/features/ActionLog/ActionLog"
@@ -93,6 +94,17 @@ const BankReconciliation = () => {
 
 const BankRecWorkspace = () => {
     const selectedBankAccount = useAtomValue(selectedBankAccountAtom)
+    const company = useCurrentCompany()
+
+    if (!company) {
+        return <Empty>
+            <EmptyMedia><LandmarkIcon /></EmptyMedia>
+            <EmptyHeader>
+                <EmptyTitle>{_("Select a company")}</EmptyTitle>
+                <EmptyDescription>{_("Choose a company above to view its bank accounts and transactions.")}</EmptyDescription>
+            </EmptyHeader>
+        </Empty>
+    }
 
     return <Tabs defaultValue="Match and Reconcile" className="min-h-0 flex-1 gap-4">
         {/* Picker + tab strip stack on the left, balance panel beside them - the tab strip
