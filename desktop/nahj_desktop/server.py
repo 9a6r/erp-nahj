@@ -97,11 +97,12 @@ def compose_spec(profile, root):
 
     def service(name, command):
         return {**common, 'labels': {'io.nahj.project': project, 'io.nahj.service': name},
-                'entrypoint': [], 'command': command}
+                'entrypoint': ['/home/frappe/entrypoint.sh'], 'command': command}
 
     services = {
-        'backend': service('backend', ['env/bin/gunicorn', '--bind', '0.0.0.0:8000',
-                                     '--workers', '2', '--threads', '4', '--timeout', '300', 'frappe.app:application']),
+        'backend': service('backend', ['env/bin/gunicorn', '--chdir=sites', '--bind', '0.0.0.0:8000',
+                                     '--workers', '2', '--threads', '4', '--worker-class=gthread',
+                                     '--timeout', '300', '--preload', 'frappe.app:application']),
         'websocket': service('websocket', ['node', 'apps/frappe/socketio.js']),
         'scheduler': service('scheduler', ['bench', 'schedule']),
         'worker': service('worker', ['bench', 'worker', '--queue', 'short,default,long']),
@@ -216,12 +217,24 @@ class Server:
                 raise ServerError('A site is already configured or partially initialized. Data was retained; do not overwrite it.')
             if self.run(['podman', 'info', '--format', '{{.Host.Security.Rootless}}']).strip() != 'true':
                 raise ServerError('Run Nahj with rootless Podman as your normal desktop user.')
+            if not archive:
+                from .server_download import download
+                archive = download(self.progress)
             p['image'] = self.import_image(archive)
             p['project'] = 'nahj-' + uuid.uuid4().hex[:12]
             if p['mode'] == 'external':
                 private_write(self.root / 'database-ca.pem', Path(p.pop('ca')).read_text())
                 # A CA certificate is public; the unprivileged container user needs to read it.
                 (self.root / 'database-ca.pem').chmod(0o644)
+                self.progress('Checking the external MariaDB connection over TLS…')
+                # The release image includes this read-only preflight. Reject bad
+                # credentials/certificates/nonempty databases before saving a profile.
+                self.run(['podman', 'run', '--rm', '-i', '--entrypoint', BENCH + '/env/bin/python',
+                          '-v', str(self.root / 'database-ca.pem') + ':/run/nahj/ca.pem:ro',
+                          p['image'], '/home/frappe/nahj-check-database.py'],
+                         payload=json.dumps({'host': p['db_host'], 'port': p['db_port'],
+                                             'user': p['db_user'], 'password': db_password,
+                                             'database': p['db_name'], 'ca': True}))
             else:
                 db_password = secrets.token_urlsafe(32)
                 self.redactions.append(db_password)
@@ -239,7 +252,7 @@ class Server:
                          payload=json.dumps(payload))
             p['initialized'] = True
             private_write(self.root / 'profile.json', json.dumps(p))
-            self._start()
+            return self._start()
 
     def _start(self):
         p = self.profile()

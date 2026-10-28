@@ -12,6 +12,7 @@ class ServerPanel(Gtk.Box):
         self.t = app.t
         self.controls = []
         self.fields = {}
+        self.set_direction(app.window.get_direction())
         self.set_size_request(500, -1)
         self.add_css_class('card')
         self.append(Gtk.Label(label=self.t('إدارة نظام نهج', 'Manage Nahj server'), css_classes=['hero-title']))
@@ -25,10 +26,18 @@ class ServerPanel(Gtk.Box):
         self.controls.append(self.mode)
         self.form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.append(self.form)
-        self.field('archive', 'صورة الخادم ‎0.3.0‎ (ملف tar.gz)', 'Server 0.3.0 image (tar.gz file)')
-        self.field('site', 'اسم الموقع', 'Site hostname', 'nahj.localhost')
-        self.field('port', 'منفذ الواجهة المحلية', 'Local web port', '8088')
+        self.form.append(Gtk.Label(wrap=True, max_width_chars=58, label=self.t(
+            'يُنزَّل الخادم تلقائيًا أول مرة (حوالي 1.28 جيجابايت). يمكن اختيار ملف سبق تنزيله، ويُفحص قبل استخدامه.',
+            'The server downloads automatically on first setup (about 1.28 GiB). You can also select an existing download; its integrity is verified before use.')))
         self.field('admin', 'كلمة مرور Administrator الجديدة', 'New Administrator password', secret=True)
+        advanced = Gtk.Expander(label=self.t('خيارات متقدمة وملف تنزيل محفوظ', 'Advanced options and existing download'))
+        advanced_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        advanced.set_child(advanced_box)
+        self.form.append(advanced)
+        self.field('archive', 'ملف خادم محفوظ — اختياري', 'Existing server download — optional', box=advanced_box)
+        self.choose_file('archive', advanced_box)
+        self.field('site', 'اسم الموقع', 'Site hostname', 'nahj.localhost', box=advanced_box)
+        self.field('port', 'منفذ الواجهة المحلية', 'Local web port', '8088', box=advanced_box)
         self.external = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.form.append(self.external)
         self.field('db_host', 'عنوان MariaDB الخارجي', 'External MariaDB hostname', box=self.external)
@@ -37,10 +46,11 @@ class ServerPanel(Gtk.Box):
         self.field('db_user', 'مستخدم قاعدة البيانات', 'Database user', box=self.external)
         self.field('db_password', 'كلمة مرور قاعدة البيانات', 'Database password', secret=True, box=self.external)
         self.field('ca', 'مسار شهادة CA لقاعدة البيانات', 'Database CA certificate path', box=self.external)
+        self.choose_file('ca', self.external)
         note = Gtk.Label(wrap=True, max_width_chars=58, label=self.t(
             'الاتصال الخارجي يتحقق من شهادة TLS واسم الخادم. يجب أن تكون القاعدة فارغة ومخصصة لهذا الموقع. لن تُحذف البيانات عند إيقاف الخدمات.',
             'External connections verify the TLS certificate and hostname. Use an empty database dedicated to this site. Stopping services retains all data.'))
-        self.form.append(note)
+        self.external.append(note)
         self.setup_button = self.button('إعداد الموقع لأول مرة', 'Set up a new site', self.setup, self.form)
         self.actions = Gtk.Box(spacing=8)
         self.append(self.actions)
@@ -48,6 +58,7 @@ class ServerPanel(Gtk.Box):
         self.button('إيقاف', 'Stop', lambda: self.operation(lambda server: server.stop()), self.actions)
         self.button('الحالة', 'Status', lambda: self.operation(lambda server: server.status()), self.actions)
         self.field('destination', 'مجلد تصدير النسخة الاحتياطية', 'Backup destination folder', box=self)
+        self.choose_file('destination', self, folder=True)
         self.backup_button = self.button('نسخ القاعدة والملفات وإعداد الموقع', 'Back up database, files and site configuration', self.backup, self)
         self.spinner = Gtk.Spinner()
         self.append(self.spinner)
@@ -66,7 +77,7 @@ class ServerPanel(Gtk.Box):
             for key in self.fields:
                 if key in profile:
                     self.fields[key].set_text(str(profile[key]))
-            self.form.set_sensitive(False)
+            self.form.set_visible(False)
             self.mode.set_sensitive(False)
             self.status.set_label(self.t('الموقع المحفوظ: ', 'Saved site: ') + profile['site'])
         self.has_profile = bool(profile)
@@ -74,7 +85,7 @@ class ServerPanel(Gtk.Box):
     def field(self, key, ar, en, value='', secret=False, box=None):
         box = box if box is not None else self.form
         label = self.t(ar, en)
-        box.append(Gtk.Label(label=label, xalign=0, wrap=True))
+        box.append(Gtk.Label(label=label, xalign=1 if self.app.settings['language'] == 'ar' else 0, wrap=True))
         entry = Gtk.PasswordEntry(show_peek_icon=True) if secret else Gtk.Entry()
         entry.set_text(value)
         entry.set_direction(Gtk.TextDirection.LTR)
@@ -90,6 +101,22 @@ class ServerPanel(Gtk.Box):
         self.controls.append(button)
         return button
 
+    def choose_file(self, key, box, folder=False):
+        def choose():
+            dialog = Gtk.FileDialog(title=self.t('اختر مجلدًا' if folder else 'اختر ملفًا', 'Choose a folder' if folder else 'Choose a file'))
+            def selected(dialog, result):
+                try:
+                    file = dialog.select_folder_finish(result) if folder else dialog.open_finish(result)
+                    if file and file.get_path():
+                        self.fields[key].set_text(file.get_path())
+                except GLib.Error:
+                    pass  # Dismissing the native chooser preserves the previous selection.
+            if folder:
+                dialog.select_folder(self.app.window, None, selected)
+            else:
+                dialog.open(self.app.window, None, selected)
+        self.button('اختيار…', 'Browse…', choose, box)
+
     def mode_changed(self, *_):
         choice = self.mode.get_selected()
         if choice == 0:
@@ -102,7 +129,7 @@ class ServerPanel(Gtk.Box):
         values['mode'] = 'external' if self.mode.get_selected() == 2 else 'local'
         self.fields['admin'].set_text('')
         self.fields['db_password'].set_text('')
-        self.operation(lambda server: server.setup(values, values['archive'], values['admin'], values['db_password']))
+        self.operation(lambda server: server.setup(values, values['archive'], values['admin'], values['db_password']), connect=True)
 
     def backup(self):
         destination = self.fields['destination'].get_text()
@@ -121,7 +148,21 @@ class ServerPanel(Gtk.Box):
         self.status.set_label(self.t('جارٍ تنفيذ العملية…', 'Operation in progress…'))
 
         def progress(message):
-            GLib.idle_add(self.status.set_label, self.t('التقدم: ', 'Progress: ') + message)
+            translations = {
+                'Checking the external MariaDB connection over TLS…': 'جارٍ فحص الاتصال بقاعدة MariaDB الخارجية عبر TLS…',
+                'Checking server image SHA256…': 'جارٍ التحقق من سلامة صورة الخادم…',
+                'Importing verified server image…': 'جارٍ تجهيز صورة الخادم المتحقق منها…',
+                'Starting database and Redis…': 'جارٍ تشغيل قاعدة البيانات وخدمات النظام…',
+                'Creating the site and installing ERPNext. This may take several minutes…': 'جارٍ إنشاء الموقع وتثبيت النظام. قد يستغرق ذلك عدة دقائق…',
+                'Starting services…': 'جارٍ تشغيل الخدمات…',
+                'Waiting for ERPNext to respond…': 'جارٍ انتظار جاهزية النظام…',
+                'Stopping services; database and files will be retained…': 'جارٍ إيقاف الخدمات مع الاحتفاظ بالقاعدة والملفات…',
+                'Services stopped. Database and files retained.': 'توقفت الخدمات وحُفظت القاعدة والملفات.',
+                'Backing up database, public/private files and site configuration…': 'جارٍ نسخ القاعدة والملفات العامة والخاصة وإعداد الموقع…',
+            }
+            if self.app.settings['language'] == 'ar':
+                message = translations.get(message, message.replace('Downloading server:', 'تنزيل الخادم:').replace('ERPNext is ready:', 'النظام جاهز:').replace('Backup exported:', 'حُفظت النسخة الاحتياطية:'))
+            GLib.idle_add(self.status.set_label, message)
 
         def work():
             result, error = None, None

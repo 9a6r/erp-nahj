@@ -38,6 +38,7 @@ class Nahj(Gtk.Application):
         provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.window = Gtk.ApplicationWindow(application=self, title='نهج · Nahj', default_width=1280, default_height=820)
+        self.window.connect('close-request', lambda *_: bool(getattr(self, 'server_operation', False)))
         self.window.set_size_request(560, 400)
         self.header = Gtk.HeaderBar()
         self.window.set_titlebar(self.header)
@@ -104,6 +105,8 @@ class Nahj(Gtk.Application):
             self.content.remove(child)
 
     def show_settings(self, draft=None):
+        if getattr(self, 'server_operation', False):
+            return
         self.cancel_probe()
         self.clear()
         self.progress.set_visible(False)

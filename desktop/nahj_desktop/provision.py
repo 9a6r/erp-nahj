@@ -23,7 +23,9 @@ def main():
                       password=settings['password'], connect_timeout=10)
     common = dict(db_host=host, db_port=port, redis_cache='redis://redis-cache:6379',
                   redis_queue='redis://redis-queue:6379', redis_socketio='redis://redis-queue:6379',
-                  socketio_port=9000, default_site=site, serve_default_site=True)
+                  socketio_port=9000, default_site=site, serve_default_site=True,
+                  host_name=f"http://127.0.0.1:{settings['port']}",
+                  chromium_path='/usr/lib/chromium/chromium-headless-shell')
     if external:
         connection.update(database=settings['db_name'],
                           ssl={'ca': '/run/nahj/database-ca.pem', 'check_hostname': True})
@@ -48,6 +50,7 @@ def main():
                 if cursor.fetchall():
                     raise RuntimeError('External database is not empty; provisioning refused.')
     Path('common_site_config.json').write_text(json.dumps(common))
+    Path('apps.txt').write_text('frappe\nerpnext\n')
     os.chmod('common_site_config.json', 0o600)
     frappe.init(site, new_site=True, sites_path='.')
     _new_site(
