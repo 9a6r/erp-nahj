@@ -2,6 +2,7 @@
 import threading
 
 from gi.repository import Gtk, GLib
+from . import config
 from .server import Server, ServerError
 
 
@@ -16,6 +17,12 @@ class ServerPanel(Gtk.Box):
         self.set_size_request(500, -1)
         self.add_css_class('card')
         self.append(Gtk.Label(label=self.t('إدارة نظام نهج', 'Manage Nahj server'), css_classes=['hero-title']))
+        language = Gtk.DropDown.new_from_strings(['العربية', 'English'])
+        language.set_selected(1 if app.settings['language'] == 'en' else 0)
+        language.update_property([Gtk.AccessibleProperty.LABEL], [self.t('لغة التطبيق', 'Application language')])
+        self.language_handler = language.connect('notify::selected', self.change_language)
+        self.append(language)
+        self.controls.append(language)
         self.mode = Gtk.DropDown.new_from_strings([
             self.t('خادم ERPNext موجود', 'Existing ERPNext server'),
             self.t('نظام محلي كامل مع MariaDB', 'Complete local system with MariaDB'),
@@ -52,14 +59,17 @@ class ServerPanel(Gtk.Box):
             'External connections verify the TLS certificate and hostname. Use an empty database dedicated to this site. Stopping services retains all data.'))
         self.external.append(note)
         self.setup_button = self.button('إعداد الموقع لأول مرة', 'Set up a new site', self.setup, self.form)
+        self.setup_button.add_css_class('suggested-action')
+        self.management = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        self.append(self.management)
         self.actions = Gtk.Box(spacing=8)
-        self.append(self.actions)
+        self.management.append(self.actions)
         self.button('تشغيل', 'Start', lambda: self.operation(lambda server: server.start(), connect=True), self.actions)
         self.button('إيقاف', 'Stop', lambda: self.operation(lambda server: server.stop()), self.actions)
         self.button('الحالة', 'Status', lambda: self.operation(lambda server: server.status()), self.actions)
-        self.field('destination', 'مجلد تصدير النسخة الاحتياطية', 'Backup destination folder', box=self)
-        self.choose_file('destination', self, folder=True)
-        self.backup_button = self.button('نسخ القاعدة والملفات وإعداد الموقع', 'Back up database, files and site configuration', self.backup, self)
+        self.field('destination', 'مجلد تصدير النسخة الاحتياطية', 'Backup destination folder', box=self.management)
+        self.choose_file('destination', self.management, folder=True)
+        self.backup_button = self.button('نسخ القاعدة والملفات وإعداد الموقع', 'Back up database, files and site configuration', self.backup, self.management)
         self.spinner = Gtk.Spinner()
         self.append(self.spinner)
         self.status = Gtk.Label(wrap=True, selectable=True, max_width_chars=65, xalign=0)
@@ -83,6 +93,7 @@ class ServerPanel(Gtk.Box):
             self.mode.set_sensitive(False)
             self.status.set_label(self.t('الموقع المحفوظ: ', 'Saved site: ') + profile['site'])
         self.has_profile = bool(profile)
+        self.management.set_visible(bool(profile and profile.get('initialized')))
 
     def field(self, key, ar, en, value='', secret=False, box=None):
         box = box if box is not None else self.form
@@ -125,6 +136,22 @@ class ServerPanel(Gtk.Box):
             self.app.show_settings()
             return
         self.external.set_visible(choice == 2)
+
+    def change_language(self, dropdown, *_):
+        values = {key: entry.get_text() for key, entry in self.fields.items()}
+        selected = self.mode.get_selected()
+        updated = {**self.app.settings, 'language': 'en' if dropdown.get_selected() else 'ar'}
+        try:
+            config.save(updated)
+        except OSError:
+            dropdown.handler_block(self.language_handler)
+            dropdown.set_selected(1 if self.app.settings['language'] == 'en' else 0)
+            dropdown.handler_unblock(self.language_handler)
+            self.status.set_label(self.t('تعذر حفظ اللغة؛ بيانات النموذج محفوظة في النافذة.', 'Could not save the language; form values remain in this window.'))
+            return
+        self.app.settings = updated
+        self.app.update_header()
+        show(self.app, values, selected)
 
     def setup(self):
         values = {key: entry.get_text() for key, entry in self.fields.items()}
@@ -188,6 +215,7 @@ class ServerPanel(Gtk.Box):
             try:
                 profile = Server().profile()
                 self.has_profile = True
+                self.management.set_visible(bool(profile.get('initialized')))
                 self.form.set_sensitive(True)
                 self.form.set_visible(not profile.get('initialized', False))
                 if not profile.get('initialized'):
@@ -208,7 +236,7 @@ class ServerPanel(Gtk.Box):
         threading.Thread(target=work, daemon=False).start()
 
 
-def show(app):
+def show(app, draft=None, selected=None):
     if getattr(app, 'server_operation', False):
         return
     app.cancel_probe()
@@ -217,6 +245,12 @@ def show(app):
     app.error_banner.set_visible(False)
     scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
     panel = ServerPanel(app)
+    if draft is not None:
+        for key, value in draft.items():
+            if key in panel.fields:
+                panel.fields[key].set_text(value)
+    if selected is not None:
+        panel.mode.set_selected(selected)
     panel.set_halign(Gtk.Align.CENTER)
     for side in ('top', 'bottom', 'start', 'end'):
         getattr(panel, 'set_margin_' + side)(24)

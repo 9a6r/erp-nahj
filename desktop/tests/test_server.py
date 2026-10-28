@@ -53,6 +53,7 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(spec['services']['frontend']['ports'], ['127.0.0.1:8088:8080'])
         self.assertEqual(spec['services']['frontend']['environment']['PROXY_READ_TIMEOUT'], '300')
         self.assertIn('database:/var/lib/mysql', spec['services']['db']['volumes'])
+        self.assertEqual(spec['services']['initializer']['profiles'], ['setup'])
         external = compose_spec({**self.profile, 'mode': 'external'}, self.server.root)
         self.assertNotIn('db', external['services'])
         self.assertTrue(any('/run/nahj/database-ca.pem:ro' in v for v in external['services']['backend']['volumes']))
@@ -96,7 +97,7 @@ class ServerTests(unittest.TestCase):
     def test_resume_keeps_identity_and_uses_stdin_for_credentials(self):
         private_write(self.server.root / 'profile.json', json.dumps({**self.profile, 'initialized': False}))
         private_write(self.server.root / 'db-password', 'private-test-password')
-        with patch.object(self.server, 'compose') as command, patch.object(self.server, '_start', return_value='ready'):
+        with patch.object(self.server, 'compose') as command, patch.object(self.server, 'run', return_value=''), patch.object(self.server, '_start', return_value='ready'):
             self.assertEqual(self.server.resume('private-admin-password'), 'ready')
         saved = self.server.profile()
         self.assertTrue(saved['initialized'])
@@ -105,6 +106,13 @@ class ServerTests(unittest.TestCase):
         run = command.call_args
         self.assertNotIn('private-test-password', str(run.args))
         self.assertEqual(json.loads(run.kwargs['payload'])['password'], 'private-test-password')
+
+    def test_resume_does_not_duplicate_a_running_initializer(self):
+        private_write(self.server.root / 'profile.json', json.dumps({**self.profile, 'initialized': False}))
+        with patch.object(self.server, 'run', return_value='running-container'), patch.object(self.server, 'compose') as command:
+            with self.assertRaisesRegex(ServerError, 'still running'):
+                self.server.resume()
+        command.assert_not_called()
 
 
 if __name__ == '__main__':

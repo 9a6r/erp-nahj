@@ -112,6 +112,8 @@ def compose_spec(profile, root):
                         'command': ['redis-server', '--appendonly', 'yes'], 'volumes': ['queue:/data']},
     }
     services['frontend'] = service('frontend', ['nginx-entrypoint.sh'])
+    services['initializer'] = service('initializer', ['true'])
+    services['initializer']['profiles'] = ['setup']
     services['frontend']['environment'] = {
         'BACKEND': 'backend:8000', 'SOCKETIO': 'websocket:9000',
         'FRAPPE_SITE_NAME_HEADER': profile['site'], 'PROXY_READ_TIMEOUT': '300',
@@ -249,7 +251,7 @@ class Server:
             payload = {**p, 'admin_password': admin_password, 'password': db_password}
             script = Path(__file__).with_name('provision.py').read_text()
             # Source is fixed application code. Secrets are JSON on stdin only.
-            self.compose('run', '--rm', '-T', 'backend', 'env/bin/python', '-c', script,
+            self.compose('run', '--rm', '-T', 'initializer', 'env/bin/python', '-c', script,
                          payload=json.dumps(payload))
             p['initialized'] = True
             private_write(self.root / 'profile.json', json.dumps(p))
@@ -283,13 +285,17 @@ class Server:
             p = self.profile()
             if p.get('initialized'):
                 return self._start()
+            active = self.run(['podman', 'ps', '--filter', 'label=io.nahj.project=' + p['project'],
+                               '--filter', 'label=io.nahj.service=initializer', '--format', '{{.ID}}']).strip()
+            if active:
+                raise ServerError('The original site initialization is still running. Wait for it to finish before resuming.')
             if p['mode'] == 'local':
                 db_password = (self.root / 'db-password').read_text()
             self.redactions = [admin_password, db_password]
             self.progress('Resuming the saved site installation without replacing its data…')
             self.compose('up', '-d', 'redis-cache', 'redis-queue', *(['db'] if p['mode'] == 'local' else []))
             script = Path(__file__).with_name('provision.py').read_text()
-            self.compose('run', '--rm', '-T', 'backend', 'env/bin/python', '-c', script,
+            self.compose('run', '--rm', '-T', 'initializer', 'env/bin/python', '-c', script,
                          payload=json.dumps({**p, 'admin_password': admin_password, 'password': db_password}))
             p['initialized'] = True
             private_write(self.root / 'profile.json', json.dumps(p))
