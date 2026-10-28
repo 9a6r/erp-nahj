@@ -149,6 +149,9 @@ class Nahj(Gtk.Application):
         self.connect_button.add_css_class('suggested-action')
         self.connect_button.connect('clicked', self.connect_server)
         card.append(self.connect_button)
+        manage = Gtk.Button(label=self.t('نظام محلي أو قاعدة بيانات خارجية', 'Local system or external database'))
+        manage.connect('clicked', self.show_server_settings)
+        card.append(manage)
         if self.web:
             resume = Gtk.Button(label=self.t('العودة إلى العمل', 'Return to workspace'))
             resume.add_css_class('flat')
@@ -157,6 +160,10 @@ class Nahj(Gtk.Application):
         wrapper.append(card)
         scroll.set_child(wrapper)
         self.content.append(scroll)
+
+    def show_server_settings(self, *_):
+        from .server_panel import show
+        show(self)
 
     def change_graphics(self, checkbox):
         old = self.settings['graphics_compatibility']
