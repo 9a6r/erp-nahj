@@ -60,7 +60,8 @@ def validate(options):
         raise ServerError('Invalid local HTTP port.') from None
     if not 1024 <= port <= 65535:
         raise ServerError('Local HTTP port must be between 1024 and 65535.')
-    result = {'mode': mode, 'site': site, 'port': port}
+    result = {'mode': mode, 'site': site, 'port': port,
+              'language': 'en' if options.get('language') == 'en' else 'ar'}
     if mode == 'external':
         for key in ('db_host', 'db_name', 'db_user'):
             value = options.get(key, '').strip()
@@ -274,6 +275,24 @@ class Server:
 
     def start(self):
         with self.locked():
+            return self._start()
+
+    def resume(self, admin_password='', db_password=''):
+        """Resume app installation without dropping a database or changing passwords."""
+        with self.locked():
+            p = self.profile()
+            if p.get('initialized'):
+                return self._start()
+            if p['mode'] == 'local':
+                db_password = (self.root / 'db-password').read_text()
+            self.redactions = [admin_password, db_password]
+            self.progress('Resuming the saved site installation without replacing its data…')
+            self.compose('up', '-d', 'redis-cache', 'redis-queue', *(['db'] if p['mode'] == 'local' else []))
+            script = Path(__file__).with_name('provision.py').read_text()
+            self.compose('run', '--rm', '-T', 'backend', 'env/bin/python', '-c', script,
+                         payload=json.dumps({**p, 'admin_password': admin_password, 'password': db_password}))
+            p['initialized'] = True
+            private_write(self.root / 'profile.json', json.dumps(p))
             return self._start()
 
     def stop(self):

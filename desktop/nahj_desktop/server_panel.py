@@ -77,7 +77,9 @@ class ServerPanel(Gtk.Box):
             for key in self.fields:
                 if key in profile:
                     self.fields[key].set_text(str(profile[key]))
-            self.form.set_visible(False)
+            self.form.set_visible(not profile.get('initialized', False))
+            if not profile.get('initialized'):
+                self.setup_button.set_label(self.t('استكمال إعداد الموقع المحفوظ', 'Resume saved site setup'))
             self.mode.set_sensitive(False)
             self.status.set_label(self.t('الموقع المحفوظ: ', 'Saved site: ') + profile['site'])
         self.has_profile = bool(profile)
@@ -127,9 +129,13 @@ class ServerPanel(Gtk.Box):
     def setup(self):
         values = {key: entry.get_text() for key, entry in self.fields.items()}
         values['mode'] = 'external' if self.mode.get_selected() == 2 else 'local'
+        values['language'] = self.app.settings['language']
         self.fields['admin'].set_text('')
         self.fields['db_password'].set_text('')
-        self.operation(lambda server: server.setup(values, values['archive'], values['admin'], values['db_password']), connect=True)
+        if self.has_profile:
+            self.operation(lambda server: server.resume(values['admin'], values['db_password']), connect=True)
+        else:
+            self.operation(lambda server: server.setup(values, values['archive'], values['admin'], values['db_password']), connect=True)
 
     def backup(self):
         destination = self.fields['destination'].get_text()
@@ -149,6 +155,7 @@ class ServerPanel(Gtk.Box):
 
         def progress(message):
             translations = {
+                'Resuming the saved site installation without replacing its data…': 'جارٍ استكمال تثبيت الموقع المحفوظ دون استبدال بياناته…',
                 'Checking the external MariaDB connection over TLS…': 'جارٍ فحص الاتصال بقاعدة MariaDB الخارجية عبر TLS…',
                 'Checking server image SHA256…': 'جارٍ التحقق من سلامة صورة الخادم…',
                 'Importing verified server image…': 'جارٍ تجهيز صورة الخادم المتحقق منها…',
@@ -179,8 +186,12 @@ class ServerPanel(Gtk.Box):
             for control in self.controls:
                 control.set_sensitive(True)
             try:
-                Server().profile()
-                self.form.set_sensitive(False)
+                profile = Server().profile()
+                self.has_profile = True
+                self.form.set_sensitive(True)
+                self.form.set_visible(not profile.get('initialized', False))
+                if not profile.get('initialized'):
+                    self.setup_button.set_label(self.t('استكمال إعداد الموقع المحفوظ', 'Resume saved site setup'))
                 self.mode.set_sensitive(False)
             except ServerError:
                 pass

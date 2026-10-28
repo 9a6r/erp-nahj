@@ -9,13 +9,25 @@ import time
 def main():
     import pymysql
     import frappe
-    from frappe.installer import _new_site
+    from frappe.installer import _new_site, install_app
 
     settings = json.load(sys.stdin)
     os.chdir('/home/frappe/frappe-bench/sites')
     site = settings['site']
+    if (Path(site) / 'site_config.json').is_file():
+        frappe.init(site, sites_path='.')
+        frappe.connect()
+        installed = frappe.get_installed_apps()
+        if 'frappe' not in installed:
+            raise RuntimeError('The base site installation is incomplete. Data was retained; restore or repair it before retrying.')
+        if 'erpnext' not in installed:
+            install_app('erpnext')
+        finish(frappe, settings)
+        return
     if Path(site).exists():
         raise RuntimeError('Site directory already exists; refusing to overwrite it.')
+    if len(settings.get('admin_password', '')) < 12:
+        raise RuntimeError('Enter an Administrator password of at least 12 characters to initialize the site.')
     external = settings['mode'] == 'external'
     host = settings['db_host'] if external else 'db'
     port = settings['db_port'] if external else 3306
@@ -64,8 +76,13 @@ def main():
         setup_db=not external, mariadb_user_host_login_scope='%',
     )
     frappe.connect()
+    finish(frappe, settings)
+
+
+def finish(frappe, settings):
     from frappe.utils.scheduler import enable_scheduler
     enable_scheduler()
+    frappe.db.set_value('User', 'Administrator', 'language', settings.get('language', 'ar'))
     frappe.db.commit()
     frappe.destroy()
 

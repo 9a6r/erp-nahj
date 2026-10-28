@@ -17,7 +17,11 @@ arch=('any')
 url='https://github.com/9a6r/erp-nahj'
 license=('GPL-3.0-only')
 depends=('python' 'python-gobject' 'gtk4' 'webkitgtk-6.0' 'gst-plugins-good' 'noto-fonts' 'adwaita-icon-theme')
-optdepends=('xdg-desktop-portal: desktop integration on Wayland')
+optdepends=('xdg-desktop-portal: desktop integration on Wayland'
+            'podman: local server and external MariaDB modes'
+            'podman-compose: manage local server services'
+            'slirp4netns: rootless container networking'
+            'fuse-overlayfs: rootless container storage fallback')
 source=("nahj-desktop-$version.tar.gz")
 sha256sums=('$checksum')
 package() {

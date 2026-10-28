@@ -93,6 +93,19 @@ class ServerTests(unittest.TestCase):
                 self.server.setup(self.profile, '/unused', 'a-long-test-password')
         command.assert_not_called()
 
+    def test_resume_keeps_identity_and_uses_stdin_for_credentials(self):
+        private_write(self.server.root / 'profile.json', json.dumps({**self.profile, 'initialized': False}))
+        private_write(self.server.root / 'db-password', 'private-test-password')
+        with patch.object(self.server, 'compose') as command, patch.object(self.server, '_start', return_value='ready'):
+            self.assertEqual(self.server.resume('private-admin-password'), 'ready')
+        saved = self.server.profile()
+        self.assertTrue(saved['initialized'])
+        self.assertEqual(saved['project'], self.profile['project'])
+        self.assertNotIn('password', saved)
+        run = command.call_args
+        self.assertNotIn('private-test-password', str(run.args))
+        self.assertEqual(json.loads(run.kwargs['payload'])['password'], 'private-test-password')
+
 
 if __name__ == '__main__':
     unittest.main()
