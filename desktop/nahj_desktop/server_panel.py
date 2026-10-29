@@ -36,7 +36,8 @@ class ServerPanel(Gtk.Box):
         self.form.append(Gtk.Label(wrap=True, max_width_chars=58, label=self.t(
             'يُنزَّل الخادم تلقائيًا أول مرة (حوالي 1.28 جيجابايت). يمكن اختيار ملف سبق تنزيله، ويُفحص قبل استخدامه.',
             'The server downloads automatically on first setup (about 1.28 GiB). You can also select an existing download; its integrity is verified before use.')))
-        self.field('admin', 'كلمة مرور Administrator الجديدة', 'New Administrator password', secret=True)
+        self.field('admin', 'كلمة مرور Administrator الجديدة — 12 حرفًا على الأقل',
+                   'New Administrator password — at least 12 characters', secret=True)
         advanced = Gtk.Expander(label=self.t('خيارات متقدمة وملف تنزيل محفوظ', 'Advanced options and existing download'))
         advanced_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         advanced.set_child(advanced_box)
@@ -224,6 +225,15 @@ class ServerPanel(Gtk.Box):
             except ServerError:
                 pass
             if error:
+                if self.app.settings['language'] == 'ar':
+                    error = {
+                        'Select an existing backup destination folder.': 'اختر مجلدًا موجودًا لحفظ النسخة الاحتياطية.',
+                        'Choose an Administrator password of at least 12 characters.': 'اختر كلمة مرور لحساب Administrator تتكون من 12 حرفًا على الأقل.',
+                        'Podman/Podman Compose is missing. Install podman and podman-compose on Arch.': 'يلزم تثبيت podman وpodman-compose لتشغيل الخادم على Arch.',
+                        'Select the CA certificate for the MariaDB server.': 'اختر ملف شهادة CA لخادم MariaDB.',
+                        'Cannot load the MariaDB CA certificate.': 'تعذر قراءة شهادة CA؛ اختر ملف شهادة صالحًا.',
+                        'Another service operation is still running.': 'توجد عملية أخرى قيد التنفيذ؛ انتظر اكتمالها.',
+                    }.get(error, error)
                 self.status.add_css_class('error')
                 self.status.set_label(self.t('تعذرت العملية؛ لم تُحذف البيانات. التفاصيل:\n', 'Operation failed; data was retained. Details:\n') + error)
             else:

@@ -99,6 +99,12 @@ class ServerTests(unittest.TestCase):
                 self.server.backup(self.root)
         self.assertEqual(list(self.root.glob('*backup*')), [])
 
+    def test_empty_backup_destination_is_not_the_working_directory(self):
+        with patch.object(self.server, 'run') as command:
+            with self.assertRaisesRegex(ServerError, 'destination folder'):
+                self.server.backup('')
+        command.assert_not_called()
+
     def test_invalid_configuration_rejected(self):
         for options in (dict(mode='local', site='../escape'), dict(mode='local', site='site', port=0),
                         dict(mode='external', site='site', db_host='db', db_user='user', db_name='db', ca='')):

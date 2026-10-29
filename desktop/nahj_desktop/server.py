@@ -319,6 +319,8 @@ class Server:
 
     def backup(self, destination):
         """Export only this invocation's files from the backend selected by labels."""
+        if not str(destination).strip():
+            raise ServerError('Select an existing backup destination folder.')
         with self.locked():
             p = self.profile()
             container = self.backend()
