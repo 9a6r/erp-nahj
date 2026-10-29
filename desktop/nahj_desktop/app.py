@@ -38,6 +38,7 @@ class Nahj(Gtk.Application):
         provider.load_from_data(CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.window = Gtk.ApplicationWindow(application=self, title='نهج · Nahj', default_width=1280, default_height=820)
+        self.window.connect('close-request', lambda *_: bool(getattr(self, 'server_operation', False)))
         self.window.set_size_request(560, 400)
         self.header = Gtk.HeaderBar()
         self.window.set_titlebar(self.header)
@@ -104,6 +105,8 @@ class Nahj(Gtk.Application):
             self.content.remove(child)
 
     def show_settings(self, draft=None):
+        if getattr(self, 'server_operation', False):
+            return
         self.cancel_probe()
         self.clear()
         self.progress.set_visible(False)
@@ -149,6 +152,9 @@ class Nahj(Gtk.Application):
         self.connect_button.add_css_class('suggested-action')
         self.connect_button.connect('clicked', self.connect_server)
         card.append(self.connect_button)
+        manage = Gtk.Button(label=self.t('نظام محلي أو قاعدة بيانات خارجية', 'Local system or external database'))
+        manage.connect('clicked', self.show_server_settings)
+        card.append(manage)
         if self.web:
             resume = Gtk.Button(label=self.t('العودة إلى العمل', 'Return to workspace'))
             resume.add_css_class('flat')
@@ -157,6 +163,10 @@ class Nahj(Gtk.Application):
         wrapper.append(card)
         scroll.set_child(wrapper)
         self.content.append(scroll)
+
+    def show_server_settings(self, *_):
+        from .server_panel import show
+        show(self)
 
     def change_graphics(self, checkbox):
         old = self.settings['graphics_compatibility']

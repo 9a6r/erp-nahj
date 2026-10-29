@@ -15,6 +15,11 @@ if [[ -e /var/lib/pacman/db.lck ]]; then
 fi
 
 dependencies=(base-devel python python-gobject gtk4 webkitgtk-6.0 gst-plugins-good noto-fonts adwaita-icon-theme)
+case "${1:-}" in
+    --with-server) dependencies+=(podman podman-compose slirp4netns fuse-overlayfs) ;;
+    '') ;;
+    *) printf 'Usage: %s [--with-server]\n' "$0" >&2; exit 2 ;;
+esac
 missing=()
 for dependency in "${dependencies[@]}"; do
     if ! pacman -Q "$dependency" >/dev/null 2>&1; then

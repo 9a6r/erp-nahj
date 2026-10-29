@@ -9,9 +9,9 @@
 افتح الطرفية في النظام المثبّت على القرص. هذه الطريقة لا تحتاج إلى Git أو أدوات بناء:
 
 ```bash
-curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.2.1/nahj-desktop-0.2.1-1-any.pkg.tar.zst
-curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.2.1/SHA256SUMS
-sha256sum -c SHA256SUMS && sudo pacman -U ./nahj-desktop-0.2.1-1-any.pkg.tar.zst
+curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.3.0/nahj-desktop-0.3.0-1-any.pkg.tar.zst
+curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.3.0/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS && sudo pacman -U ./nahj-desktop-0.3.0-1-any.pkg.tar.zst
 nahj-desktop
 ```
 
@@ -50,7 +50,7 @@ journalctl -k -b --no-pager | tail -n 80
 2. اضغط **اتصال وفتح مساحة العمل**. يتحقق التطبيق من الاتصال قبل حفظ العنوان.
 3. سجّل الدخول بحساب عملك. تظهر الوحدات والبيانات وفق صلاحيات حسابك.
 
-يتطلب التطبيق خادم ERPNext/Frappe 17 قائمًا. يمكن أن يكون خادم المؤسسة أو خادمًا محليًا. لتجهيز الخادم، اتبع [دليل المشروع](https://github.com/9a6r/erp-nahj#development-setup). بيانات قاعدة البيانات ومفاتيح تكاملات البنوك والبريد تُضبط في إعدادات الخادم الخاصة بالخدمة. اتصال التطبيق نفسه يستخدم جلسة الحساب المعتادة ولا يحتاج API token.
+يمكنك الاتصال بخادم ERPNext/Frappe 17 قائم، أو اختيار **نظام محلي أو قاعدة بيانات خارجية** من الإعدادات لتجهيز موقع مستقل. راجع [دليل تشغيل النظام والنسخ الاحتياطي](SERVER.md). بيانات تكاملات البنوك والبريد تُضبط في إعدادات الخادم الخاصة بالخدمة. اتصال التطبيق نفسه يستخدم جلسة الحساب المعتادة ولا يحتاج API token.
 
 استخدم HTTPS للخوادم البعيدة. يقبل التطبيق HTTP للخادم المحلي فقط، مثل `http://localhost:8000`.
 
