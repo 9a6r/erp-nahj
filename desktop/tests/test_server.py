@@ -1,10 +1,11 @@
+import hashlib
 import json
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from nahj_desktop.server import Server, ServerError, compose_spec, private_write, validate
+from nahj_desktop.server import IMAGE_ID, Server, ServerError, compose_spec, private_write, validate
 
 
 class ServerTests(unittest.TestCase):
@@ -47,6 +48,21 @@ class ServerTests(unittest.TestCase):
             with self.assertRaises(ServerError):
                 with other.locked():
                     self.fail('lock was not enforced')
+
+    def test_verified_image_reused_by_immutable_identity(self):
+        archive = self.root / 'release.tar.gz'
+        archive.write_bytes(b'checksum-pinned fixture')
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        info = json.dumps([{'Id': IMAGE_ID, 'Architecture': 'amd64'}])
+        with patch('nahj_desktop.server.IMAGE_SHA256', digest), patch.object(self.server, 'run', return_value=info) as command:
+            self.assertEqual(self.server.import_image(archive), IMAGE_ID)
+        command.assert_called_once_with(['podman', 'image', 'inspect', IMAGE_ID])
+        with patch('nahj_desktop.server.IMAGE_SHA256', digest), patch.object(self.server, 'run', side_effect=[ServerError('missing'), '', info]) as command:
+            self.assertEqual(self.server.import_image(archive), IMAGE_ID)
+            self.assertEqual(command.call_args_list[1].args[0], ['podman', 'load', '--input', str(archive)])
+        with patch('nahj_desktop.server.IMAGE_SHA256', digest), patch.object(self.server, 'run', return_value=json.dumps([{'Id': 'sha256:wrong', 'Architecture': 'amd64'}])):
+            with self.assertRaisesRegex(ServerError, 'identity'):
+                self.server.import_image(archive)
 
     def test_compose_persists_data_and_binds_loopback(self):
         spec = compose_spec(self.profile, self.server.root)

@@ -13,7 +13,6 @@ import re
 import secrets
 import shutil
 import subprocess
-import tarfile
 import tempfile
 import time
 import uuid
@@ -21,6 +20,8 @@ import uuid
 from .connection import probe, ConnectionFailure
 
 IMAGE_SHA256 = 'dc3c5731b34b63865c4e5320f1045f16c46b19dcc7bfaf1522ddc8d71a7553af'
+# Config digest from the manifest in the above checksum-pinned release archive.
+IMAGE_ID = 'sha256:46a6fb4e82c0f5f82f7b1d647ca2a4107f369e44d934093d92dbb1f140ee7c39'
 BENCH = '/home/frappe/frappe-bench'
 
 
@@ -193,18 +194,18 @@ class Server:
             actual = hashlib.file_digest(stream, 'sha256').hexdigest()
         if actual != IMAGE_SHA256:
             raise ServerError('Server image checksum does not match release 0.3.0. Nothing was imported.')
-        # Never extract the archive into the host filesystem.
-        with tarfile.open(archive, 'r:*') as bundle:
-            member = bundle.getmember('manifest.json')
-            if member.size > 1024 * 1024:
-                raise ServerError('Invalid image manifest.')
-            manifest = json.load(bundle.extractfile(member))
-        if len(manifest) != 1 or not manifest[0].get('RepoTags'):
-            raise ServerError('Expected a single tagged Docker-format image in the release archive.')
-        tag = manifest[0]['RepoTags'][0]
-        self.progress('Importing verified server image…')
-        self.run(['podman', 'load', '--input', str(archive)])
-        info = json.loads(self.run(['podman', 'image', 'inspect', tag]))[0]
+        # The verified archive and image config have fixed digests. Avoid inflating
+        # every layer merely to locate manifest.json, or importing an existing image.
+        # Inspect by immutable ID so a changed local tag cannot select another image.
+        try:
+            inspected = self.run(['podman', 'image', 'inspect', IMAGE_ID])
+        except ServerError:
+            self.progress('Importing verified server image…')
+            self.run(['podman', 'load', '--input', str(archive)])
+            inspected = self.run(['podman', 'image', 'inspect', IMAGE_ID])
+        info = json.loads(inspected)[0]
+        if info['Id'].removeprefix('sha256:') != IMAGE_ID.removeprefix('sha256:'):
+            raise ServerError('Imported image identity does not match release 0.3.0.')
         if info.get('Architecture') != 'amd64':
             raise ServerError('This server release requires an amd64 machine.')
         return info['Id']

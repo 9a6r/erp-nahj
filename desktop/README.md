@@ -9,9 +9,9 @@
 افتح الطرفية في النظام المثبّت على القرص. هذه الطريقة لا تحتاج إلى Git أو أدوات بناء:
 
 ```bash
-curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.2.1/nahj-desktop-0.2.1-1-any.pkg.tar.zst
-curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.2.1/SHA256SUMS
-sha256sum -c SHA256SUMS && sudo pacman -U ./nahj-desktop-0.2.1-1-any.pkg.tar.zst
+curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.3.0/nahj-desktop-0.3.0-1-any.pkg.tar.zst
+curl -fLO https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.3.0/SHA256SUMS
+sha256sum --ignore-missing -c SHA256SUMS && sudo pacman -U ./nahj-desktop-0.3.0-1-any.pkg.tar.zst
 nahj-desktop
 ```
 

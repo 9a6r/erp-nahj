@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
-version=0.2.1
+version=0.3.0
 mkdir -p dist
 # The archive contains source and documentation only; no local state or sessions.
 tar --exclude=__pycache__ --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
