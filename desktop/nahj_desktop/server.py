@@ -116,6 +116,7 @@ def compose_spec(profile, root):
     services['frontend'] = service('frontend', ['nginx-entrypoint.sh'])
     services['initializer'] = service('initializer', ['true'])
     services['initializer']['profiles'] = ['setup']
+    services['initializer']['volumes'] = [*common['volumes'], str(root / 'provision.py') + ':/run/nahj/provision.py:ro']
     services['frontend']['environment'] = {
         'BACKEND': 'backend:8000', 'SOCKETIO': 'websocket:9000',
         'FRAPPE_SITE_NAME_HEADER': profile['site'], 'PROXY_READ_TIMEOUT': '300',
@@ -148,7 +149,7 @@ class Server:
         except subprocess.TimeoutExpired:
             raise ServerError('Operation timed out. Services and data were retained; inspect status before retrying.') from None
         if result.returncode:
-            detail = (result.stderr or result.stdout)[-4000:]
+            detail = '\n'.join(part for part in (result.stdout, result.stderr) if part)[-4000:]
             for secret in self.redactions:
                 if secret:
                     detail = detail.replace(secret, '[redacted]')
@@ -178,6 +179,13 @@ class Server:
         p = self.profile()
         return self.run(['podman', 'compose', '--project-name', p['project'],
                          '-f', str(self.root / 'compose.json'), *args], payload=payload, timeout=timeout)
+
+    def write_compose(self, profile):
+        # Mount fixed application code instead of a long `python -c` argument:
+        # Compose echoes failed commands, which otherwise hides the actual error.
+        private_write(self.root / 'provision.py', Path(__file__).with_name('provision.py').read_text())
+        (self.root / 'provision.py').chmod(0o644)
+        private_write(self.root / 'compose.json', json.dumps(compose_spec(profile, self.root), indent=2))
 
     def backend(self):
         p = self.profile()
@@ -253,14 +261,13 @@ class Server:
                 private_write(self.root / 'db-password', db_password)
             p['initialized'] = False
             private_write(self.root / 'profile.json', json.dumps(p))
-            private_write(self.root / 'compose.json', json.dumps(compose_spec(p, self.root), indent=2))
+            self.write_compose(p)
             self.progress('Starting database and Redis…')
             self.compose('up', '-d', 'redis-cache', 'redis-queue', *(['db'] if p['mode'] == 'local' else []))
             self.progress('Creating the site and installing ERPNext. This may take several minutes…')
             payload = {**p, 'admin_password': admin_password, 'password': db_password}
-            script = Path(__file__).with_name('provision.py').read_text()
-            # Source is fixed application code. Secrets are JSON on stdin only.
-            self.compose('run', '--rm', '-T', 'initializer', 'env/bin/python', '-c', script,
+            # Secrets are JSON on stdin only.
+            self.compose('--profile', 'setup', 'run', '--rm', '-T', 'initializer', 'env/bin/python', '/run/nahj/provision.py',
                          payload=json.dumps(payload), timeout=3600)
             p['initialized'] = True
             private_write(self.root / 'profile.json', json.dumps(p))
@@ -302,9 +309,9 @@ class Server:
                 db_password = (self.root / 'db-password').read_text()
             self.redactions = [admin_password, db_password]
             self.progress('Resuming the saved site installation without replacing its data…')
+            self.write_compose(p)
             self.compose('up', '-d', 'redis-cache', 'redis-queue', *(['db'] if p['mode'] == 'local' else []))
-            script = Path(__file__).with_name('provision.py').read_text()
-            self.compose('run', '--rm', '-T', 'initializer', 'env/bin/python', '-c', script,
+            self.compose('--profile', 'setup', 'run', '--rm', '-T', 'initializer', 'env/bin/python', '/run/nahj/provision.py',
                          payload=json.dumps({**p, 'admin_password': admin_password, 'password': db_password}),
                          timeout=3600)
             p['initialized'] = True

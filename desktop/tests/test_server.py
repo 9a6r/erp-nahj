@@ -127,6 +127,8 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(saved['project'], self.profile['project'])
         self.assertNotIn('password', saved)
         run = command.call_args
+        self.assertEqual(run.args[:3], ('--profile', 'setup', 'run'))
+        self.assertIn('/run/nahj/provision.py', run.args)
         self.assertNotIn('private-test-password', str(run.args))
         self.assertEqual(json.loads(run.kwargs['payload'])['password'], 'private-test-password')
 
