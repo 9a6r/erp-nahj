@@ -57,6 +57,7 @@ class ServerTests(unittest.TestCase):
         external = compose_spec({**self.profile, 'mode': 'external'}, self.server.root)
         self.assertNotIn('db', external['services'])
         self.assertTrue(any('/run/nahj/database-ca.pem:ro' in v for v in external['services']['backend']['volumes']))
+        self.assertTrue(any('/home/frappe/.my.cnf:ro' in v for v in external['services']['backend']['volumes']))
 
     def test_config_and_backup_are_private(self):
         self.assertEqual((self.server.root / 'profile.json').stat().st_mode & 0o777, 0o600)

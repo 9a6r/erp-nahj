@@ -95,6 +95,7 @@ def compose_spec(profile, root):
     }
     if profile['mode'] == 'external':
         common['volumes'].append(str(root / 'database-ca.pem') + ':/run/nahj/database-ca.pem:ro')
+        common['volumes'].append(str(root / 'database-client.cnf') + ':/home/frappe/.my.cnf:ro')
 
     def service(name, command):
         return {**common, 'labels': {'io.nahj.project': project, 'io.nahj.service': name},
@@ -229,6 +230,11 @@ class Server:
                 private_write(self.root / 'database-ca.pem', Path(p.pop('ca')).read_text())
                 # A CA certificate is public; the unprivileged container user needs to read it.
                 (self.root / 'database-ca.pem').chmod(0o644)
+                # Frappe's import/dump CLI does not pass db_ssl_ca itself.
+                # Enforce certificate and hostname checks for those clients too.
+                private_write(self.root / 'database-client.cnf',
+                              '[client]\nssl-ca=/run/nahj/database-ca.pem\nssl-verify-server-cert=1\n')
+                (self.root / 'database-client.cnf').chmod(0o644)
                 self.progress('Checking the external MariaDB connection over TLS…')
                 # The release image includes this read-only preflight. Reject bad
                 # credentials/certificates/nonempty databases before saving a profile.
@@ -330,6 +336,7 @@ class Server:
                           str(stage / 'common_site_config.json')])
                 if p['mode'] == 'external':
                     shutil.copyfile(self.root / 'database-ca.pem', stage / 'database-ca.pem')
+                    shutil.copyfile(self.root / 'database-client.cnf', stage / 'database-client.cnf')
                 files = [f for f in stage.iterdir() if f.is_file() and not f.is_symlink()]
                 names = [f.name for f in files]
                 for suffixes in (('database.sql.gz',), ('-files.tar', '-files.tgz'),

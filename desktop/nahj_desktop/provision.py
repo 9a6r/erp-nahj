@@ -41,7 +41,10 @@ def main():
     if external:
         connection.update(database=settings['db_name'],
                           ssl={'ca': '/run/nahj/database-ca.pem', 'check_hostname': True})
-        common.update(db_ssl_ca='/run/nahj/database-ca.pem', db_ssl_check_hostname=True)
+        # Frappe passes check_hostname through its PyMySQL connection path.
+        # mysqlclient's SSL dictionary does not implement that option.
+        common.update(db_ssl_ca='/run/nahj/database-ca.pem', db_ssl_check_hostname=True,
+                      use_mysqlclient=False)
     deadline = time.monotonic() + 180
     while True:
         try:
