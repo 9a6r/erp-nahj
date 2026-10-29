@@ -174,10 +174,10 @@ class Server:
         except (OSError, ValueError):
             raise ServerError('No managed site is configured. Set up a site first.') from None
 
-    def compose(self, *args, payload=None):
+    def compose(self, *args, payload=None, timeout=1800):
         p = self.profile()
         return self.run(['podman', 'compose', '--project-name', p['project'],
-                         '-f', str(self.root / 'compose.json'), *args], payload=payload)
+                         '-f', str(self.root / 'compose.json'), *args], payload=payload, timeout=timeout)
 
     def backend(self):
         p = self.profile()
@@ -201,7 +201,9 @@ class Server:
             inspected = self.run(['podman', 'image', 'inspect', IMAGE_ID])
         except ServerError:
             self.progress('Importing verified server image…')
-            self.run(['podman', 'load', '--input', str(archive)])
+            # Layer verification/extraction is substantially slower on emulated CPUs
+            # and slow disks. It does not change a site or any existing volumes.
+            self.run(['podman', 'load', '--input', str(archive)], timeout=7200)
             inspected = self.run(['podman', 'image', 'inspect', IMAGE_ID])
         info = json.loads(inspected)[0]
         if info['Id'].removeprefix('sha256:') != IMAGE_ID.removeprefix('sha256:'):
@@ -259,7 +261,7 @@ class Server:
             script = Path(__file__).with_name('provision.py').read_text()
             # Source is fixed application code. Secrets are JSON on stdin only.
             self.compose('run', '--rm', '-T', 'initializer', 'env/bin/python', '-c', script,
-                         payload=json.dumps(payload))
+                         payload=json.dumps(payload), timeout=3600)
             p['initialized'] = True
             private_write(self.root / 'profile.json', json.dumps(p))
             return self._start()
@@ -303,7 +305,8 @@ class Server:
             self.compose('up', '-d', 'redis-cache', 'redis-queue', *(['db'] if p['mode'] == 'local' else []))
             script = Path(__file__).with_name('provision.py').read_text()
             self.compose('run', '--rm', '-T', 'initializer', 'env/bin/python', '-c', script,
-                         payload=json.dumps({**p, 'admin_password': admin_password, 'password': db_password}))
+                         payload=json.dumps({**p, 'admin_password': admin_password, 'password': db_password}),
+                         timeout=3600)
             p['initialized'] = True
             private_write(self.root / 'profile.json', json.dumps(p))
             return self._start()
