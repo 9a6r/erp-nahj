@@ -207,9 +207,21 @@ def add_dimension_to_budget_doctype(df, doc):
 def delete_accounting_dimension(doc):
 	doclist = get_doctypes_with_dimensions()
 
-	frappe.db.delete("Custom Field", filters={"fieldname": doc.fieldname, "dt": ["in", doclist]})
+	frappe.db.sql(
+		"""
+		DELETE FROM `tabCustom Field`
+		WHERE fieldname = {}
+		AND dt IN ({})""".format("%s", ", ".join(["%s"] * len(doclist))),  # nosec
+		tuple([doc.fieldname, *doclist]),
+	)
 
-	frappe.db.delete("Property Setter", filters={"field_name": doc.fieldname, "doc_type": ["in", doclist]})
+	frappe.db.sql(
+		"""
+		DELETE FROM `tabProperty Setter`
+		WHERE field_name = {}
+		AND doc_type IN ({})""".format("%s", ", ".join(["%s"] * len(doclist))),  # nosec
+		tuple([doc.fieldname, *doclist]),
+	)
 
 	budget_against_property = frappe.get_doc("Property Setter", "Budget-budget_against-options")
 	value_list = budget_against_property.value.split("\n")[3:]
@@ -225,7 +237,7 @@ def delete_accounting_dimension(doc):
 
 
 @frappe.whitelist(methods=["POST"])
-def disable_dimension(doc: str):
+def disable_dimension(doc):
 	# toggle_disabling rewrites a Custom Field site-wide, so demand the write that configures dimensions
 	frappe.has_permission("Accounting Dimension", "write", throw=True)
 
@@ -236,7 +248,7 @@ def disable_dimension(doc: str):
 
 
 def toggle_disabling(doc):
-	doc = frappe.parse_json(doc)
+	doc = json.loads(doc)
 
 	if doc.get("disabled"):
 		df = {"read_only": 1}
@@ -273,26 +285,12 @@ def get_accounting_dimensions(as_list=True):
 
 
 def get_checks_for_pl_and_bs_accounts():
-	AccountingDimension = frappe.qb.DocType("Accounting Dimension")
-	AccountingDimensionDetail = frappe.qb.DocType("Accounting Dimension Detail")
-
-	query = (
-		frappe.qb.from_(AccountingDimension)
-		.join(AccountingDimensionDetail)
-		.on(AccountingDimension.name == AccountingDimensionDetail.parent)
-		.select(
-			AccountingDimension.label,
-			AccountingDimension.disabled,
-			AccountingDimension.fieldname,
-			AccountingDimensionDetail.default_dimension,
-			AccountingDimensionDetail.company,
-			AccountingDimensionDetail.mandatory_for_pl,
-			AccountingDimensionDetail.mandatory_for_bs,
-		)
-		.where(AccountingDimension.disabled == 0)
+	return frappe.db.sql(
+		"""SELECT p.label, p.disabled, p.fieldname, c.default_dimension, c.company, c.mandatory_for_pl, c.mandatory_for_bs
+			FROM `tabAccounting Dimension`p ,`tabAccounting Dimension Detail` c
+			WHERE p.name = c.parent AND p.disabled = 0""",
+		as_dict=1,
 	)
-
-	return query.run(as_dict=1)
 
 
 def get_dimension_with_children(doctype, dimensions):
@@ -310,7 +308,7 @@ def get_dimension_with_children(doctype, dimensions):
 
 
 @frappe.whitelist()
-def get_dimensions(with_cost_center_and_project: str | bool = False):
+def get_dimensions(with_cost_center_and_project=False):
 	c = frappe.qb.DocType("Accounting Dimension Detail")
 	p = frappe.qb.DocType("Accounting Dimension")
 	dimension_filters = (

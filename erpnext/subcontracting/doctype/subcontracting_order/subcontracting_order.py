@@ -20,10 +20,6 @@ from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry impor
 )
 from erpnext.stock.stock_balance import get_ordered_qty, update_bin_qty
 from erpnext.stock.utils import get_bin
-from erpnext.subcontracting.doctype.subcontracting_bom.subcontracting_bom import (
-	get_applicable_bom_items,
-	get_finished_good_bom,
-)
 
 
 class SubcontractingOrder(SubcontractingController):
@@ -183,8 +179,12 @@ class SubcontractingOrder(SubcontractingController):
 			if not po.is_subcontracted:
 				frappe.throw(_("Please select a valid Purchase Order that is configured for Subcontracting."))
 
+			if po.is_old_subcontracting_flow:
+				frappe.throw(_("Please select a valid Purchase Order that has Service Items."))
+
 			if po.docstatus != 1:
-				frappe.throw(_("Please submit Purchase Order {0} before proceeding.").format(po.name))
+				msg = f"Please submit Purchase Order {po.name} before proceeding."
+				frappe.throw(_(msg))
 
 			if po.status in ("Closed", "On Hold"):
 				frappe.throw(
@@ -194,11 +194,8 @@ class SubcontractingOrder(SubcontractingController):
 				)
 
 			if po.per_received == 100:
-				frappe.throw(
-					_("Cannot create more Subcontracting Orders against the Purchase Order {0}.").format(
-						po.name
-					)
-				)
+				msg = f"Cannot create more Subcontracting Orders against the Purchase Order {po.name}."
+				frappe.throw(_(msg))
 		else:
 			self.service_items = self.items = self.supplied_items = None
 			frappe.throw(_("Please select a Subcontracting Purchase Order."))
@@ -261,11 +258,8 @@ class SubcontractingOrder(SubcontractingController):
 		if self.supplier_warehouse:
 			for item in self.supplied_items:
 				if self.supplier_warehouse == item.reserve_warehouse:
-					frappe.throw(
-						_(
-							"Reserve Warehouse must be different from Supplier Warehouse for Supplied Item {0}."
-						).format(item.main_item_code)
-					)
+					msg = f"Reserve Warehouse must be different from Supplier Warehouse for Supplied Item {item.main_item_code}."
+					frappe.throw(_(msg))
 
 	def set_missing_values(self):
 		self.calculate_additional_costs()
@@ -305,8 +299,9 @@ class SubcontractingOrder(SubcontractingController):
 			item.amount = item.qty * item.rate
 			total_qty += flt(item.qty)
 			total += flt(item.amount)
-		self.total_qty = total_qty
-		self.total = total
+		else:
+			self.total_qty = total_qty
+			self.total = total
 
 	def update_ordered_qty_for_subcontracting(self, sco_item_rows=None):
 		item_wh_list = []
@@ -353,7 +348,6 @@ class SubcontractingOrder(SubcontractingController):
 					fg_item_qty,
 					production_plan_sub_assembly_item,
 					project,
-					bom,
 				) = frappe.db.get_value(
 					"Purchase Order Item",
 					si.purchase_order_item,
@@ -363,7 +357,6 @@ class SubcontractingOrder(SubcontractingController):
 						"fg_item_qty",
 						"production_plan_sub_assembly_item",
 						"project",
-						"bom",
 					],
 				)
 				available_qty = flt(qty) - flt(subcontracted_qty)
@@ -378,6 +371,15 @@ class SubcontractingOrder(SubcontractingController):
 				)
 				si.amount = available_qty * si.rate
 
+				bom = (
+					frappe.db.get_value(
+						"Subcontracting BOM",
+						{"finished_good": item.name, "is_active": 1},
+						"finished_good_bom",
+					)
+					or item.default_bom
+				)
+
 				items.append(
 					{
 						"item_code": item.name,
@@ -387,7 +389,7 @@ class SubcontractingOrder(SubcontractingController):
 						"qty": si.fg_item_qty,
 						"subcontracting_conversion_factor": conversion_factor,
 						"stock_uom": item.stock_uom,
-						"bom": get_finished_good_bom_for_row(item, bom),
+						"bom": bom,
 						"purchase_order_item": si.purchase_order_item,
 						"material_request": si.material_request,
 						"material_request_item": si.material_request_item,
@@ -547,7 +549,7 @@ class SubcontractingOrder(SubcontractingController):
 
 				reservation_items.append(data)
 
-			sre = StockReservation(self, items=reservation_items)
+			sre = StockReservation(self, items=reservation_items, notify=True)
 			if is_transfer:
 				sre.transfer_reservation_entries_to(
 					self.production_plan, from_doctype="Production Plan", to_doctype="Subcontracting Order"
@@ -579,7 +581,6 @@ class SubcontractingOrder(SubcontractingController):
 	def release_unused_reserved_qty(self, sre_name: str) -> None:
 		"""Keep only the used qty reserved and give the rest back to the reservation it was taken from."""
 		sre = frappe.get_doc("Stock Reservation Entry", sre_name)
-		released = sre.get_serial_batch_entries()
 		sre.db_set("reserved_qty", flt(sre.delivered_qty) + flt(sre.transferred_qty) + flt(sre.consumed_qty))
 
 		sb_entry = frappe.qb.DocType("Serial and Batch Entry")
@@ -591,11 +592,14 @@ class SubcontractingOrder(SubcontractingController):
 
 		sre.update_status()
 		sre.update_reserved_qty_in_voucher()
+		sre.update_unreserved_qty_in_sre()
 		sre.update_reserved_stock_in_bin()
-		sre.give_back_to_from_voucher(released)
 
 	@frappe.whitelist()
-	def cancel_stock_reservation_entries(self, sre_list: list | None = None, notify: bool = True):
+	def cancel_stock_reservation_entries(self, sre_list=None, notify=True) -> None:
+		# same guard as the sibling method on Pick List; run_doc_method only gates on `read`
+		self.check_permission("write")
+
 		from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
 			cancel_stock_reservation_entries,
 		)
@@ -646,17 +650,8 @@ def update_subcontracted_qty(work_order: str):
 	doc.update_reserved_qty_for_production()
 
 
-def get_finished_good_bom_for_row(item: Document, purchase_order_bom: str | None) -> str | None:
-	"""The Purchase Order row's BOM when it belongs to the finished good, else the finished good's BOM."""
-	bom_item = purchase_order_bom and frappe.db.get_value("BOM", purchase_order_bom, "item")
-	if bom_item in get_applicable_bom_items(item.name):
-		return purchase_order_bom
-
-	return get_finished_good_bom(item)
-
-
 @frappe.whitelist()
-def make_subcontracting_receipt(source_name: str, target_doc: str | dict | Document | None = None):
+def make_subcontracting_receipt(source_name, target_doc=None):
 	items = frappe.flags.args.get("items") if frappe.flags.args else None
 	return get_mapped_subcontracting_receipt(source_name, target_doc, items=items)
 

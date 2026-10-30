@@ -5,7 +5,6 @@ import json
 
 import frappe
 from frappe import _
-from frappe.query_builder import Case
 from frappe.query_builder.functions import Sum
 from frappe.utils import cstr, nowdate
 from frappe.utils.data import fmt_money
@@ -129,16 +128,20 @@ def get_columns():
 
 
 def get_payer_address_html(company):
-	address = frappe.qb.DocType("Address")
-	address_list = (
-		frappe.qb.from_(address)
-		.select(address.name)
-		.where(address.is_your_company_address == 1)
-		.orderby(Case().when(address.address_type == "Postal", 1).else_(0), order=frappe.qb.desc)
-		.orderby(Case().when(address.address_type == "Billing", 1).else_(0), order=frappe.qb.desc)
-		.orderby(address.name)  # deterministic LIMIT-1 tie-break across engines
-		.limit(1)
-		.run(as_dict=True)
+	address_list = frappe.db.sql(
+		"""
+		SELECT
+			name
+		FROM
+			tabAddress
+		WHERE
+			is_your_company_address = 1
+		ORDER BY
+			address_type="Postal" DESC, address_type="Billing" DESC
+		LIMIT 1
+	""",
+		{"company": company},
+		as_dict=True,
 	)
 
 	address_display = ""
@@ -150,19 +153,23 @@ def get_payer_address_html(company):
 
 
 def get_street_address_html(party_type, party):
-	link = frappe.qb.DocType("Dynamic Link")
-	address = frappe.qb.DocType("Address")
-	address_list = (
-		frappe.qb.from_(link)
-		.inner_join(address)
-		.on(address.name == link.parent)
-		.select(link.parent)
-		.where((link.parenttype == "Address") & (link.link_name == party))
-		.orderby(Case().when(address.address_type == "Postal", 1).else_(0), order=frappe.qb.desc)
-		.orderby(Case().when(address.address_type == "Billing", 1).else_(0), order=frappe.qb.desc)
-		.orderby(link.parent)  # deterministic LIMIT-1 tie-break across engines
-		.limit(1)
-		.run(as_dict=True)
+	address_list = frappe.db.sql(
+		"""
+		SELECT
+			link.parent
+		FROM
+			`tabDynamic Link` link,
+			`tabAddress` address
+		WHERE
+			link.parenttype = "Address"
+				AND link.link_name = %(party)s
+		ORDER BY
+			address.address_type="Postal" DESC,
+			address.address_type="Billing" DESC
+		LIMIT 1
+	""",
+		{"party": party},
+		as_dict=True,
 	)
 
 	street_address = city_state = ""

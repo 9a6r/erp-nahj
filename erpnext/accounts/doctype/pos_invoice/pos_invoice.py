@@ -4,10 +4,9 @@
 
 import frappe
 from frappe import _, bold
-from frappe.model.document import Document
 from frappe.model.mapper import map_child_doc, map_doc
 from frappe.query_builder.functions import IfNull, Sum
-from frappe.utils import cint, cstr, escape_html, flt, get_link_to_form, getdate, nowdate
+from frappe.utils import cint, cstr, flt, get_link_to_form, getdate, nowdate
 from frappe.utils.nestedset import get_descendants_of
 
 from erpnext import _refuse
@@ -15,17 +14,14 @@ from erpnext.accounts.doctype.loyalty_program.loyalty_program import validate_lo
 from erpnext.accounts.doctype.payment_request.payment_request import make_payment_request
 from erpnext.accounts.doctype.sales_invoice.sales_invoice import (
 	SalesInvoice,
+	get_discounting_status,
 	get_mode_of_payment_info,
 	update_multi_mode_option,
 )
-from erpnext.accounts.doctype.sales_invoice.services.loyalty import LoyaltyService
-from erpnext.accounts.doctype.sales_invoice.services.status import get_discounting_status
 from erpnext.accounts.party import get_due_date, get_party_account
 from erpnext.controllers.queries import item_query as _item_query
 from erpnext.controllers.sales_and_purchase_return import get_sales_invoice_item_from_consolidated_invoice
-from erpnext.selling.doctype.product_bundle.product_bundle import get_active_product_bundle
-from erpnext.stock.serial_batch_bundle import get_serial_batch_list_from_item
-from erpnext.stock.serial_batch_identity import SerialBatchIdentity
+from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
 from erpnext.stock.stock_ledger import is_negative_stock_allowed
 
 
@@ -235,7 +231,7 @@ class POSInvoice(SalesInvoice):
 		self.validate_company_with_pos_company()
 		self.validate_full_payment()
 		self.update_packing_list()
-		if self.coupon_code:
+		if self.coupon_code and self.counts_coupon_use():
 			from erpnext.accounts.doctype.pricing_rule.utils import validate_coupon_code
 
 			validate_coupon_code(self.coupon_code)
@@ -246,13 +242,13 @@ class POSInvoice(SalesInvoice):
 	def on_submit(self):
 		# create the loyalty point ledger entry if the customer is enrolled in any loyalty program
 		if not self.is_return and self.loyalty_program:
-			LoyaltyService(self).make_loyalty_point_entry()
+			self.make_loyalty_point_entry()
 		elif self.is_return and self.return_against and self.loyalty_program:
 			against_psi_doc = frappe.get_doc("POS Invoice", self.return_against)
-			LoyaltyService(against_psi_doc).delete_loyalty_point_entry()
-			LoyaltyService(against_psi_doc).make_loyalty_point_entry()
+			against_psi_doc.delete_loyalty_point_entry()
+			against_psi_doc.make_loyalty_point_entry()
 		if self.redeem_loyalty_points and self.loyalty_points:
-			LoyaltyService(self).apply_loyalty_points()
+			self.apply_loyalty_points()
 		self.check_phone_payments()
 		self.set_status(update=True)
 		self.make_bundle_for_sales_purchase_return()
@@ -260,7 +256,7 @@ class POSInvoice(SalesInvoice):
 			self.make_bundle_using_old_serial_batch_fields(table_name)
 			self.submit_serial_batch_bundle(table_name)
 
-		if self.coupon_code:
+		if self.coupon_code and self.counts_coupon_use():
 			from erpnext.accounts.doctype.pricing_rule.utils import update_coupon_code_count
 
 			update_coupon_code_count(self.coupon_code, "used")
@@ -282,7 +278,7 @@ class POSInvoice(SalesInvoice):
 				limit=1,
 			)
 			frappe.throw(
-				_("You need to cancel POS Closing Entry {0} to be able to cancel this document.").format(
+				_("You need to cancel POS Closing Entry {} to be able to cancel this document.").format(
 					get_link_to_form("POS Closing Entry", pos_closing_entry[0])
 				),
 				title=_("Not Allowed"),
@@ -293,15 +289,15 @@ class POSInvoice(SalesInvoice):
 		# run on cancel method of selling controller
 		super(SalesInvoice, self).on_cancel()
 		if not self.is_return and self.loyalty_program:
-			LoyaltyService(self).delete_loyalty_point_entry()
+			self.delete_loyalty_point_entry()
 		elif self.is_return and self.return_against and self.loyalty_program:
 			against_psi_doc = frappe.get_doc("POS Invoice", self.return_against)
-			LoyaltyService(against_psi_doc).delete_loyalty_point_entry()
-			LoyaltyService(against_psi_doc).make_loyalty_point_entry()
+			against_psi_doc.delete_loyalty_point_entry()
+			against_psi_doc.make_loyalty_point_entry()
 
 		self.db_set("status", "Cancelled")
 
-		if self.coupon_code:
+		if self.coupon_code and self.counts_coupon_use():
 			from erpnext.accounts.doctype.pricing_rule.utils import update_coupon_code_count
 
 			update_coupon_code_count(self.coupon_code, "cancelled")
@@ -407,7 +403,7 @@ class POSInvoice(SalesInvoice):
 
 		for d in self.get("items"):
 			if not d.serial_and_batch_bundle:
-				if get_active_product_bundle(d.item_code):
+				if frappe.db.exists("Product Bundle", d.item_code):
 					(
 						availability,
 						is_stock_item,
@@ -475,9 +471,7 @@ class POSInvoice(SalesInvoice):
 			frappe.throw(_("Sales Invoice mode is activated in POS. Please create Sales Invoice instead."))
 
 	def validate_serialised_or_batched_item(self):
-		from erpnext.stock.services.serial_batch_bundle_service import SerialBatchBundleService
-
-		auto_picks_serial_nos = SerialBatchBundleService(self).auto_picks_outward_serial_batch()
+		auto_picks_serial_nos = self.auto_picks_outward_serial_batch()
 		error_msg = []
 		for d in self.get("items"):
 			error_msg = ""
@@ -505,31 +499,36 @@ class POSInvoice(SalesInvoice):
 			if d.get("qty") > 0:
 				frappe.throw(
 					_(
-						"Row #{0}: You cannot add positive quantities in a return invoice. Please remove item {1} to complete the return."
+						"Row #{}: You cannot add positive quantities in a return invoice. Please remove item {} to complete the return."
 					).format(d.idx, frappe.bold(d.item_code)),
 					title=_("Invalid Item"),
 				)
-			self.validate_return_serial_nos(d)
+			if d.get("serial_no"):
+				serial_nos = get_serial_nos(d.serial_no)
+				for sr in serial_nos:
+					serial_no_exists = frappe.db.sql(
+						"""
+						SELECT name
+						FROM `tabPOS Invoice Item`
+						WHERE
+							parent = %s
+							and (serial_no = %s
+								or serial_no like %s
+								or serial_no like %s
+								or serial_no like %s
+							)
+					""",
+						(self.return_against, sr, sr + "\n%", "%\n" + sr, "%\n" + sr + "\n%"),
+					)
 
-	def validate_return_serial_nos(self, item):
-		serial_ids = get_serial_batch_list_from_item(item)[0]
-		if not serial_ids:
-			return
-		original_serials = set()
-		for row in frappe.get_all(
-			"POS Invoice Item",
-			filters={"parent": self.return_against, "item_code": item.item_code},
-			fields=["item_code", "serial_no", "batch_no", "serial_and_batch_bundle"],
-		):
-			original_serials.update(get_serial_batch_list_from_item(row)[0])
-
-		invalid_serials = [name for name in serial_ids if name not in original_serials]
-		for number in SerialBatchIdentity("Serial No").get_numbers(item.item_code, invalid_serials):
-			frappe.throw(
-				_(
-					"Row #{0}: Serial No {1} cannot be returned since it was not transacted in original invoice {2}"
-				).format(item.idx, bold(escape_html(number)), bold(escape_html(self.return_against)))
-			)
+					if not serial_no_exists:
+						bold_return_against = frappe.bold(self.return_against)
+						bold_serial_no = frappe.bold(sr)
+						frappe.throw(
+							_(
+								"Row #{}: Serial No {} cannot be returned since it was not transacted in original invoice {}"
+							).format(d.idx, bold_serial_no, bold_return_against)
+						)
 
 	def validate_mode_of_payment(self):
 		if len(self.payments) == 0:
@@ -542,7 +541,7 @@ class POSInvoice(SalesInvoice):
 			and frappe.get_cached_value("Account", self.account_for_change_amount, "company") != self.company
 		):
 			frappe.throw(
-				_("The selected change account {0} does not belong to Company {1}.").format(
+				_("The selected change account {} doesn't belongs to Company {}.").format(
 					self.account_for_change_amount, self.company
 				)
 			)
@@ -572,12 +571,12 @@ class POSInvoice(SalesInvoice):
 			invoice_total = self.rounded_total or self.grand_total
 			total_amount_in_payments = flt(total_amount_in_payments, self.precision("grand_total"))
 			if total_amount_in_payments and total_amount_in_payments < invoice_total:
-				frappe.throw(_("Total payments amount can't be greater than {0}").format(-invoice_total))
+				frappe.throw(_("Total payments amount can't be greater than {}").format(-invoice_total))
 
 	def validate_company_with_pos_company(self):
 		if self.company != frappe.db.get_value("POS Profile", self.pos_profile, "company"):
 			frappe.throw(
-				_("Company {0} does not match with POS Profile Company {1}").format(
+				_("Company {} does not match with POS Profile Company {}").format(
 					self.company, frappe.db.get_value("POS Profile", self.pos_profile, "company")
 				)
 			)
@@ -664,6 +663,7 @@ class POSInvoice(SalesInvoice):
 	def set_pos_fields(self, for_validate=False):
 		"""Set retail related fields from POS Profiles"""
 		from erpnext.stock.get_item_details import (
+			ItemDetailsCtx,
 			get_pos_profile,
 			get_pos_profile_item_details_,
 		)
@@ -736,7 +736,7 @@ class POSInvoice(SalesInvoice):
 			for item in self.get("items"):
 				if item.get("item_code"):
 					profile_details = get_pos_profile_item_details_(
-						frappe._dict(item.as_dict()), profile.get("company"), profile
+						ItemDetailsCtx(item.as_dict()), profile.get("company"), profile
 					)
 					for fname, val in profile_details.items():
 						if (not for_validate) or (for_validate and not item.get(fname)):
@@ -748,9 +748,7 @@ class POSInvoice(SalesInvoice):
 
 			# fetch charges
 			if self.taxes_and_charges and not len(self.get("taxes")):
-				from erpnext.accounts.services.taxes import TaxService
-
-				TaxService(self).set_taxes()
+				self.set_taxes()
 
 		if not self.account_for_change_amount:
 			self.account_for_change_amount = frappe.get_cached_value(
@@ -760,7 +758,7 @@ class POSInvoice(SalesInvoice):
 		return profile
 
 	@frappe.whitelist()
-	def set_missing_values(self, for_validate: bool | None = False):
+	def set_missing_values(self, for_validate=False):
 		profile = self.set_pos_fields(for_validate)
 
 		if not self.debit_to:
@@ -861,7 +859,7 @@ class POSInvoice(SalesInvoice):
 			return frappe.get_doc("Payment Request", pr)
 
 	@frappe.whitelist()
-	def update_payments(self, payments: list):
+	def update_payments(self, payments):
 		if self.status == "Consolidated":
 			frappe.throw(_("Create Payment Entry for Consolidated POS Invoices."))
 
@@ -873,16 +871,11 @@ class POSInvoice(SalesInvoice):
 
 		idx = self.payments[-1].idx if self.payments else -1
 
-		self.reload()
-		self.flags.ignore_validate_update_after_submit = True
-
 		for d in payments:
 			idx += 1
 			payment = create_payments_on_invoice(self, idx, frappe._dict(d))
 			paid_amount += flt(payment.amount)
-			self.append("payments", payment)
-
-		self.save()
+			payment.submit()
 
 		paid_amount = flt(flt(paid_amount), self.precision("paid_amount"))
 		base_paid_amount = flt(flt(paid_amount * self.conversion_rate), self.precision("base_paid_amount"))
@@ -909,31 +902,20 @@ class POSInvoice(SalesInvoice):
 
 
 @frappe.whitelist()
-def get_stock_availability(item_code: str | None, warehouse: str):
-	# The POS Profile is what entitles a caller to POS stock figures, and it is the only boundary
-	# that fits: `Item` read and `Bin` read both exclude Accounts Manager, `Item` select is granted
-	# to every desk user by `Desk User`, and `POS Invoice` read is granted to `All`.
-	frappe.has_permission("POS Profile", throw=True)
+def get_stock_availability(item_code, warehouse):
+	# select-or-read on POS Profile: a bare check defaults to `read`, which Sales Manager lacks.
+	# The profile is the only boundary that fits -- Item and Bin read both exclude Accounts Manager.
+	ptype = "select" if frappe.only_has_select_perm("POS Profile") else "read"
+	frappe.has_permission("POS Profile", ptype, throw=True)
 
-	# and keep a company-restricted caller inside their own companies, which costs nobody who has
-	# no Company User Permission
-	from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_companies
-
-	allowed_companies = get_allowed_companies(frappe.session.user, "POS Profile")
-	if allowed_companies:
-		company = frappe.db.get_value("Warehouse", warehouse, "company")
-		if company and company not in allowed_companies:
-			frappe.throw(_("Not permitted for {0}").format(company), frappe.PermissionError)
-
-	# the caller picks the warehouse when allow_warehouse_change is set, and the company check above
-	# does not narrow within a company; costs nobody who has no Warehouse User Permission
+	# the caller picks the warehouse when allow_warehouse_change is set; costs nobody who has no
+	# Warehouse User Permission
 	from frappe.permissions import get_allowed_docs_for_doctype, get_user_permissions
 
 	if warehouse_permissions := get_user_permissions(frappe.session.user).get("Warehouse"):
 		allowed_warehouses = get_allowed_docs_for_doctype(warehouse_permissions, "POS Invoice")
 		if allowed_warehouses and warehouse not in allowed_warehouses:
 			frappe.throw(_("Not permitted for {0}").format(warehouse), frappe.PermissionError)
-
 	if frappe.db.get_value("Item", item_code, "is_stock_item"):
 		is_stock_item = True
 		bin_qty = get_bin_qty(item_code, warehouse)
@@ -942,7 +924,7 @@ def get_stock_availability(item_code: str | None, warehouse: str):
 		return bin_qty - pos_sales_qty, is_stock_item, is_negative_stock_allowed(item_code=item_code)
 	else:
 		is_stock_item = True
-		if get_active_product_bundle(item_code):
+		if frappe.db.exists("Product Bundle", {"name": item_code, "disabled": 0}):
 			return get_bundle_availability(item_code, warehouse), is_stock_item, False
 		else:
 			is_stock_item = False
@@ -952,7 +934,7 @@ def get_stock_availability(item_code: str | None, warehouse: str):
 
 def get_product_bundle_stock_availability(item_code, warehouse, item_qty):
 	is_stock_item = True
-	bundle = frappe.get_doc("Product Bundle", get_active_product_bundle(item_code))
+	bundle = frappe.get_doc("Product Bundle", item_code)
 	availabilities = []
 	for bundle_item in bundle.items:
 		if frappe.get_value("Item", bundle_item.item_code, "is_stock_item"):
@@ -971,7 +953,7 @@ def get_product_bundle_stock_availability(item_code, warehouse, item_qty):
 
 
 def get_bundle_availability(bundle_item_code, warehouse):
-	product_bundle = frappe.get_doc("Product Bundle", get_active_product_bundle(bundle_item_code))
+	product_bundle = frappe.get_doc("Product Bundle", bundle_item_code)
 
 	bundle_bin_qty = 1000000
 	for item in product_bundle.items:
@@ -988,9 +970,15 @@ def get_bundle_availability(bundle_item_code, warehouse):
 
 
 def get_bin_qty(item_code, warehouse):
-	actual_qty = frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "actual_qty")
+	bin_qty = frappe.db.sql(
+		"""select actual_qty from `tabBin`
+		where item_code = %s and warehouse = %s
+		limit 1""",
+		(item_code, warehouse),
+		as_dict=1,
+	)
 
-	return actual_qty or 0
+	return bin_qty[0].actual_qty or 0 if bin_qty else 0
 
 
 def get_pos_reserved_qty(item_code, warehouse):
@@ -1050,7 +1038,7 @@ def get_pos_reserved_qty_from_table(child_table, item_code, warehouse):
 
 
 @frappe.whitelist()
-def make_sales_return(source_name: str, target_doc: str | dict | Document | None = None):
+def make_sales_return(source_name, target_doc=None):
 	from erpnext.controllers.sales_and_purchase_return import make_return_doc
 
 	return make_return_doc("POS Invoice", source_name, target_doc)
@@ -1060,19 +1048,19 @@ def make_sales_return(source_name: str, target_doc: str | dict | Document | None
 def make_merge_log(invoices: str | list):
 	import json
 
-	invoices = frappe.parse_json(invoices)
+	if isinstance(invoices, str):
+		invoices = json.loads(invoices)
 
 	if len(invoices) == 0:
 		frappe.throw(_("At least one invoice has to be selected."))
 
+	merge_log = frappe.new_doc("POS Invoice Merge Log")
+	merge_log.posting_date = getdate(nowdate())
 	for inv in invoices:
 		inv["name"] = cstr(inv.get("name"))
 		if not inv["name"] or not frappe.has_permission("POS Invoice", "read", doc=inv["name"]):
 			_refuse()
 
-	merge_log = frappe.new_doc("POS Invoice Merge Log")
-	merge_log.posting_date = getdate(nowdate())
-	for inv in invoices:
 		inv_data = frappe.db.get_values(
 			"POS Invoice", inv.get("name"), ["customer", "posting_date", "grand_total"], as_dict=1
 		)[0]
@@ -1111,15 +1099,7 @@ def add_return_modes(doc, pos_profile):
 
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
-def item_query(
-	doctype: str,
-	txt: str,
-	searchfield: str,
-	start: int,
-	page_len: int,
-	filters: dict,
-	as_dict: bool = False,
-):
+def item_query(doctype, txt, searchfield, start, page_len, filters, as_dict=False):
 	if pos_profile := filters.get("pos_profile")[1]:
 		pos_profile = frappe.get_cached_doc("POS Profile", pos_profile)
 		if item_groups := get_item_group(pos_profile):

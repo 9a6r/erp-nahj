@@ -37,7 +37,7 @@ frappe.query_reports["Sales Pipeline Analytics"] = {
 			fieldname: "status",
 			label: __("Status"),
 			fieldtype: "Select",
-			options: "Open\nQuotation\nConverted\nReplied\nLost\nClosed",
+			options: "Open\nQuotation\nConverted\nReplied",
 		},
 		{
 			fieldname: "based_on",

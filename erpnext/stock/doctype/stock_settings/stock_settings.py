@@ -8,6 +8,7 @@ import frappe
 from frappe import _
 from frappe.custom.doctype.property_setter.property_setter import make_property_setter
 from frappe.model.document import Document
+from frappe.utils import cint
 from frappe.utils.html_utils import clean_html
 
 from erpnext.stock.utils import check_pending_reposting
@@ -65,11 +66,10 @@ class StockSettings(Document):
 		stock_uom: DF.Link | None
 		update_existing_price_list_rate: DF.Check
 		update_price_list_based_on: DF.Literal["Rate", "Price List Rate"]
-		use_inline_serial_batch_editor: DF.Check
 		use_naming_series: DF.Check
 		use_serial_batch_fields: DF.Check
 		validate_material_transfer_warehouses: DF.Check
-		valuation_method: DF.Literal["FIFO", "Moving Average", "LIFO", "Standard Cost"]
+		valuation_method: DF.Literal["FIFO", "Moving Average", "LIFO"]
 	# end: auto-generated types
 
 	def validate(self):
@@ -85,9 +85,17 @@ class StockSettings(Document):
 		]:
 			frappe.db.set_default(key, self.get(key, ""))
 
-		self.update_item_naming_settings()
-		self.update_barcode_field_visibility()
+		from erpnext.utilities.naming import set_by_naming_series
 
+		set_by_naming_series(
+			"Item",
+			"item_code",
+			self.get("item_naming_by") == "Naming Series",
+			hide_name_field=True,
+			make_mandatory=0,
+		)
+
+		self.update_barcode_field_visibility()
 		self.validate_serial_and_batch_no_settings()
 		self.cant_change_valuation_method()
 		self.validate_clean_description_html()
@@ -98,20 +106,6 @@ class StockSettings(Document):
 		self.change_precision_for_purchase()
 		self.change_precision_for_stock_entry()
 		self.validate_do_not_use_batchwise_valuation()
-
-	def update_item_naming_settings(self):
-		if not self.has_value_changed("item_naming_by"):
-			return
-
-		from erpnext.utilities.naming import set_by_naming_series
-
-		set_by_naming_series(
-			"Item",
-			"item_code",
-			self.get("item_naming_by") == "Naming Series",
-			hide_name_field=True,
-			make_mandatory=0,
-		)
 
 	def update_barcode_field_visibility(self):
 		if not self.has_value_changed("show_barcode_field"):
@@ -133,7 +127,7 @@ class StockSettings(Document):
 		if not doc_before_save:
 			return
 
-		if not frappe.db.exists("Serial and Batch Bundle", {"docstatus": 1}):
+		if not frappe.get_all("Serial and Batch Bundle", filters={"docstatus": 1}, limit=1, pluck="name"):
 			return
 
 		if doc_before_save.do_not_use_batchwise_valuation and not self.do_not_use_batchwise_valuation:
@@ -182,27 +176,17 @@ class StockSettings(Document):
 		if previous_valuation_method and previous_valuation_method != self.valuation_method:
 			# check if there are any stock ledger entries against items
 			# which does not have it's own valuation method
-			sle_dt = frappe.qb.DocType("Stock Ledger Entry")
-			item = frappe.qb.DocType("Item")
-			sle = (
-				frappe.qb.from_(sle_dt)
-				.select(sle_dt.name)
-				.where(
-					sle_dt.item_code.isin(
-						frappe.qb.from_(item)
-						.select(item.name)
-						.where(item.valuation_method.isnull() | (item.valuation_method == ""))
-					)
-				)
-				.where(sle_dt.is_cancelled == 0)
-				.limit(1)
-				.run()
+			sle = frappe.db.sql(
+				"""select name from `tabStock Ledger Entry` sle
+				where sle.is_cancelled=0 and exists(select name from tabItem
+					where name=sle.item_code and (valuation_method is null or valuation_method='')) limit 1
+			"""
 			)
 
 			if sle:
 				frappe.throw(
 					_(
-						"Can't change the valuation method, as there are transactions against some items which do not have their own valuation method"
+						"Can't change the valuation method, as there are transactions against some items which do not have its own valuation method"
 					)
 				)
 
@@ -258,7 +242,7 @@ class StockSettings(Document):
 
 				if has_reserved_stock:
 					frappe.throw(
-						_("As there is reserved stock, you cannot disable {0}.").format(
+						_("As there are reserved stock, you cannot disable {0}.").format(
 							frappe.bold(_("Stock Reservation"))
 						)
 					)
@@ -274,10 +258,8 @@ class StockSettings(Document):
 				_(
 					"You have enabled {0} and {1} in {2}. This can lead to prices from the default price list being inserted in the transaction price list."
 				).format(
-					"<i>{}</i>".format(
-						self.meta.get_translated_label("auto_insert_price_list_rate_if_missing")
-					),
-					"<i>{}</i>".format(selling_meta.get_translated_label("fallback_to_default_price_list")),
+					"<i>{}</i>".format(_(self.meta.get_label("auto_insert_price_list_rate_if_missing"))),
+					"<i>{}</i>".format(_(selling_meta.get_label("fallback_to_default_price_list"))),
 					frappe.bold(_("Selling Settings")),
 				)
 			)

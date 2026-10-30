@@ -5,6 +5,7 @@
 import frappe
 from frappe import _
 from frappe.permissions import get_allowed_docs_for_doctype, get_user_permissions
+from frappe.utils import flt
 
 from erpnext import get_default_currency
 
@@ -156,11 +157,27 @@ def get_opportunities(filters):
 			[filters["transaction_date"][0], filters["transaction_date"][1]],
 		]
 
-	return frappe.get_all(
+	opportunities = frappe.get_all(
 		"Opportunity",
-		fields=["name", "territory", "base_opportunity_amount", "company", "opportunity_from", "party_name"],
+		fields=[
+			"name",
+			"territory",
+			"opportunity_amount",
+			"conversion_rate",
+			"company",
+			"opportunity_from",
+			"party_name",
+		],
 		filters=orm_filters,
 	)
+
+	# opportunity_amount is in the opportunity's currency; convert to company currency
+	for opportunity in opportunities:
+		opportunity.base_opportunity_amount = flt(opportunity.opportunity_amount) * flt(
+			opportunity.conversion_rate or 1
+		)
+
+	return opportunities
 
 
 def get_quotations(opportunities):

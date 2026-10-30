@@ -8,7 +8,6 @@ from frappe.utils import cint, flt
 from erpnext.stock.report.stock_ledger_invariant_check.stock_ledger_invariant_check import (
 	get_data as stock_ledger_invariant_check,
 )
-from erpnext.stock.report.utils import prepare_serial_batch_report
 
 
 def execute(filters=None):
@@ -18,7 +17,7 @@ def execute(filters=None):
 	columns = get_columns()
 	data = get_data(filters)
 
-	return prepare_serial_batch_report(columns, data)
+	return columns, data
 
 
 def get_columns():

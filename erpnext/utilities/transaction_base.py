@@ -347,6 +347,7 @@ class TransactionBase(StatusUpdater):
 					"item_tax_template": item.get("item_tax_template"),
 					"child_doctype": item.get("doctype"),
 					"child_docname": item.get("name"),
+					"is_old_subcontracting_flow": self.get("is_old_subcontracting_flow"),
 					"use_serial_batch_fields": item.get("use_serial_batch_fields"),
 				}
 			),
@@ -596,7 +597,7 @@ class TransactionBase(StatusUpdater):
 			"plc_conversion_rate": self.plc_conversion_rate,
 			"company": self.company,
 			"transaction_date": self.transaction_date or self.posting_date,
-			"campaign": self.get("utm_campaign"),
+			"campaign": self.campaign,
 			"sales_partner": self.sales_partner,
 			"ignore_pricing_rule": self.ignore_pricing_rule,
 			"doctype": self.doctype,
@@ -610,20 +611,23 @@ class TransactionBase(StatusUpdater):
 			"is_internal_customer": self.is_internal_customer,
 		}
 		# TODO: test method call impact on document
-		_apply_price_list(ctx=args, as_doc=True, doc=self)
+		_apply_price_list(cts=args, as_doc=True, doc=self)
 
 
 def delete_events(ref_type, ref_name):
-	event = frappe.qb.DocType("Event")
-	participant = frappe.qb.DocType("Event Participants")
 	events = (
-		frappe.qb.from_(event)
-		.inner_join(participant)
-		.on(event.name == participant.parent)
-		.select(event.name)
-		.distinct()
-		.where((participant.reference_doctype == ref_type) & (participant.reference_docname == ref_name))
-		.run(pluck="name")
+		frappe.db.sql_list(
+			""" SELECT
+			distinct `tabEvent`.name
+		from
+			`tabEvent`, `tabEvent Participants`
+		where
+			`tabEvent`.name = `tabEvent Participants`.parent
+			and `tabEvent Participants`.reference_doctype = %s
+			and `tabEvent Participants`.reference_docname = %s
+		""",
+			(ref_type, ref_name),
+		)
 		or []
 	)
 

@@ -2,10 +2,10 @@
 # See license.txt
 
 import frappe
-from frappe.utils import add_days, nowdate
+from frappe.utils import add_days, add_to_date, now_datetime, nowdate
 
-from erpnext.manufacturing.doctype.work_order.mapper import make_stock_entry
 from erpnext.manufacturing.doctype.work_order.test_work_order import make_wo_order_test_record
+from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry
 from erpnext.manufacturing.report.process_loss_report.process_loss_report import execute
 from erpnext.stock.doctype.stock_entry import test_stock_entry
 from erpnext.tests.utils import ERPNextTestSuite
@@ -13,28 +13,14 @@ from erpnext.tests.utils import ERPNextTestSuite
 
 class TestProcessLossReport(ERPNextTestSuite):
 	def run_report(self, **extra):
-		filters = frappe._dict(
-			{
-				"company": "_Test Company",
-				"from_date": nowdate(),
-				"to_date": nowdate(),
-			}
-		)
+		filters = frappe._dict({"company": "_Test Company", "from_date": nowdate(), "to_date": nowdate()})
 		filters.update(extra)
 		return execute(filters)[1]
 
 	def find_row(self, data, work_order):
-		for row in data:
-			if row.get("name") == work_order:
-				return row
-		return None
+		return next((row for row in data if row.get("name") == work_order), None)
 
 	def make_manufactured_work_order(self, planned_qty, produced_qty, manufacture_qty=None):
-		"""Create a submitted WO and manufacture `produced_qty` of `manufacture_qty` (default `planned_qty`).
-
-		The difference is booked as process loss on the Manufacture stock entry,
-		which propagates to the work order's `process_loss_qty`.
-		"""
 		wo_order = make_wo_order_test_record(production_item="_Test FG Item", qty=planned_qty)
 
 		test_stock_entry.make_stock_entry(
@@ -62,8 +48,6 @@ class TestProcessLossReport(ERPNextTestSuite):
 			manufacture.set_posting_time = 1
 			manufacture.posting_date = posting_date
 
-		# Reduce the finished good qty below fg_completed_qty so the difference is
-		# recorded as process loss.
 		if qty != produced_qty:
 			for d in manufacture.get("items"):
 				if d.is_finished_item:
@@ -91,14 +75,6 @@ class TestProcessLossReport(ERPNextTestSuite):
 		expected_pl_value = row.process_loss_qty * (row.total_fg_value / 5)
 		self.assertAlmostEqual(row.total_pl_value, expected_pl_value)
 		self.assertGreater(row.total_pl_value, 0)
-
-	def test_process_loss_value_for_partial_production(self):
-		wo_order = self.make_manufactured_work_order(planned_qty=10, produced_qty=4, manufacture_qty=5)
-
-		row = self.find_row(self.run_report(), wo_order.name)
-		self.assertEqual(row.qty_to_manufacture, 10)
-		self.assertGreater(row.total_fg_value, 0)
-		self.assertAlmostEqual(row.total_pl_value, row.total_fg_value / 5)
 
 	def test_work_order_without_process_loss_is_not_listed(self):
 		wo_order = self.make_manufactured_work_order(planned_qty=5, produced_qty=5)
@@ -139,15 +115,26 @@ class TestProcessLossReport(ERPNextTestSuite):
 
 		self.assertIsNone(self.find_row(self.run_report(from_date=tomorrow, to_date=tomorrow), wo_order.name))
 
+	def test_process_loss_value_for_partial_production(self):
+		wo_order = self.make_manufactured_work_order(planned_qty=10, produced_qty=4, manufacture_qty=5)
+
+		row = self.find_row(self.run_report(), wo_order.name)
+		self.assertEqual(row.qty_to_manufacture, 10)
+		self.assertGreater(row.total_fg_value, 0)
+		self.assertAlmostEqual(row.total_pl_value, row.total_fg_value / 5)
+
 	def test_process_loss_value_for_intermediate_operation(self):
 		from erpnext.manufacturing.doctype.job_card.test_job_card import TestJobCard
 
 		job_card_tests = TestJobCard()
 		wo_order = job_card_tests.make_semi_fg_work_order("_Test PLR")
 		job_card = job_card_tests.get_semi_fg_job_card(wo_order, "_Test PLR Op A")
+		# Op B is scheduled on the same workstation after the work order starts.
+		# Log Op A before that start so the test does not depend on the time of day.
+		from_time = add_to_date(now_datetime(), hours=-2)
 		job_card.append(
 			"time_logs",
-			{"from_time": "2024-01-01 08:00:00", "to_time": "2024-01-01 09:00:00", "completed_qty": 3},
+			{"from_time": from_time, "to_time": add_to_date(from_time, hours=1), "completed_qty": 3},
 		)
 		job_card.pending_qty = 0
 		job_card.process_loss_qty = 2

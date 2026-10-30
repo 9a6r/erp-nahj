@@ -7,20 +7,20 @@ from unittest.mock import patch
 import frappe
 
 from erpnext.manufacturing.doctype.operation.test_operation import make_operation
-from erpnext.manufacturing.doctype.production_plan.services.work_order_quantities import (
-	ProductionPlanWorkOrderQuantities,
-)
 from erpnext.manufacturing.doctype.production_plan.test_production_plan import (
 	create_production_plan,
 	make_bom,
 )
-from erpnext.manufacturing.doctype.work_order.mapper import make_stock_entry as make_se_from_wo
+from erpnext.manufacturing.doctype.production_plan.work_order_quantities import (
+	ProductionPlanWorkOrderQuantities,
+)
 from erpnext.manufacturing.doctype.work_order.work_order import (
 	OverProductionError,
 	StockOverProductionError,
 	close_work_order,
 	stop_unstop,
 )
+from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry as make_se_from_wo
 from erpnext.manufacturing.doctype.workstation.test_workstation import make_workstation
 from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 from erpnext.stock.doctype.item.test_item import make_item
@@ -41,7 +41,9 @@ class TestProductionPlanWorkOrderQuantities(ERPNextTestSuite):
 			(self.sub_assembly, self.raw_material),
 			(self.finished_good, self.sub_assembly),
 		):
-			make_bom(item=item, raw_materials=[material], process_loss_percentage=10)
+			bom = make_bom(item=item, raw_materials=[material], do_not_save=True)
+			bom.process_loss_percentage = 10
+			bom.insert().submit()
 		frappe.db.set_single_value("Manufacturing Settings", "overproduction_percentage_for_work_order", 0)
 
 	def test_quantity_limit_on_submit(self):
@@ -251,6 +253,27 @@ class TestProductionPlanWorkOrderQuantities(ERPNextTestSuite):
 		job_card.cancel()
 		self.assertEqual(first.reload().process_loss_qty, 0)
 
+	def test_expected_loss_does_not_allow_extra_quantity(self):
+		plan = self.make_plan()
+		for field in REFERENCE_FIELDS:
+			with self.subTest(field=field):
+				work_order = self.create_work_order(plan, field)
+				self.assert_overproduction(work_order, 110)
+
+	def test_overproduction_allowance(self):
+		frappe.db.set_single_value("Manufacturing Settings", "overproduction_percentage_for_work_order", 10)
+		plan = self.make_plan()
+		for field in REFERENCE_FIELDS:
+			with self.subTest(field=field):
+				first = self.create_work_order(plan, field)
+				self.assertEqual(first.qty, 100)
+				first.submit()
+				self.assert_pending_qty(plan, field, 0)
+				second = self.copy_work_order(first)
+				self.assert_overproduction(second, 11)
+				second.qty = 10
+				second.submit()
+
 	def test_process_loss_and_overproduction_allowance(self):
 		frappe.db.set_single_value("Manufacturing Settings", "overproduction_percentage_for_work_order", 10)
 		plan = self.make_plan()
@@ -392,6 +415,15 @@ class TestProductionPlanWorkOrderQuantities(ERPNextTestSuite):
 			{"skip_transfer": 1, "source_warehouse": self.warehouse, "fg_warehouse": self.warehouse}
 		)
 		return work_order
+
+	def copy_work_order(self, work_order):
+		copy = frappe.copy_doc(work_order)
+		copy.docstatus = 0
+		copy.production_plan = work_order.production_plan
+		for field in REFERENCE_FIELDS:
+			copy.set(field, work_order.get(field))
+		copy.insert()
+		return copy
 
 	def manufacture_with_loss(self, work_order, qty=None, *, loss_qty=None, submit=True):
 		for item in work_order.required_items:

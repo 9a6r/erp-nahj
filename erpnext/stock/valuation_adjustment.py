@@ -10,9 +10,8 @@ erpnext.stock.expected_valuation says they should be.
 
 An Adjustment Entry is a Stock Reconciliation with purpose "Adjustment Entry". Its rows are the
 stock each item-warehouse should hold on the date: the serial nos at their own rates, the batches
-valued batch-wise at theirs, the stock valued in the pool layer by layer, with the batches or
-serial nos in the pool spread over the layers, and the stock of a Standard Cost item at the standard
-rate on the date. On submit, every item-warehouse is reset:
+valued batch-wise at theirs, and the stock valued in the pool layer by layer, with the batches or
+serial nos in the pool spread over the layers. On submit, every item-warehouse is reset:
 
 1. Primed: a batch valued batch-wise holds a value of its own that only leaves with its qty, so a
    batch holding value with no qty, or less than none, is brought up to one unit first. A batch
@@ -48,6 +47,10 @@ QTY_NOISE = 1e-9
 
 
 class BackdatedEntryBeforeAdjustmentError(frappe.ValidationError):
+	pass
+
+
+class ManualAdjustmentEntryError(frappe.ValidationError):
 	pass
 
 
@@ -167,14 +170,11 @@ def set_adjustment_rows(plan: AdjustmentPlan, stock, details, posting_datetime, 
 
 def get_pool_layers(stock, details, posting_datetime) -> list[tuple[float, float]]:
 	"""The [qty, rate] layers the pool should hold, oldest first: counted in in this order, they
-	give a FIFO queue or a LIFO stack back as it should be. A moving average pool is one layer, and
-	so is a Standard Cost item's stock, at the standard rate on the date."""
+	give a FIFO queue or a LIFO stack back as it should be. A moving average pool is one layer."""
 	precision = details.currency_precision
 	pool = stock.pool
 
-	if details.valuation_method == "Standard Cost":
-		layers = [(pool.qty, flt(details.get_standard_rate(getdate(posting_datetime)), precision))]
-	elif isinstance(pool, QueuePool):
+	if isinstance(pool, QueuePool):
 		layers = [(qty, flt(rate, precision)) for qty, rate in pool.layers]
 	else:
 		layers = [(pool.qty, flt(pool.rate, precision))]
@@ -200,18 +200,14 @@ def get_pooled_lots(plan: AdjustmentPlan, details, posting_datetime, exclude_vou
 	return [
 		[batch_no, qty]
 		for batch_no, qty in lots.batch_qty.items()
-		if qty >= details.qty_tolerance
-		and (details.valuation_method == "Standard Cost" or not details.is_valued_batch_wise(batch_no))
+		if qty >= details.qty_tolerance and not details.is_valued_batch_wise(batch_no)
 	]
 
 
 def values_serial_nos_in_pool(item, details) -> bool:
 	"""Whether the item's serial nos are valued with the rest of its stock rather than one by one:
-	without serial no wise valuation, or at Standard Cost."""
-	return bool(
-		item.has_serial_no
-		and (details.values_everything_in_pool or details.valuation_method == "Standard Cost")
-	)
+	without serial no wise valuation."""
+	return bool(item.has_serial_no and details.values_everything_in_pool)
 
 
 def spread_over_layers(layers, pooled_lots: list[list], details, is_serial: bool) -> list[AdjustmentRow]:
@@ -317,6 +313,7 @@ def make_adjustment_entry(
 	doc.update(
 		{
 			"purpose": ADJUSTMENT_ENTRY,
+			"is_made_from_valuation_comparison": 1,
 			"company": company,
 			"posting_date": posting_date,
 			"posting_time": posting_time,
@@ -427,6 +424,18 @@ class AdjustmentEntry:
 
 		self.doc.difference_amount = flt(
 			sum(flt(row.amount_difference) for row in self.doc.items), self.doc.precision("difference_amount")
+		)
+
+	def validate_made_from_report(self) -> None:
+		if self.doc.is_made_from_valuation_comparison:
+			return
+
+		frappe.throw(
+			_(
+				"Adjustment Entry can only be used by the system from the Stock Valuation Comparison report. Users can only select the purpose Opening Stock to add opening stock, or Stock Reconciliation to update stock quantity or valuation rate."
+			),
+			title=_("Not Allowed Purpose"),
+			exc=ManualAdjustmentEntryError,
 		)
 
 	def set_row_amounts(self, plan: AdjustmentPlan, rows) -> None:
@@ -727,12 +736,9 @@ class AdjustmentNetting:
 	"""
 
 	def __init__(self, by_lot: bool = False):
-		# cancelled ones too: a snapshot synced before the cancel still holds their entries
 		self.vouchers = set(
 			frappe.get_all(
-				"Stock Reconciliation",
-				filters={"purpose": ADJUSTMENT_ENTRY, "docstatus": ("!=", 0)},
-				pluck="name",
+				"Stock Reconciliation", filters={"purpose": ADJUSTMENT_ENTRY, "docstatus": 1}, pluck="name"
 			)
 		)
 		self.lot_changes = get_adjustment_lot_changes(self.vouchers) if by_lot and self.vouchers else {}

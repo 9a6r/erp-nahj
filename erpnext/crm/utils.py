@@ -4,9 +4,6 @@ from frappe.model.document import Document
 from frappe.utils import cstr, now, today
 from pypika import functions
 
-# pre-sales statuses an event today moves to Open; others (Converted, Lost, ...) are kept
-STATUSES_REOPENED_BY_EVENT = {"Lead": ("Lead", "Replied", "Interested"), "Opportunity": ("Replied",)}
-
 
 def disable_opportunity_creation_on_contact_us_disabled(doc, method):
 	if doc.is_disabled:
@@ -14,26 +11,36 @@ def disable_opportunity_creation_on_contact_us_disabled(doc, method):
 
 
 def update_lead_phone_numbers(contact, method):
-	"""Copy the contact's primary phone and mobile number to its Lead, including ones cleared on edit."""
-	lead = contact.get_link_for("Lead")
-	numbers = {
-		field: contact.get(field) or ""
-		for field in ("phone", "mobile_no")
-		if contact.get(field) or (not contact.is_new() and contact.has_value_changed(field))
-	}
-	if not (lead and numbers):
-		return
+	if contact.phone_nos:
+		contact_lead = contact.get_link_for("Lead")
+		if contact_lead:
+			phone = mobile_no = contact.phone_nos[0].phone
 
-	current = frappe.db.get_value("Lead", lead, list(numbers), as_dict=True)
-	if changed := {
-		field: number for field, number in numbers.items() if (current.get(field) or "") != number
-	}:
-		frappe.db.set_value("Lead", lead, changed, update_modified=False)
-		link_existing_conversations_of_lead(lead)
+			if len(contact.phone_nos) > 1:
+				# get the default phone number
+				primary_phones = [
+					phone_doc.phone for phone_doc in contact.phone_nos if phone_doc.is_primary_phone
+				]
+				if primary_phones:
+					phone = primary_phones[0]
+
+				# get the default mobile number
+				primary_mobile_nos = [
+					phone_doc.phone for phone_doc in contact.phone_nos if phone_doc.is_primary_mobile_no
+				]
+				if primary_mobile_nos:
+					mobile_no = primary_mobile_nos[0]
+
+			lead = frappe.get_doc("Lead", contact_lead)
+			numbers_changed = (lead.phone, lead.mobile_no) != (phone, mobile_no)
+			lead.db_set("phone", phone)
+			lead.db_set("mobile_no", mobile_no)
+			if numbers_changed:
+				link_existing_conversations_of_lead(lead.name)
 
 
 def link_existing_conversations_of_lead(lead: str):
-	# set_value does not run the Lead's on_update hook that links past calls
+	# db_set does not run the Lead's on_update hook that links past calls
 	from erpnext.telephony.doctype.call_log.call_log import link_existing_conversations
 
 	link_existing_conversations(frappe.get_doc("Lead", lead), "on_update")
@@ -99,7 +106,7 @@ def link_communications_with_prospect(communication, method):
 
 
 def update_modified_timestamp(communication, method):
-	if communication.reference_doctype in ("Lead", "Opportunity") and communication.reference_name:
+	if communication.reference_doctype and communication.reference_name:
 		if communication.sent_or_received == "Received" and frappe.db.get_single_value(
 			"CRM Settings", "update_timestamp_on_new_communication"
 		):
@@ -164,10 +171,9 @@ def link_open_events(ref_doctype, ref_docname, doc, ignore_permissions=False):
 
 
 @frappe.whitelist()
-def get_open_activities(ref_doctype: str, ref_docname: str):
-	# both arguments are caller supplied and nothing below checked them: the ToDo and Event rows are
-	# read with get_all, so the referenced document is what decides who may see its activities.
-	# doc= applies User Permissions; the desk only asks this for a form the caller has open.
+def get_open_activities(ref_doctype, ref_docname):
+	# both arguments are caller supplied and the ToDo/Event rows are read with get_all, so the
+	# referenced document decides who may see its activities. doc= applies User Permissions.
 	frappe.has_permission(ref_doctype, doc=ref_docname, throw=True)
 
 	tasks = get_open_todos(ref_doctype, ref_docname)
@@ -269,17 +275,12 @@ def open_leads_opportunities_based_on_todays_event():
 	data = query.run(as_dict=True)
 
 	for d in data:
-		frappe.db.set_value(
-			d.reference_doctype,
-			{"name": d.reference_docname, "status": ("in", STATUSES_REOPENED_BY_EVENT[d.reference_doctype])},
-			"status",
-			"Open",
-		)
+		frappe.db.set_value(d.reference_doctype, d.reference_docname, "status", "Open")
 
 
 class CRMNote(Document):
 	@frappe.whitelist()
-	def add_note(self, note: str):
+	def add_note(self, note):
 		self.append("notes", {"note": note, "added_by": frappe.session.user, "added_on": now()})
 		self.save()
 		notify_mentions(self.doctype, self.name, note)
@@ -293,7 +294,7 @@ class CRMNote(Document):
 		self.save()
 
 	@frappe.whitelist()
-	def delete_note(self, row_id: str):
+	def delete_note(self, row_id):
 		for d in self.notes:
 			if cstr(d.name) == row_id:
 				self.remove(d)

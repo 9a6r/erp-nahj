@@ -81,6 +81,7 @@
   "secondary_items_section",
   "secondary_items",
   "reference_section",
+  "update_consumed_material_cost_in_project",
   "project",
   "subcontracting_inward_order",
   "production_plan",
@@ -423,7 +424,7 @@
   },
   {
    "fieldname": "description",
-   "fieldtype": "Text Editor",
+   "fieldtype": "Small Text",
    "label": "Item Description",
    "read_only": 1
   },
@@ -507,6 +508,12 @@
   {
    "fieldname": "column_break_18",
    "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "update_consumed_material_cost_in_project",
+   "fieldtype": "Check",
+   "label": "Update Consumed Material Cost In Project"
   },
   {
    "description": "This is a location where raw materials are available.",
@@ -607,7 +614,7 @@
    "fieldname": "track_semi_finished_goods",
    "fieldtype": "Check",
    "hidden": 1,
-   "label": "Produce an Item at Each Operation",
+   "label": "Produce Item per Operation",
    "read_only": 1
   },
   {
@@ -762,7 +769,7 @@
  "image_field": "image",
  "is_submittable": 1,
  "links": [],
- "modified": "2026-10-20 12:00:00.000000",
+ "modified": "2026-10-25 15:30:00.000000",
  "modified_by": "Administrator",
  "module": "Manufacturing",
  "name": "Work Order",

@@ -4,8 +4,8 @@
 import frappe
 
 from erpnext.manufacturing.doctype.production_plan.test_production_plan import make_bom
-from erpnext.manufacturing.doctype.work_order.mapper import make_stock_entry, make_stock_return_entry
 from erpnext.manufacturing.doctype.work_order.test_work_order import make_wo_order_test_record
+from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry, make_stock_return_entry
 from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.stock.doctype.stock_entry import test_stock_entry
 from erpnext.stock.doctype.warehouse.test_warehouse import create_warehouse

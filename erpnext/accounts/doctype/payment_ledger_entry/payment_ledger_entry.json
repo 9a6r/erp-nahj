@@ -6,7 +6,6 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "icon": "book-open",
- "is_submittable": 1,
  "field_order": [
   "posting_date",
   "company",

@@ -2,16 +2,7 @@
 // License: GNU General Public License v3. See license.txt
 
 frappe.ui.form.on("Customer", {
-	restrict_to_companies(frm) {
-		if (!frm.doc.restrict_to_companies) {
-			frm.set_value("allowed_companies", []);
-		}
-	},
-
 	setup: function (frm) {
-		frm.set_query("allowed_companies", () => ({
-			query: "erpnext.stock.doctype.company_restriction.company_restriction.company_query",
-		}));
 		frm.custom_make_buttons = {
 			Opportunity: "Opportunity",
 			Quotation: "Quotation",
@@ -22,7 +13,7 @@ frappe.ui.form.on("Customer", {
 		frm.make_methods = {
 			Quotation: () =>
 				frappe.model.open_mapped_doc({
-					method: "erpnext.selling.doctype.customer.mapper.make_quotation",
+					method: "erpnext.selling.doctype.customer.customer.make_quotation",
 					frm: frm,
 				}),
 			"Sales Order": () =>
@@ -33,12 +24,12 @@ frappe.ui.form.on("Customer", {
 				}),
 			Opportunity: () =>
 				frappe.model.open_mapped_doc({
-					method: "erpnext.selling.doctype.customer.mapper.make_opportunity",
+					method: "erpnext.selling.doctype.customer.customer.make_opportunity",
 					frm: frm,
 				}),
 			"Payment Entry": () =>
 				frappe.model.open_mapped_doc({
-					method: "erpnext.selling.doctype.customer.mapper.make_payment_entry",
+					method: "erpnext.selling.doctype.customer.customer.make_payment_entry",
 					frm: frm,
 				}),
 			"Pricing Rule": () => frm.trigger("make_pricing_rule"),
@@ -159,7 +150,7 @@ frappe.ui.form.on("Customer", {
 		if (frappe.defaults.get_default("cust_master_name") != "Naming Series") {
 			frm.toggle_display("naming_series", false);
 		} else {
-			erpnext.toggle_naming_series(frm);
+			erpnext.toggle_naming_series();
 		}
 
 		if (!frm.doc.__islocal) {
@@ -217,16 +208,8 @@ frappe.ui.form.on("Customer", {
 				);
 			}
 
-			const loyalty = (frm.doc.__onload?.dashboard_info || []).filter((d) => d.loyalty_points);
-			loyalty.forEach((info) => {
-				const label =
-					loyalty.length > 1
-						? __("Loyalty Points ({0}): {1}", [info.company, info.loyalty_points])
-						: __("Loyalty Points: {0}", [info.loyalty_points]);
-				frm.dashboard.add_indicator(label, "blue");
-			});
-
-			frm.trigger("render_items_tab");
+			// indicator
+			erpnext.utils.set_party_dashboard_indicators(frm);
 		} else {
 			frappe.contacts.clear_address_and_contact(frm);
 		}
@@ -256,32 +239,6 @@ frappe.ui.form.on("Customer", {
 	validate: function (frm) {
 		if (frm.doc.lead_name) frappe.model.clear_doc("Lead", frm.doc.lead_name);
 	},
-
-	render_items_tab(frm) {
-		frm.party_items ??= new erpnext.PartyItems(frm, {
-			party_type: "Customer",
-			order_doctype: "Sales Order",
-			labels: {
-				frequent_description: __("The items this customer orders most often."),
-				frequent_empty: __("No sales orders from this customer yet."),
-				orders_title: __("Submitted sales orders that include this item"),
-				section_title: __("Customer Specific Items"),
-				add_title: __("Add Customer Specific Item"),
-				allowed_description: __("When selling to this customer, only these items can be selected."),
-				allowed_empty: __("No limits set. Every item can be sold to this customer."),
-				first_rule_note: __(
-					"After this, only items in Customer Specific Items can be sold to this customer."
-				),
-				item_hint: __("Items this customer orders most often are listed first."),
-			},
-		});
-		frm.party_items.refresh();
-	},
-
-	on_tab_change(frm) {
-		frm.party_items?.show();
-	},
-
 	get_customer_group_details: function (frm) {
 		frappe.call({
 			method: "get_customer_group_details",
@@ -322,7 +279,7 @@ frappe.ui.form.on("Customer", {
 					error: function () {
 						dialog.hide();
 						frappe.msgprint({
-							message: __("Linking to Supplier failed. Please try again."),
+							message: __("Linking to Supplier Failed. Please try again."),
 							title: __("Linking Failed"),
 							indicator: "red",
 						});

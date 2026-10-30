@@ -4,8 +4,8 @@
 import frappe
 
 from erpnext.manufacturing.doctype.production_plan.test_production_plan import create_production_plan
-from erpnext.manufacturing.doctype.work_order.mapper import make_stock_entry as make_se_from_wo
 from erpnext.manufacturing.doctype.work_order.test_work_order import make_wo_order_test_record
+from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry as make_se_from_wo
 from erpnext.manufacturing.report.production_plan_summary.production_plan_summary import execute
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 from erpnext.tests.utils import ERPNextTestSuite
@@ -149,23 +149,15 @@ class TestProductionPlanSummary(ERPNextTestSuite):
 
 		data = self.run_report(plan.name)
 
+		self.assertEqual(
+			[
+				row.get("pending_qty")
+				for row in data
+				if row.get("item_code") == "_Test FG Item" and row.get("document_type") == "Work Order"
+			],
+			[0, 0],
+		)
 		self.assertEqual(self.get_summary_row(data, "_Test FG Item").get("pending_qty"), 0)
-
-	def test_replacement_work_order_keeps_lost_qty_pending(self):
-		plan = self.make_plan(planned_qty=2)
-		first = self.make_submitted_work_order(plan, qty=2)
-		self.stock_required_materials(first)
-		se = frappe.get_doc(make_se_from_wo(first.name, "Manufacture", 2))
-		for row in se.items:
-			if row.is_finished_item:
-				row.qty = 1
-		se.submit()
-
-		self.make_submitted_work_order(plan, qty=1)
-
-		data = self.run_report(plan.name)
-
-		self.assertEqual(self.get_summary_row(data, "_Test FG Item").get("pending_qty"), 1)
 
 	def test_split_work_orders_with_lost_qty_leave_nothing_pending(self):
 		plan = self.make_plan(planned_qty=4)
@@ -185,17 +177,28 @@ class TestProductionPlanSummary(ERPNextTestSuite):
 
 		self.assertEqual(self.get_summary_row(data, "_Test FG Item").get("pending_qty"), 0)
 
+	def test_replacement_work_order_keeps_lost_qty_pending(self):
+		plan = self.make_plan(planned_qty=2)
+		first = self.make_submitted_work_order(plan, qty=2)
+		self.stock_required_materials(first)
+		se = frappe.get_doc(make_se_from_wo(first.name, "Manufacture", 2))
+		for row in se.items:
+			if row.is_finished_item:
+				row.qty = 1
+		se.submit()
+
+		self.make_submitted_work_order(plan, qty=1)
+
+		data = self.run_report(plan.name)
+
+		self.assertEqual(self.get_summary_row(data, "_Test FG Item").get("pending_qty"), 1)
+
 	def test_pending_qty_is_rounded_to_the_qty_precision(self):
 		from erpnext.manufacturing.report.production_plan_summary.production_plan_summary import (
-			get_document_row,
+			get_pending_qty,
 		)
 
-		row = get_document_row(
-			frappe._dict(qty=11.4, produced_qty=11.2, process_loss_qty=0.2, item_code="_Test FG Item"),
-			indent=1,
-		)
-
-		self.assertEqual(row["pending_qty"], 0)
+		self.assertEqual(get_pending_qty(11.4, 11.2, 0.2), 0)
 
 	def test_summary_scoped_to_its_own_plan(self):
 		"""Each plan's report only reports its own work order documents."""

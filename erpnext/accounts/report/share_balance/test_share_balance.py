@@ -12,7 +12,7 @@ COMPANY = "_Test Company"
 class TestShareBalanceReport(ERPNextTestSuite):
 	def setUp(self):
 		self.share_type = create_share_type("_Test Share Balance Equity")
-		self.shareholder = get_shareholder("Iron Man", COMPANY)
+		self.shareholder = create_shareholder("_Test Share Balance Holder", COMPANY)
 
 	def test_date_filter_is_mandatory(self):
 		self.assertRaises(frappe.ValidationError, execute, frappe._dict({"shareholder": self.shareholder}))
@@ -104,7 +104,7 @@ class TestShareBalanceReport(ERPNextTestSuite):
 		self.assertEqual(row[4], 3000)
 
 	def test_balance_reduces_after_transfer_out(self):
-		other_holder = get_shareholder("Thor", COMPANY)
+		other_holder = create_shareholder("_Test Share Balance Holder 2", COMPANY)
 		create_share_transfer(
 			transfer_type="Issue",
 			to_shareholder=self.shareholder,
@@ -209,7 +209,7 @@ class TestShareBalanceReport(ERPNextTestSuite):
 		self.assertEqual(row[2:], [60, 10, 600])
 
 	def test_shares_transferred_out_keep_their_received_rate(self):
-		other_holder = get_shareholder("Thor", COMPANY)
+		other_holder = create_shareholder("_Test Share Balance Holder 2", COMPANY)
 		create_share_transfer(
 			transfer_type="Issue",
 			to_shareholder=self.shareholder,
@@ -249,7 +249,7 @@ class TestShareBalanceReport(ERPNextTestSuite):
 		create_share_transfer(
 			transfer_type="Transfer",
 			from_shareholder=self.shareholder,
-			to_shareholder=get_shareholder("Thor", COMPANY),
+			to_shareholder=create_shareholder("_Test Share Balance Holder 2", COMPANY),
 			share_type=self.share_type,
 			from_no=1,
 			to_no=40,
@@ -274,7 +274,7 @@ class TestShareBalanceReport(ERPNextTestSuite):
 		create_share_transfer(
 			transfer_type="Transfer",
 			from_shareholder=self.shareholder,
-			to_shareholder=get_shareholder("Thor", COMPANY),
+			to_shareholder=create_shareholder("_Test Share Balance Holder 2", COMPANY),
 			share_type=self.share_type,
 			from_no=1,
 			to_no=40,
@@ -287,7 +287,7 @@ class TestShareBalanceReport(ERPNextTestSuite):
 		self.assertEqual(self.get_row(date="2026-06-15")[2:], [60, 10, 600])
 
 	def test_draft_submitted_after_its_shares_come_back_moves_them_out(self):
-		other_holder = get_shareholder("Hulk", COMPANY)
+		other_holder = create_shareholder("_Test Share Balance Holder 3", COMPANY)
 		transfer = dict(share_type=self.share_type, from_no=1, to_no=40, no_of_shares=40, rate=10)
 		create_share_transfer(
 			transfer_type="Issue",
@@ -303,7 +303,7 @@ class TestShareBalanceReport(ERPNextTestSuite):
 			submit=False,
 			transfer_type="Transfer",
 			from_shareholder=self.shareholder,
-			to_shareholder=get_shareholder("Thor", COMPANY),
+			to_shareholder=create_shareholder("_Test Share Balance Holder 2", COMPANY),
 			date="2026-06-10",
 			**transfer,
 		)
@@ -383,8 +383,9 @@ def create_share_type(title):
 	return title
 
 
-def get_shareholder(title, company):
-	return frappe.db.get_value("Shareholder", {"title": title, "company": company}, "name")
+def create_shareholder(title, company):
+	shareholder = frappe.get_doc({"doctype": "Shareholder", "title": title, "company": company}).insert()
+	return shareholder.name
 
 
 def create_share_transfer(submit=True, **kwargs):

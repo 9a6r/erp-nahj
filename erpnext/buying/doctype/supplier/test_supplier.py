@@ -3,6 +3,7 @@
 
 
 import frappe
+from frappe.tests import UnitTestCase
 from frappe.utils import nowdate
 
 from erpnext.accounts.party import get_due_date
@@ -151,7 +152,7 @@ class TestSupplier(ERPNextTestSuite):
 		create_supplier(party_account="Creditors - _TC")
 
 	def test_hold_all_blocks_receipts_and_quotations(self):
-		from erpnext.stock.doctype.purchase_receipt.mapper import make_purchase_return
+		from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_return
 		from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
 
 		supplier = create_supplier()
@@ -242,7 +243,7 @@ class TestSupplier(ERPNextTestSuite):
 	def test_supplier_country(self):
 		# Test that country field exists in Supplier DocType
 		supplier = frappe.get_doc("Supplier", "_Test Supplier with Country")
-		self.assertIn("country", supplier.as_dict())
+		self.assertTrue("country" in supplier.as_dict())
 
 		# Test if test supplier field record is 'Greece'
 		self.assertEqual(supplier.country, "Greece")

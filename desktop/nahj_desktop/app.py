@@ -156,6 +156,15 @@ class Nahj(Gtk.Application):
         manage.connect('clicked', self.show_server_settings)
         card.append(manage)
         if self.web:
+            integrations = Gtk.Button(label=self.t('تكاملات المؤسسة والخدمات الخارجية', 'Organization integrations and external services'))
+            integrations.connect('clicked', lambda *_: self.navigate('/desk/integrations'))
+            card.append(integrations)
+            integration_note = Gtk.Label(label=self.t(
+                'تُضبط الحسابات ومفاتيح الخدمات على خادم المؤسسة وفق صلاحيات حسابك.',
+                'Configure service accounts and credentials on your organization server, subject to your account permissions.'),
+                wrap=True, max_width_chars=42)
+            integration_note.add_css_class('subtitle')
+            card.append(integration_note)
             resume = Gtk.Button(label=self.t('العودة إلى العمل', 'Return to workspace'))
             resume.add_css_class('flat')
             resume.connect('clicked', lambda *_: self.show_web())

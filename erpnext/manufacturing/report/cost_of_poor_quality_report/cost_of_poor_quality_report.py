@@ -10,11 +10,10 @@ from frappe.utils import flt, get_datetime
 from pypika.terms import ExistsCriterion
 
 from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
-from erpnext.stock.report.utils import prepare_serial_batch_report
 
 
 def execute(filters=None):
-	return prepare_serial_batch_report(get_columns(filters), get_data(filters))
+	return get_columns(filters), get_data(filters)
 
 
 def get_data(report_filters):
@@ -73,7 +72,7 @@ def append_filters(query, report_filters, operations, job_card):
 	):
 		if report_filters.get(field):
 			if field == "serial_no":
-				query = filter_by_serial_no(query, job_card, report_filters.get(field))
+				query = query.where(Locate(report_filters.get(field), job_card[field]) > 0)
 			elif field == "operation":
 				query = query.where(job_card[field].isin(operations))
 			else:
@@ -130,16 +129,7 @@ def get_minutes_in_range(log, start, end):
 	return flt(log.time_in_mins) * max(overlap, 0) / duration
 
 
-def filter_by_serial_no(query, job_card, serial_id):
-	serial = frappe.db.get_value("Serial No", serial_id, ["serial_no", "item_code"], as_dict=True)
-	serial = serial or frappe._dict()
-	return query.where(Locate(serial.serial_no or "", job_card.serial_no) > 0).where(
-		job_card.production_item == serial.item_code
-	)
-
-
-def keep_exact_serial_no(data, serial_id):
-	serial_no = frappe.db.get_value("Serial No", serial_id, "serial_no")
+def keep_exact_serial_no(data, serial_no):
 	return [row for row in data if serial_no in get_serial_nos(row.serial_no)]
 
 
@@ -175,25 +165,13 @@ def get_columns(filters):
 			"width": "100",
 		},
 		{"label": _("Serial No"), "fieldtype": "Data", "fieldname": "serial_no", "width": "100"},
-		{
-			"label": _("Batch No"),
-			"fieldtype": "Link",
-			"fieldname": "batch_no",
-			"options": "Batch",
-			"width": "100",
-		},
+		{"label": _("Batch No"), "fieldtype": "Data", "fieldname": "batch_no", "width": "100"},
 		{
 			"label": _("Workstation"),
 			"fieldtype": "Link",
 			"fieldname": "workstation",
 			"options": "Workstation",
 			"width": "100",
-		},
-		{
-			"label": _("Hour Rate"),
-			"fieldtype": "Currency",
-			"fieldname": "hour_rate",
-			"width": "120",
 		},
 		{
 			"label": _("Operating Cost"),

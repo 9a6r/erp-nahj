@@ -5,7 +5,7 @@
 import frappe
 from frappe import _
 from frappe.query_builder import Case
-from frappe.query_builder.functions import Coalesce, Max, Sum
+from frappe.query_builder.functions import Coalesce, Sum
 
 Filters = frappe._dict
 Row = frappe._dict
@@ -33,15 +33,13 @@ def get_data(filters: Filters) -> Data:
 		.left_join(finished_items)
 		.on(finished_items.stock_entry == se.name)
 		.select(
-			# grouped by se.work_order (== wo.name); the work-order columns are constant per group ->
-			# Max() keeps the GROUP BY valid on postgres with the same value.
-			Max(wo.name).as_("name"),
-			Max(wo.status).as_("status"),
-			Max(wo.production_item).as_("production_item"),
+			wo.name,
+			wo.status,
+			wo.production_item,
 			Coalesce(Sum(finished_items.produced_qty), 0).as_("produced_qty"),
 			Coalesce(Sum(finished_items.output_qty), 0).as_("output_qty"),
 			Sum(se.process_loss_qty).as_("process_loss_qty"),
-			Max(wo.qty).as_("qty_to_manufacture"),
+			wo.qty.as_("qty_to_manufacture"),
 			Sum(se.total_incoming_value).as_("total_fg_value"),
 			Sum(se.total_outgoing_value).as_("total_rm_value"),
 		)

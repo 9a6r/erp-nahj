@@ -5,7 +5,7 @@ import frappe
 from frappe.utils import flt
 
 from erpnext.stock.doctype.item.test_item import make_item
-from erpnext.stock.doctype.purchase_receipt.mapper import make_purchase_return
+from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_return
 from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 from erpnext.stock.doctype.stock_reconciliation.test_stock_reconciliation import (

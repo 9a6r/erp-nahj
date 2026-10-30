@@ -14,7 +14,10 @@ def execute(filters=None):
 
 def get_data(filters):
 	data = []
-	depreciation_accounts = frappe.get_all("Account", filters={"account_type": "Depreciation"}, pluck="name")
+	depreciation_accounts = frappe.db.sql_list(
+		""" select name from tabAccount
+		where ifnull(account_type, '') = 'Depreciation' """
+	)
 
 	filters_data = [
 		["company", "=", filters.get("company")],

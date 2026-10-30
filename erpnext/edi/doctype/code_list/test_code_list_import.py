@@ -1,7 +1,7 @@
 # Copyright (c) 2024, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
 
-from contextlib import contextmanager
+import re
 from unittest.mock import Mock, patch
 
 import frappe
@@ -52,9 +52,12 @@ SAMPLE_GENERICODE = b"""<?xml version="1.0" encoding="UTF-8"?>
 
 class TestCodeListImport(ERPNextTestSuite):
 	def test_import_genericode_rejects_remote_file_url(self):
-		with self.upload_context(
-			file_name="trusted.xml", file_url="https://example.com/codelists/trusted.xml"
-		), patch("erpnext.edi.doctype.code_list.code_list_import.requests.get") as mock_get:
+		self.set_upload_context(
+			file_name="trusted.xml",
+			file_url="https://example.com/codelists/trusted.xml",
+		)
+
+		with patch("erpnext.edi.doctype.code_list.code_list_import.requests.get") as mock_get:
 			with self.assertRaisesRegex(
 				frappe.ValidationError, "Importing Code Lists from remote URLs is not allowed."
 			):
@@ -63,9 +66,12 @@ class TestCodeListImport(ERPNextTestSuite):
 		mock_get.assert_not_called()
 
 	def test_import_genericode_rejects_file_scheme_url(self):
-		with self.upload_context(file_name="trusted.xml", file_url="file:///tmp/trusted.xml"), patch(
-			"erpnext.edi.doctype.code_list.code_list_import.requests.get"
-		) as mock_get:
+		self.set_upload_context(
+			file_name="trusted.xml",
+			file_url="file:///tmp/trusted.xml",
+		)
+
+		with patch("erpnext.edi.doctype.code_list.code_list_import.requests.get") as mock_get:
 			with self.assertRaisesRegex(
 				frappe.ValidationError, "Importing Code Lists from remote URLs is not allowed."
 			):
@@ -105,54 +111,57 @@ class TestCodeListImport(ERPNextTestSuite):
 				code_list_import.import_genericode_from_url("https://example.com/codelists/trusted.xml")
 
 	def test_import_genericode_from_uploaded_file_returns_metadata(self):
-		with self.upload_context(content=SAMPLE_GENERICODE, file_name="uploaded_genericode.xml"):
-			import_result = code_list_import.import_genericode()
+		self.set_upload_context(content=SAMPLE_GENERICODE, file_name="uploaded_genericode.xml")
 
-			self.assert_import_response(import_result)
+		import_result = code_list_import.import_genericode()
 
-			file_doc = frappe.get_doc("File", import_result["file"])
-			self.assertEqual(file_doc.get_content(encodings=()), SAMPLE_GENERICODE)
+		self.assert_import_response(import_result)
+
+		file_doc = frappe.get_doc("File", import_result["file"])
+		self.assertEqual(file_doc.get_content(encodings=()), SAMPLE_GENERICODE)
 
 	def test_uploaded_file_is_saved_under_a_plain_name(self):
 		cases = (("../../sub/list.xml", "_.._sub_list.xml"), ("..", "genericode.xml"))
 		for index, (file_name, expected) in enumerate(cases):
 			frappe.db.delete("Code List", "test-code-list-v1")
 			content = SAMPLE_GENERICODE + f"<!-- {index} {frappe.generate_hash()} -->".encode()
-			with self.upload_context(content=content, file_name=file_name):
-				import_result = code_list_import.import_genericode()
+			self.set_upload_context(content=content, file_name=file_name)
+			import_result = code_list_import.import_genericode()
 
 			file_doc = frappe.get_doc("File", import_result["file"])
-			self.assertEqual(file_doc.file_name, expected)
-			self.assertEqual(file_doc.file_url, f"/private/files/{expected}")
+			stem, extension = expected.rsplit(".", 1)
+			self.assertRegex(file_doc.file_name, rf"^{re.escape(stem)}(\w{{6}})?\.{extension}$")
+			self.assertEqual(file_doc.file_url, f"/private/files/{file_doc.file_name}")
 
 	def test_process_genericode_import_reads_file_doc_content(self):
-		with self.upload_context(content=SAMPLE_GENERICODE, file_name="uploaded_genericode.xml"):
-			import_result = code_list_import.import_genericode()
-			count = code_list_import.process_genericode_import(
-				code_list_name=import_result["code_list"],
-				file_name=import_result["file"],
-				code_column="code",
-				title_column="name",
-			)
+		self.set_upload_context(content=SAMPLE_GENERICODE, file_name="uploaded_genericode.xml")
 
-			self.assertEqual(count, 3)
-			self.assertEqual(frappe.db.count("Common Code", {"code_list": import_result["code_list"]}), 3)
+		import_result = code_list_import.import_genericode()
+		count = code_list_import.process_genericode_import(
+			code_list_name=import_result["code_list"],
+			file_name=import_result["file"],
+			code_column="code",
+			title_column="name",
+		)
 
-			code_list_import.process_genericode_import(
-				code_list_name=import_result["code_list"],
-				file_name=import_result["file"],
-				code_column="code",
-				title_column="name",
-			)
-			self.assertEqual(frappe.db.count("Common Code", {"code_list": import_result["code_list"]}), 3)
-			self.assertEqual(
-				frappe.db.get_value(
-					"Common Code",
-					{"code_list": import_result["code_list"], "common_code": "A"},
-					"title",
-				),
-				"Alpha",
-			)
+		self.assertEqual(count, 3)
+		self.assertEqual(frappe.db.count("Common Code", {"code_list": import_result["code_list"]}), 3)
+
+		code_list_import.process_genericode_import(
+			code_list_name=import_result["code_list"],
+			file_name=import_result["file"],
+			code_column="code",
+			title_column="name",
+		)
+		self.assertEqual(frappe.db.count("Common Code", {"code_list": import_result["code_list"]}), 3)
+		self.assertEqual(
+			frappe.db.get_value(
+				"Common Code",
+				{"code_list": import_result["code_list"], "common_code": "A"},
+				"title",
+			),
+			"Alpha",
+		)
 
 	def test_import_genericode_from_local_file_url(self):
 		source_file = frappe.get_doc(
@@ -163,25 +172,26 @@ class TestCodeListImport(ERPNextTestSuite):
 				"is_private": 1,
 			}
 		).insert()
-		with self.upload_context(file_name=source_file.file_name, file_url=source_file.file_url):
-			import_result = code_list_import.import_genericode()
+		self.set_upload_context(file_name=source_file.file_name, file_url=source_file.file_url)
 
-			self.assert_import_response(import_result)
+		import_result = code_list_import.import_genericode()
+
+		self.assert_import_response(import_result)
 
 	def test_import_genericode_refuses_files_without_required_elements(self):
 		for element in (
 			b"<ShortName>Test Code List</ShortName>",
 			b"<CanonicalVersionUri>test-code-list-v1</CanonicalVersionUri>",
 		):
-			with self.upload_context(content=SAMPLE_GENERICODE.replace(element, b"")):
-				self.assertRaises(frappe.ValidationError, code_list_import.import_genericode)
+			self.set_upload_context(content=SAMPLE_GENERICODE.replace(element, b""))
+			self.assertRaises(frappe.ValidationError, code_list_import.import_genericode)
 
 	def test_process_genericode_import_filters_on_values_with_special_characters(self):
 		content = SAMPLE_GENERICODE.replace(b"Group 1", b"R&amp;D").replace(
 			b"Group 2", "Côte d'Ivoire".encode()
 		)
-		with self.upload_context(content=content):
-			import_result = code_list_import.import_genericode()
+		self.set_upload_context(content=content)
+		import_result = code_list_import.import_genericode()
 
 		def import_with(category: str) -> int:
 			return code_list_import.process_genericode_import(
@@ -201,8 +211,8 @@ class TestCodeListImport(ERPNextTestSuite):
 		content = SAMPLE_GENERICODE.replace(
 			b'<Value ColumnRef="code"><SimpleValue>B</SimpleValue></Value>', b""
 		)
-		with self.upload_context(content=content):
-			import_result = code_list_import.import_genericode()
+		self.set_upload_context(content=content)
+		import_result = code_list_import.import_genericode()
 
 		with self.assertRaisesRegex(frappe.ValidationError, "Row 2"):
 			code_list_import.process_genericode_import(
@@ -216,8 +226,8 @@ class TestCodeListImport(ERPNextTestSuite):
 		content = SAMPLE_GENERICODE.replace(
 			b'<Value ColumnRef="code"><SimpleValue>C</SimpleValue></Value>', b""
 		)
-		with self.upload_context(content=content):
-			import_result = code_list_import.import_genericode()
+		self.set_upload_context(content=content)
+		import_result = code_list_import.import_genericode()
 
 		with self.assertRaisesRegex(frappe.ValidationError, "Row 3"):
 			code_list_import.process_genericode_import(
@@ -230,8 +240,8 @@ class TestCodeListImport(ERPNextTestSuite):
 
 	def test_process_genericode_import_keeps_codes_that_differ_in_case(self):
 		content = SAMPLE_GENERICODE.replace(b"<SimpleValue>B</SimpleValue>", b"<SimpleValue>a</SimpleValue>")
-		with self.upload_context(content=content):
-			import_result = code_list_import.import_genericode()
+		self.set_upload_context(content=content)
+		import_result = code_list_import.import_genericode()
 
 		code_list_import.process_genericode_import(
 			code_list_name=import_result["code_list"],
@@ -245,33 +255,26 @@ class TestCodeListImport(ERPNextTestSuite):
 		)
 		self.assertCountEqual(codes, [("A", "Alpha"), ("a", "Beta"), ("C", "Gamma")])
 
-	@staticmethod
-	@contextmanager
-	def upload_context(
+	def set_upload_context(
+		self,
 		content: bytes | None = None,
 		file_name: str = "genericode.xml",
 		file_url: str | None = None,
 		docname: str | None = None,
 	):
-		missing = object()
-		attrs = {
-			"form_dict": frappe._dict(doctype="Code List", docname=docname),
-			"uploaded_file": content,
-			"uploaded_file_url": file_url,
-			"uploaded_filename": file_name,
-		}
-		originals = {key: getattr(frappe.local, key, missing) for key in attrs}
-		for key, value in attrs.items():
-			setattr(frappe.local, key, value)
+		attrs = ("form_dict", "uploaded_file", "uploaded_file_url", "uploaded_filename")
+		originals = {attr: getattr(frappe.local, attr, None) for attr in attrs}
 
-		try:
-			yield
-		finally:
-			for key, value in originals.items():
-				if value is missing:
-					delattr(frappe.local, key)
-				else:
-					setattr(frappe.local, key, value)
+		frappe.local.form_dict = frappe._dict(doctype="Code List", docname=docname)
+		frappe.local.uploaded_file = content
+		frappe.local.uploaded_file_url = file_url
+		frappe.local.uploaded_filename = file_name
+
+		def restore():
+			for attr, value in originals.items():
+				setattr(frappe.local, attr, value)
+
+		self.addCleanup(restore)
 
 	def assert_import_response(self, import_result):
 		self.assertEqual(

@@ -12,6 +12,7 @@ from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_orde
 from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 from erpnext.stock.doctype.stock_reservation_entry.test_stock_reservation_entry import (
+	cancel_all_stock_reservation_entries,
 	create_items,
 	create_material_receipt,
 )

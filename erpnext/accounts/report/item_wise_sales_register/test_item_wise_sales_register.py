@@ -139,7 +139,7 @@ class TestItemWiseSalesRegister(ERPNextTestSuite, AccountsTestMixin):
 		self.assertEqual(self.get_grand_total_row(data)["percent_gt"], 100)
 
 	def test_grouped_report_with_zero_grand_total(self):
-		from erpnext.accounts.doctype.sales_invoice.mapper import make_sales_return
+		from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
 
 		self.customer = "_Test Customer 2"
 		make_sales_return(self.create_sales_invoice().name).submit()
@@ -206,7 +206,7 @@ class TestItemWiseSalesRegister(ERPNextTestSuite, AccountsTestMixin):
 			self.assertEqual(fieldnames, {account: all_fieldnames[account]})
 
 	def test_delivery_notes_for_invoice_made_from_order(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_delivery_note, make_sales_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note, make_sales_invoice
 		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 
 		make_stock_entry(item_code=self.item, target="_Test Warehouse - _TC", qty=2, rate=100)
@@ -232,7 +232,7 @@ class TestItemWiseSalesRegister(ERPNextTestSuite, AccountsTestMixin):
 		self.assertEqual((row["delivery_doctype"], row["delivery_note"]), ("Sales Invoice", si.name))
 
 	def test_update_stock_invoice_for_partly_delivered_order(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_delivery_note, make_sales_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note, make_sales_invoice
 		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 
 		make_stock_entry(item_code=self.item, target="_Test Warehouse - _TC", qty=2, rate=100)

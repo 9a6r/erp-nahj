@@ -8,11 +8,9 @@ from frappe import _
 from frappe.utils import flt
 from frappe.utils.nestedset import get_descendants_of
 
-from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_companies_condition
 from erpnext.stock.report.stock_ledger_invariant_check.stock_ledger_invariant_check import (
 	maintains_fifo_queue,
 )
-from erpnext.stock.report.utils import prepare_serial_batch_report
 from erpnext.stock.utils import get_valuation_method, is_serial_no_wise_valuation_disabled
 
 SLE_FIELDS = (
@@ -39,7 +37,7 @@ SLE_FIELDS = (
 def execute(filters=None):
 	columns = get_columns()
 	data = get_data(filters)
-	return prepare_serial_batch_report(columns, data)
+	return columns, data
 
 
 def get_data(filters):
@@ -74,15 +72,10 @@ def get_stock_ledger_entries(filters):
 	elif filters.to_date:
 		sle_filters["posting_date"] = ("<=", filters.to_date)
 
-	ledger_filters = [sle_filters]
-	sle = frappe.qb.DocType("Stock Ledger Entry")
-	if condition := get_allowed_companies_condition(sle.company, "Stock Ledger Entry"):
-		ledger_filters.append(condition)
-
 	return frappe.get_all(
 		"Stock Ledger Entry",
 		fields=SLE_FIELDS,
-		filters=ledger_filters,
+		filters=sle_filters,
 		order_by="posting_datetime, creation",
 	)
 

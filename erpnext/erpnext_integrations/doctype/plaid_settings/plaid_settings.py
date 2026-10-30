@@ -40,8 +40,8 @@ class PlaidSettings(Document):
 
 @frappe.whitelist(methods=["POST"])
 def get_plaid_configuration():
-	# Returns plaid_env and a freshly minted Plaid link_token. Plaid Settings is a System-Manager-only
-	# single doctype and every caller reaches this from its own form, so that is the boundary.
+	# Plaid Settings is a System-Manager-only single doctype and every caller reaches this from its
+	# own form, so that is the boundary.
 	frappe.has_permission("Plaid Settings", throw=True)
 
 	if frappe.db.get_single_value("Plaid Settings", "enabled"):
@@ -56,7 +56,7 @@ def get_plaid_configuration():
 
 
 @frappe.whitelist(methods=["POST"])
-def add_institution(token: str, response: str | dict):
+def add_institution(token, response):
 	frappe.has_permission("Plaid Settings", throw=True)
 
 	response = frappe.parse_json(response)
@@ -76,7 +76,6 @@ def add_institution(token: str, response: str | dict):
 			)
 			bank.insert()
 		except Exception:
-			frappe.db.rollback()
 			frappe.log_error("Plaid Link Error")
 	else:
 		bank = frappe.get_doc("Bank", response["institution"]["name"])
@@ -87,7 +86,7 @@ def add_institution(token: str, response: str | dict):
 
 
 @frappe.whitelist(methods=["POST"])
-def add_bank_accounts(response: str | dict, bank: str | dict, company: str):
+def add_bank_accounts(response, bank, company):
 	frappe.has_permission("Plaid Settings", throw=True)
 
 	response = frappe.parse_json(response)
@@ -118,8 +117,6 @@ def add_bank_accounts(response: str | dict, bank: str | dict, company: str):
 
 		if not existing_bank_account:
 			try:
-				# savepoint so a failed insert doesn't poison the transaction on postgres
-				frappe.db.savepoint("plaid_bank_account")
 				gl_account = frappe.get_doc(
 					{
 						"doctype": "Account",
@@ -149,14 +146,12 @@ def add_bank_accounts(response: str | dict, bank: str | dict, company: str):
 
 				result.append(new_account.name)
 			except frappe.UniqueValidationError:
-				frappe.db.rollback(save_point="plaid_bank_account")  # preserve transaction in postgres
 				frappe.msgprint(
 					_("Bank account {0} already exists and could not be created again").format(
 						account["name"]
 					)
 				)
 			except Exception:
-				frappe.db.rollback(save_point="plaid_bank_account")  # preserve transaction in postgres
 				frappe.log_error("Plaid Link Error")
 				frappe.throw(
 					_("There was an error creating Bank Account while linking with Plaid."),
@@ -164,7 +159,6 @@ def add_bank_accounts(response: str | dict, bank: str | dict, company: str):
 				)
 
 		else:
-			frappe.db.savepoint("plaid_update_account")
 			try:
 				existing_account = frappe.get_doc("Bank Account", existing_bank_account)
 				existing_account.update(
@@ -180,10 +174,9 @@ def add_bank_accounts(response: str | dict, bank: str | dict, company: str):
 				existing_account.save()
 				result.append(existing_bank_account)
 			except Exception:
-				frappe.db.rollback(save_point="plaid_update_account")
 				frappe.log_error("Plaid Link Error")
 				frappe.throw(
-					_("There was an error updating Bank Account {0} while linking with Plaid.").format(
+					_("There was an error updating Bank Account {} while linking with Plaid.").format(
 						existing_bank_account
 					),
 					title=_("Plaid Link Failed"),
@@ -305,7 +298,7 @@ def new_bank_transaction(transaction):
 	if transaction["category"]:
 		try:
 			tags += transaction["category"]
-			tags += [f'Plaid Cat. {transaction["category_id"]}']
+			tags += [f"Plaid Cat. {transaction['category_id']}"]
 		except KeyError:
 			pass
 
@@ -372,9 +365,9 @@ def enqueue_synchronization():
 
 
 @frappe.whitelist(methods=["POST"])
-def get_link_token_for_update(access_token: str):
-	# `access_token` is caller-supplied and is used to mint a link token at Plaid, so this creates
-	# state at the provider even though it writes nothing here.
+def get_link_token_for_update(access_token):
+	# `access_token` is caller-supplied and mints a link token at Plaid, so this creates state at the
+	# provider even though it writes nothing here.
 	frappe.has_permission("Plaid Settings", throw=True)
 
 	plaid = PlaidConnector(access_token)
@@ -396,7 +389,7 @@ def get_company(bank_account_name):
 
 
 @frappe.whitelist(methods=["POST"])
-def update_bank_account_ids(response: str | dict):
+def update_bank_account_ids(response):
 	frappe.has_permission("Plaid Settings", throw=True)
 
 	data = frappe.parse_json(response)

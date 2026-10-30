@@ -94,7 +94,7 @@
  "idx": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2026-08-21 23:11:41.697649",
+ "modified": "2026-09-16 11:42:07.000000",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Department",
@@ -158,7 +158,6 @@
    "select": 1
   }
  ],
- "row_format": "Dynamic",
  "show_name_in_global_search": 1,
  "sort_field": "creation",
  "sort_order": "ASC",

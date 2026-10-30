@@ -1,3 +1,5 @@
+import unittest
+
 import frappe
 
 from erpnext.accounts.doctype.accounts_settings.accounts_settings import get_posting_date_confirmation

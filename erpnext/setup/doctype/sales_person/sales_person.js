@@ -32,19 +32,6 @@ frappe.ui.form.on("Sales Person", {
 			};
 		};
 
-		frm.set_query("parent_sales_person", function (doc) {
-			return {
-				filters: [
-					["Sales Person", "is_group", "=", 1],
-					["Sales Person", "name", "!=", doc.sales_person_name],
-				],
-			};
-		});
-
-		frm.set_query("employee", function () {
-			return { query: "erpnext.controllers.queries.employee_query" };
-		});
-
 		frm.make_methods = {
 			"Sales Order": () =>
 				frappe
@@ -62,3 +49,17 @@ frappe.ui.form.on("Sales Person", {
 		}
 	},
 });
+
+//get query select sales person
+cur_frm.fields_dict["parent_sales_person"].get_query = function (doc, cdt, cdn) {
+	return {
+		filters: [
+			["Sales Person", "is_group", "=", 1],
+			["Sales Person", "name", "!=", doc.sales_person_name],
+		],
+	};
+};
+
+cur_frm.fields_dict.employee.get_query = function (doc, cdt, cdn) {
+	return { query: "erpnext.controllers.queries.employee_query" };
+};

@@ -3,15 +3,15 @@
 
 import frappe
 
-from erpnext.accounts.doctype.purchase_invoice.mapper import make_debit_note
+from erpnext.accounts.doctype.purchase_invoice.purchase_invoice import make_debit_note
 from erpnext.accounts.report.non_billed_report import BILLING_LINKS
 from erpnext.accounts.report.order_billing_as_on import OrderBillingAsOn
 from erpnext.accounts.report.received_items_to_be_billed.received_items_to_be_billed import execute
-from erpnext.buying.doctype.purchase_order.mapper import make_purchase_invoice as make_pi_from_po
-from erpnext.buying.doctype.purchase_order.mapper import make_purchase_receipt as make_pr_from_po
+from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_invoice as make_pi_from_po
+from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt as make_pr_from_po
 from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
-from erpnext.stock.doctype.purchase_receipt.mapper import make_purchase_invoice as make_pi_from_pr
-from erpnext.stock.doctype.purchase_receipt.mapper import (
+from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_invoice as make_pi_from_pr
+from erpnext.stock.doctype.purchase_receipt.purchase_receipt import (
 	make_purchase_return,
 	make_purchase_return_against_rejected_warehouse,
 )

@@ -3,10 +3,10 @@
 
 import frappe
 from frappe import _
+from frappe.desk.reportview import build_match_conditions
 from frappe.utils import flt
 from frappe.utils.nestedset import get_descendants_of
-
-from erpnext.utilities.query import get_match_conditions_qb
+from pypika.terms import Bracket, LiteralValue
 
 
 def execute(filters=None):
@@ -249,8 +249,8 @@ def get_purchase_order_details(company_list, filters):
 	if filters.get("supplier"):
 		query = query.where(db_po.supplier == filters.supplier)
 
-	for condition in get_match_conditions_qb("Purchase Order", table=db_po):
-		query = query.where(condition)
+	if match_conditions := build_match_conditions("Purchase Order"):
+		query = query.where(Bracket(LiteralValue(match_conditions)))
 
 	return query.run(as_dict=1)
 

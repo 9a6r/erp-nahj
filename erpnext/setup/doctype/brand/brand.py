@@ -2,6 +2,8 @@
 # License: GNU General Public License v3. See license.txt
 
 
+import copy
+
 import frappe
 from frappe.model.document import Document
 
@@ -23,10 +25,7 @@ class Brand(Document):
 		image: DF.AttachImage | None
 	# end: auto-generated types
 
-	def validate(self):
-		from erpnext.stock.doctype.item.item import validate_item_defaults
-
-		validate_item_defaults(self.brand_defaults)
+	pass
 
 
 def get_brand_defaults(item, company):

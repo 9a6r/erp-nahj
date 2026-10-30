@@ -1,11 +1,9 @@
-import datetime
-
 import frappe
 from frappe.query_builder.functions import Sum
 from frappe.utils import flt, getdate
 
 from erpnext.accounts.utils import get_fiscal_year
-from erpnext.stock.doctype.purchase_receipt.services.billing_status import adjust_incoming_rate_for_pr
+from erpnext.stock.doctype.purchase_receipt.purchase_receipt import adjust_incoming_rate_for_pr
 
 
 def execute():
@@ -60,8 +58,8 @@ def execute():
 		):
 			posting_date = period_closing_voucher[0].period_end_date
 
-		acc_frozen_upto = get_acc_frozen_upto()
-		if acc_frozen_upto and acc_frozen_upto > getdate(posting_date):
+		acc_frozen_upto = frappe.db.get_single_value("Accounts Settings", "acc_frozen_upto")
+		if acc_frozen_upto and getdate(acc_frozen_upto) > getdate(posting_date):
 			posting_date = acc_frozen_upto
 
 		stock_frozen_upto = frappe.db.get_single_value("Stock Settings", "stock_frozen_upto")
@@ -106,12 +104,6 @@ def execute():
 
 			for pr in purchase_receipts:
 				adjust_incoming_rate_for_pr(frappe.get_doc("Purchase Receipt", pr))
-
-
-def get_acc_frozen_upto() -> datetime.date | None:
-	# read from tabSingles: the field is no longer in the Accounts Settings meta after schema sync (v16)
-	value = frappe.db.get_singles_dict("Accounts Settings").get("acc_frozen_upto")
-	return getdate(value) if value else None
 
 
 def get_billed_qty_against_purchase_receipt(pr_names):

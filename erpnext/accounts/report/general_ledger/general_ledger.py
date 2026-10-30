@@ -18,7 +18,7 @@ from erpnext.accounts.report.utils import (
 	get_currency,
 	has_gl_entry_restrictions,
 )
-from erpnext.accounts.utils import get_account_currency, get_fiscal_year
+from erpnext.accounts.utils import get_account_currency
 
 DEBIT_CREDIT_DICT = {
 	"debit": 0.0,
@@ -39,7 +39,7 @@ def execute(filters=None):
 	if filters and filters.get("print_in_account_currency") and not filters.get("account"):
 		frappe.throw(_("Select an account to print in account currency"))
 
-	for acc in frappe.get_all("Account", fields=["name", "is_group"]):
+	for acc in frappe.db.sql("""select name, is_group from tabAccount""", as_dict=1):
 		account_details.setdefault(acc.name, acc)
 
 	if filters.get("party"):
@@ -172,8 +172,7 @@ def get_gl_entries(filters, accounting_dimensions):
 
 	if filters.get("show_remarks"):
 		if remarks_length := frappe.get_single_value("Accounts Settings", "general_ledger_remarks_length"):
-			# bare alias, not 'remarks' — Postgres treats a single-quoted alias as a string literal
-			select_fields += f",substr(remarks, 1, {remarks_length}) as remarks"
+			select_fields += f",substr(remarks, 1, {remarks_length}) as 'remarks'"
 		else:
 			select_fields += """,remarks"""
 
@@ -225,7 +224,7 @@ def get_gl_entries(filters, accounting_dimensions):
 			gl_entry.party_name = party_name_map.get(gl_entry.party_type, {}).get(gl_entry.party)
 
 	if filters.get("presentation_currency"):
-		return convert_to_presentation_currency(gl_entries, currency_map, filters, use_account_currency=True)
+		return convert_to_presentation_currency(gl_entries, currency_map, filters)
 	else:
 		return gl_entries
 
@@ -566,21 +565,8 @@ def get_accountwise_gle(filters, accounting_dimensions, gl_entries, gle_map):
 	from_date, to_date = getdate(filters.from_date), getdate(filters.to_date)
 	show_opening_entries = filters.get("show_opening_entries")
 
-	# P&L accounts reset every fiscal year, so their entries before the year start don't count in opening
-	pl_accounts, year_start_date = set(), None
-	if fiscal_year := get_fiscal_year(from_date, company=filters.company, raise_on_missing=False):
-		year_start_date = getdate(fiscal_year[1])
-		pl_accounts = set(
-			frappe.get_all(
-				"Account", {"company": filters.company, "report_type": "Profit and Loss"}, pluck="name"
-			)
-		)
-
 	totals = get_totals_dict()
 	for gle in gl_entries:
-		if year_start_date and gle.posting_date < year_start_date and gle.account in pl_accounts:
-			continue
-
 		group_by_value = get_group_by_value(gle, group_by)
 		gle.voucher_subtype = _(gle.voucher_subtype)
 		gle.remarks = _(gle.remarks)
@@ -675,8 +661,10 @@ def get_result_as_list(data, filters):
 
 def get_supplier_invoice_details():
 	inv_details = {}
-	for d in frappe.get_all(
-		"Purchase Invoice", filters={"docstatus": 1, "bill_no": ["is", "set"]}, fields=["name", "bill_no"]
+	for d in frappe.db.sql(
+		""" select name, bill_no from `tabPurchase Invoice`
+		where docstatus = 1 and bill_no is not null and bill_no != '' """,
+		as_dict=1,
 	):
 		inv_details[d.name] = d.bill_no
 
@@ -703,9 +691,8 @@ def get_columns(filters):
 		and filters["presentation_currency"] != company_currency
 	):
 		frappe.throw(
-			_("Presentation Currency cannot be {0}, when {1} is enabled.").format(
-				frappe.bold(filters["presentation_currency"]),
-				frappe.bold(_("Show Credit / Debit in Company Currency")),
+			_(
+				f'Presentation Currency cannot be {frappe.bold(filters["presentation_currency"])} , When {frappe.bold("Show Credit / Debit in Company Currency")} is enabled.'
 			)
 		)
 
@@ -999,7 +986,7 @@ def get_gl_entries_duckdb(filters, accounting_dimensions, conn):
 			gl_entry.party_name = party_name_map.get(gl_entry.party_type, {}).get(gl_entry.party)
 
 	if filters.get("presentation_currency"):
-		return convert_to_presentation_currency(gl_entries, currency_map, filters, use_account_currency=True)
+		return convert_to_presentation_currency(gl_entries, currency_map, filters)
 	return gl_entries
 
 

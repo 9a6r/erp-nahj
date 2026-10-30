@@ -1,7 +1,6 @@
 # Copyright (c) 2018, Frappe Technologies Pvt. Ltd. and contributors
 # For license information, please see license.txt
 
-from datetime import date
 
 import frappe
 from frappe import _
@@ -89,13 +88,13 @@ def get_loyalty_details(
 
 @frappe.whitelist()
 def get_loyalty_program_details_with_points(
-	customer: str,
-	loyalty_program: str | None = None,
-	expiry_date: str | date | None = None,
-	company: str | None = None,
-	silent: bool = False,
-	include_expired_entry: bool = False,
-	current_transaction_amount: int | float = 0,
+	customer,
+	loyalty_program=None,
+	expiry_date=None,
+	company=None,
+	silent=False,
+	include_expired_entry=False,
+	current_transaction_amount=0,
 ):
 	frappe.has_permission("Customer", doc=customer, throw=True)
 
@@ -122,16 +121,15 @@ def get_loyalty_program_details_with_points(
 
 @frappe.whitelist()
 def get_loyalty_program_details(
-	customer: str,
-	loyalty_program: str | None = None,
-	expiry_date: str | date | None = None,
-	company: str | None = None,
-	silent: bool = False,
-	include_expired_entry: bool = False,
+	customer,
+	loyalty_program=None,
+	expiry_date=None,
+	company=None,
+	silent=False,
+	include_expired_entry=False,
 ):
-	# Same guard as get_loyalty_program_details_with_points above: the customer is what the caller
-	# is entitled to, not the programme. A check on Loyalty Program itself would be read-only to
-	# System Manager and would deny every role that actually fills in the two calling forms.
+	# The customer is what the caller is entitled to, not the programme: a check on Loyalty Program
+	# would be read-only to System Manager and deny every role that fills in the calling forms.
 	frappe.has_permission("Customer", doc=customer, throw=True)
 
 	lp_details = frappe._dict()
@@ -154,7 +152,7 @@ def get_loyalty_program_details(
 
 
 @frappe.whitelist()
-def get_redeemption_factor(loyalty_program: str | None = None, customer: str | None = None):
+def get_redeemption_factor(loyalty_program=None, customer=None):
 	# both call sites send only `loyalty_program`, so the calling form is the boundary; the customer branch stays guarded
 	if not (frappe.has_permission("Sales Invoice") or frappe.has_permission("POS Invoice")):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)

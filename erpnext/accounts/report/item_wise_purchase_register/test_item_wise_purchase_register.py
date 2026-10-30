@@ -99,7 +99,10 @@ class TestItemWisePurchaseRegister(ERPNextTestSuite, AccountsTestMixin):
 			self.assertEqual([row["invoice"] for row in execute(filters)[1]], [pi.name])
 
 	def test_purchase_receipts_for_invoice_made_from_order(self):
-		from erpnext.buying.doctype.purchase_order.mapper import make_purchase_invoice, make_purchase_receipt
+		from erpnext.buying.doctype.purchase_order.purchase_order import (
+			make_purchase_invoice,
+			make_purchase_receipt,
+		)
 		from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
 
 		po = create_purchase_order(item_code=self.item, company=self.company, supplier=self.supplier, qty=2)

@@ -1,7 +1,6 @@
 {
  "actions": [],
  "allow_auto_repeat": 1,
- "allow_bulk_edit": 1,
  "allow_import": 1,
  "autoname": "naming_series:",
  "creation": "2013-05-21 16:16:39",
@@ -12,7 +11,6 @@
  "engine": "InnoDB",
  "field_order": [
   "supplier_section",
-  "company",
   "naming_series",
   "supplier",
   "supplier_name",
@@ -23,6 +21,7 @@
   "transaction_time",
   "schedule_date",
   "column_break1",
+  "company",
   "is_subcontracted",
   "has_unit_price_items",
   "supplier_warehouse",
@@ -164,7 +163,7 @@
   "mps",
   "is_internal_supplier",
   "inter_company_order_reference",
-  "remarks",
+  "is_old_subcontracting_flow",
   "connections_tab"
  ],
  "fields": [
@@ -172,14 +171,6 @@
    "fieldname": "supplier_section",
    "fieldtype": "Section Break",
    "options": "fa fa-user"
-  },
-  {
-   "allow_on_submit": 1,
-   "fieldname": "title",
-   "fieldtype": "Data",
-   "label": "Title",
-   "no_copy": 1,
-   "print_hide": 1
   },
   {
    "fieldname": "naming_series",
@@ -515,6 +506,23 @@
    "fieldtype": "Table",
    "label": "Purchase Order Pricing Rule",
    "options": "Pricing Rule Detail",
+   "read_only": 1
+  },
+  {
+   "collapsible_depends_on": "supplied_items",
+   "fieldname": "raw_material_details",
+   "fieldtype": "Section Break",
+   "label": "Raw Materials Supplied"
+  },
+  {
+   "fieldname": "supplied_items",
+   "fieldtype": "Table",
+   "label": "Supplied Items",
+   "no_copy": 1,
+   "oldfieldname": "po_raw_material_details",
+   "oldfieldtype": "Table",
+   "options": "Purchase Order Item Supplied",
+   "print_hide": 1,
    "read_only": 1
   },
   {
@@ -934,13 +942,6 @@
    "read_only": 1
   },
   {
-   "fieldname": "remarks",
-   "fieldtype": "Small Text",
-   "label": "Remarks",
-   "no_copy": 1,
-   "print_hide": 1
-  },
-  {
    "fieldname": "column_break_74",
    "fieldtype": "Column Break"
   },
@@ -1134,6 +1135,14 @@
    "options": "Project"
   },
   {
+   "default": "0",
+   "fieldname": "is_old_subcontracting_flow",
+   "fieldtype": "Check",
+   "hidden": 1,
+   "label": "Is Old Subcontracting Flow",
+   "read_only": 1
+  },
+  {
    "depends_on": "is_internal_supplier",
    "fieldname": "set_from_warehouse",
    "fieldtype": "Link",
@@ -1302,6 +1311,14 @@
    "fieldname": "auto_repeat_section",
    "fieldtype": "Section Break",
    "label": "Auto Repeat"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "label": "Title",
+   "no_copy": 1,
+   "print_hide": 1
   }
  ],
  "grid_page_length": 50,
@@ -1309,7 +1326,7 @@
  "idx": 105,
  "is_submittable": 1,
  "links": [],
- "modified": "2026-10-12 18:16:58.531757",
+ "modified": "2026-10-13 12:12:32.190935",
  "modified_by": "Administrator",
  "module": "Buying",
  "name": "Purchase Order",

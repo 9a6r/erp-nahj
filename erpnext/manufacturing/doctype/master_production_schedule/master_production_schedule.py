@@ -7,10 +7,9 @@ import frappe
 from frappe import _, bold
 from frappe.model.document import Document
 from frappe.query_builder.functions import IfNull
-from frappe.utils import add_days, flt, get_link_to_form, getdate, parse_json
+from frappe.utils import add_days, cint, flt, get_link_to_form, getdate, parse_json
 
 from erpnext.manufacturing.doctype.sales_forecast.sales_forecast import update_sales_forecast_status
-from erpnext.manufacturing.scheduling.plan_adapter import get_days_needed
 
 
 class MasterProductionSchedule(Document):
@@ -561,6 +560,34 @@ def get_own_lead_time(lead_time, qty, is_manufactured):
 		days = flt(lead_time.purchase_time)
 
 	return days + flt(lead_time.buffer_time)
+
+
+def get_days_needed(lead_time, qty, no_of_shifts):
+	capacity = get_daily_capacity(lead_time, no_of_shifts)
+	if capacity:
+		return qty / capacity
+
+	if lead_time.manufacturing_time_in_mins:
+		minutes_per_day = get_daily_working_mins(lead_time, no_of_shifts) * (
+			cint(lead_time.no_of_workstations) or 1
+		)
+		return cint(lead_time.manufacturing_time_in_mins) * qty / minutes_per_day
+
+	return 0
+
+
+def get_daily_working_mins(lead_time, no_of_shifts):
+	return (
+		(no_of_shifts or cint(lead_time.no_of_shift) or 1) * (cint(lead_time.shift_time_in_hours) or 8) * 60.0
+	)
+
+
+def get_daily_capacity(lead_time, no_of_shifts):
+	capacity = flt(lead_time.capacity_per_day)
+	if capacity and no_of_shifts:
+		capacity = capacity * no_of_shifts / (cint(lead_time.no_of_shift) or 1)
+
+	return capacity
 
 
 @frappe.whitelist()

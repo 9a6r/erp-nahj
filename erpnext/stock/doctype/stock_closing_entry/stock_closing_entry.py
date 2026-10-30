@@ -5,6 +5,7 @@ import json
 
 import frappe
 from frappe import _
+from frappe.core.doctype.prepared_report.prepared_report import create_json_gz_file
 from frappe.desk.form.load import get_attachments
 from frappe.model.document import Document
 from frappe.utils import (
@@ -188,10 +189,11 @@ class StockClosingEntry(Document):
 			.where(
 				(table.docstatus == 1)
 				& (table.company == self.company)
-				# two date ranges overlap when each starts on or before the other ends;
-				# this also catches one range being fully contained within the other
-				& (table.from_date <= self.to_date)
-				& (table.to_date >= self.from_date)
+				& (
+					(table.from_date.between(self.from_date, self.to_date))
+					| (table.to_date.between(self.from_date, self.to_date))
+					| ((self.from_date >= table.from_date) & (table.from_date >= self.to_date))
+				)
 			)
 		)
 
@@ -341,7 +343,7 @@ class StockClosingEntry(Document):
 		enqueue(prepare_closing_stock_balance, name=self.name, queue="long", timeout=1500)
 		frappe.msgprint(
 			_(
-				"Stock Closing Entry {0} has been queued for processing, the system will take some time to complete it."
+				"Stock Closing Entry {0} has been queued for processing, system will take sometime to complete it."
 			).format(self.name)
 		)
 
@@ -349,7 +351,6 @@ class StockClosingEntry(Document):
 	def regenerate_closing_balance(self):
 		self.check_permission("write")
 		self.validate_submitted()
-
 		self.validate_closed_period_lock()
 		self.validate_later_closing_entry_for_regenerate()
 		self.remove_stock_closing()
@@ -386,7 +387,8 @@ class StockClosingEntry(Document):
 			attached_file = frappe.get_doc("File", attachment.name)
 
 			data = gzip.decompress(attached_file.get_content())
-			data = json.loads(data.decode("utf-8"))
+			if data := json.loads(data.decode("utf-8")):
+				data = data
 
 			return parse_json(data)
 
@@ -422,7 +424,6 @@ def prepare_closing_stock_balance(name):
 		is_outdated = doc.has_ledger_changes_since(started_at) or doc.has_pending_reposts_now()
 		doc.db_set("status", "Outdated" if is_outdated else "Completed")
 	except Exception:
-		frappe.db.rollback()
 		doc.db_set("status", "Failed")
 		doc.log_error(title="Stock Closing Entry Failed")
 

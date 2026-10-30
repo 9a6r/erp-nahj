@@ -4,7 +4,7 @@
 
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, formatdate, getdate, nowdate
+from frappe.utils import add_to_date, formatdate, get_link_to_form, getdate, nowdate
 from frappe.utils.dashboard import cache_source
 from frappe.utils.dateutils import get_from_date_from_timespan, get_period_ending
 from frappe.utils.nestedset import get_descendants_of
@@ -13,15 +13,15 @@ from frappe.utils.nestedset import get_descendants_of
 @frappe.whitelist()
 @cache_source
 def get(
-	chart_name: str | None = None,
-	chart: str | dict | None = None,
-	no_cache: bool | None = None,
-	filters: str | dict | None = None,
-	from_date: str | None = None,
-	to_date: str | None = None,
-	timespan: str | None = None,
-	time_interval: str | None = None,
-	heatmap_year: str | None = None,
+	chart_name=None,
+	chart=None,
+	no_cache=None,
+	filters=None,
+	from_date=None,
+	to_date=None,
+	timespan=None,
+	time_interval=None,
+	heatmap_year=None,
 ):
 	if chart_name:
 		chart = frappe.get_doc("Dashboard Chart", chart_name, check_permission="read")
@@ -40,13 +40,20 @@ def get(
 	company = filters.get("company")
 
 	# the account defaults to the company's default bank account, which a new company has not set yet
-	if not company:
-		frappe.throw(_("Choose a company in this chart's filters to see its bank balance."))
 	if not account:
+		if not company:
+			frappe.throw(_("Choose a company in this chart's filters to see its bank balance."))
 		frappe.throw(
 			_(
 				"Choose a bank account in this chart's filters, or set a default bank account on {0}, to see its balance."
 			).format(company)
+		)
+
+	if not frappe.db.exists("Account", account) and chart_name:
+		frappe.throw(
+			_("Account {0} does not exists in the dashboard chart {1}").format(
+				account, get_link_to_form("Dashboard Chart", chart_name)
+			)
 		)
 
 	# authorise the account itself, as get_balance_on() does; doc= brings User Permissions with it

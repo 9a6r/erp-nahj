@@ -3,7 +3,8 @@ import threading
 
 from gi.repository import Gtk, GLib
 from . import config
-from .server import Server, ServerError
+from .server_messages import translate_error
+from .server import Server, ServerError, RELEASE
 
 
 class ServerPanel(Gtk.Box):
@@ -33,9 +34,12 @@ class ServerPanel(Gtk.Box):
         self.controls.append(self.mode)
         self.form = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.append(self.form)
-        self.form.append(Gtk.Label(wrap=True, max_width_chars=58, label=self.t(
-            'يُنزَّل الخادم تلقائيًا أول مرة (حوالي 1.28 جيجابايت). يمكن اختيار ملف سبق تنزيله، ويُفحص قبل استخدامه.',
-            'The server downloads automatically on first setup (about 1.28 GiB). You can also select an existing download; its integrity is verified before use.')))
+        download_note = self.t(
+            'يمكن تنزيل الخادم أو اختيار ملف سبق تنزيله؛ يُفحص قبل استخدامه.',
+            'Download the server or select an existing archive; it is verified before use.') if RELEASE['published'] else self.t(
+            'هذا الإصدار قيد التحقق. اختر ملف الخادم المحلي المتحقق منه من الخيارات المتقدمة؛ التنزيل التلقائي غير متاح بعد.',
+            'This release is under validation. Select the verified local server archive under advanced options; automatic download is not available yet.')
+        self.form.append(Gtk.Label(wrap=True, max_width_chars=58, label=download_note))
         self.field('admin', 'كلمة مرور Administrator الجديدة — 12 حرفًا على الأقل',
                    'New Administrator password — at least 12 characters', secret=True)
         advanced = Gtk.Expander(label=self.t('خيارات متقدمة وملف تنزيل محفوظ', 'Advanced options and existing download'))
@@ -226,14 +230,7 @@ class ServerPanel(Gtk.Box):
                 pass
             if error:
                 if self.app.settings['language'] == 'ar':
-                    error = {
-                        'Select an existing backup destination folder.': 'اختر مجلدًا موجودًا لحفظ النسخة الاحتياطية.',
-                        'Choose an Administrator password of at least 12 characters.': 'اختر كلمة مرور لحساب Administrator تتكون من 12 حرفًا على الأقل.',
-                        'Podman/Podman Compose is missing. Install podman and podman-compose on Arch.': 'يلزم تثبيت podman وpodman-compose لتشغيل الخادم على Arch.',
-                        'Select the CA certificate for the MariaDB server.': 'اختر ملف شهادة CA لخادم MariaDB.',
-                        'Cannot load the MariaDB CA certificate.': 'تعذر قراءة شهادة CA؛ اختر ملف شهادة صالحًا.',
-                        'Another service operation is still running.': 'توجد عملية أخرى قيد التنفيذ؛ انتظر اكتمالها.',
-                    }.get(error, error)
+                    error = translate_error(error)
                 self.status.add_css_class('error')
                 self.status.set_label(self.t('تعذرت العملية؛ لم تُحذف البيانات. التفاصيل:\n', 'Operation failed; data was retained. Details:\n') + error)
             else:

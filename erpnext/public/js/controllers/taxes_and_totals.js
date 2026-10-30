@@ -140,7 +140,7 @@ erpnext.taxes_and_totals = class TaxesAndTotals extends erpnext.payments {
 
 	apply_mapped_discount_to_item(item) {
 		item.distributed_discount_amount = flt(
-			flt(item.mapped_additional_discount_amount) * this.get_billed_stock_qty(item),
+			flt(item.mapped_additional_discount_amount) * this.get_qty_in_stock_uom(item),
 			precision("distributed_discount_amount", item)
 		);
 		if (!item.distributed_discount_amount) return;
@@ -149,9 +149,13 @@ erpnext.taxes_and_totals = class TaxesAndTotals extends erpnext.payments {
 			item.net_amount - item.distributed_discount_amount,
 			precision("net_amount", item)
 		);
-		item.net_rate = flt(item.net_amount / this.get_billed_qty(item), precision("net_rate", item));
+		item.net_rate = flt(item.net_amount / item.qty, precision("net_rate", item));
 		item._unrounded_net_amount = null;
 		this.set_in_company_currency(item, ["net_rate", "net_amount"]);
+	}
+
+	get_qty_in_stock_uom(item) {
+		return flt(item.qty) * (flt(item.conversion_factor) || 1);
 	}
 
 	has_mapped_discount() {
@@ -179,9 +183,9 @@ erpnext.taxes_and_totals = class TaxesAndTotals extends erpnext.payments {
 	validate_conversion_rate() {
 		this.frm.doc.conversion_rate = flt(
 			this.frm.doc.conversion_rate,
-			frappe.meta.get_field_precision(this.frm.get_docfield("conversion_rate"), this.frm.doc)
+			cur_frm ? precision("conversion_rate") : 9
 		);
-		var conversion_rate_label = frappe.meta.get_translated_label(
+		var conversion_rate_label = frappe.meta.get_label(
 			this.frm.doc.doctype,
 			"conversion_rate",
 			this.frm.doc.name
@@ -216,28 +220,6 @@ erpnext.taxes_and_totals = class TaxesAndTotals extends erpnext.payments {
 			.filter((fieldname) => !do_not_round_fields.includes(fieldname));
 	}
 
-	get_billed_qty(item) {
-		const settings = frappe.boot.sysdefaults || {};
-		const is_internal_transfer =
-			this.frm.doc.is_internal_supplier && this.frm.doc.represents_company === this.frm.doc.company;
-		const bills_rejected_quantity =
-			this.frm.doc.doctype === "Purchase Invoice" &&
-			this.frm.doc.update_stock &&
-			!is_internal_transfer &&
-			cint(settings.set_valuation_rate_for_rejected_materials) &&
-			cint(settings.bill_for_rejected_quantity_in_purchase_invoice);
-
-		if (!flt(item.rejected_qty) || !bills_rejected_quantity) {
-			return flt(item.qty);
-		}
-
-		return flt(item.qty) + flt(item.rejected_qty);
-	}
-
-	get_billed_stock_qty(item) {
-		return this.get_billed_qty(item) * (flt(item.conversion_factor) || 1);
-	}
-
 	calculate_item_values() {
 		var me = this;
 		if (!this.discount_amount_applied) {
@@ -249,10 +231,7 @@ erpnext.taxes_and_totals = class TaxesAndTotals extends erpnext.payments {
 				item.qty = item.qty === undefined ? (me.frm.doc.is_return ? -1 : 1) : item.qty;
 
 				if (!(me.frm.doc.is_return || me.frm.doc.is_debit_note)) {
-					item.net_amount = item.amount = flt(
-						item.rate * me.get_billed_qty(item),
-						precision("amount", item)
-					);
+					item.net_amount = item.amount = flt(item.rate * item.qty, precision("amount", item));
 				} else {
 					// allow for '0' qty on Credit/Debit notes
 					let qty = flt(item.qty);
@@ -393,7 +372,7 @@ erpnext.taxes_and_totals = class TaxesAndTotals extends erpnext.payments {
 
 			item._mapped_discount_inclusive_amount =
 				flt(item.mapped_additional_discount_amount) *
-				me.get_billed_stock_qty(item) *
+				me.get_qty_in_stock_uom(item) *
 				(1 + total_tax_slope);
 
 			if (!me.discount_amount_applied && item.qty && (total_tax_intercept || total_tax_slope)) {

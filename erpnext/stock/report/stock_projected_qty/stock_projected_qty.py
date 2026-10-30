@@ -9,7 +9,6 @@ from frappe.utils.nestedset import get_descendants_of
 from pypika.terms import ExistsCriterion
 
 from erpnext.accounts.doctype.pos_invoice.pos_invoice import get_pos_reserved_qty
-from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_warehouses_condition
 from erpnext.stock.utils import (
 	is_reposting_item_valuation_in_progress,
 	update_included_uom_in_report,
@@ -98,11 +97,10 @@ def get_columns():
 			"fieldname": "item_code",
 			"fieldtype": "Link",
 			"options": "Item",
-			"width": 200,
-			"sticky": "True",
+			"width": 140,
 		},
-		{"label": _("Item Name"), "fieldname": "item_name", "width": 200},
-		{"label": _("Description"), "fieldname": "description", "width": 100},
+		{"label": _("Item Name"), "fieldname": "item_name", "width": 100},
+		{"label": _("Description"), "fieldname": "description", "width": 200},
 		{
 			"label": _("Item Group"),
 			"fieldname": "item_group",
@@ -123,7 +121,6 @@ def get_columns():
 			"fieldtype": "Link",
 			"options": "Warehouse",
 			"width": 120,
-			"sticky": "True",
 		},
 		{
 			"label": _("UOM"),
@@ -284,9 +281,6 @@ def get_bin_list(filters):
 				)
 			)
 
-	if condition := get_allowed_warehouses_condition(bin.warehouse):
-		query = query.where(condition)
-
 	bin_list = query.run(as_dict=True)
 
 	return bin_list
@@ -298,19 +292,17 @@ def get_item_map(item_code, include_uom):
 	bin = frappe.qb.DocType("Bin")
 	item = frappe.qb.DocType("Item")
 
-	# alive = end_of_life unset / future / MariaDB zero-date '0000-00-00' (an invalid date literal on
-	# postgres, where "not set" is NULL — already covered by IS NULL); zero-date term on MariaDB only.
-	alive = (item.end_of_life > today()) | item.end_of_life.isnull()
-	if frappe.db.db_type != "postgres":
-		alive |= item.end_of_life == "0000-00-00"
-
 	query = (
 		frappe.qb.from_(item)
 		.select(item.name, item.item_name, item.description, item.item_group, item.brand, item.stock_uom)
 		.where(
 			(item.is_stock_item == 1)
 			& (item.disabled == 0)
-			& alive
+			& (
+				(item.end_of_life > today())
+				| (item.end_of_life.isnull())
+				| (item.end_of_life == "0000-00-00")
+			)
 			& (ExistsCriterion(frappe.qb.from_(bin).select(bin.name).where(bin.item_code == item.name)))
 		)
 	)

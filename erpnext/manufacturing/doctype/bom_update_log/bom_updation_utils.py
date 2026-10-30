@@ -67,19 +67,21 @@ def update_cost_in_level(doc: "BOMUpdateLog", bom_list: list[str], batch_name: i
 
 
 def get_ancestor_boms(new_bom: str) -> list:
-	"""Return every ancestor BOM of `new_bom` (BOMs that consume it, transitively) in one recursive
-	CTE built with frappe.qb -- portable across postgres and mariadb 10.2+. `UNION` makes it
-	cycle-safe (it stops once no new BOM is reached); a BOM that is its own ancestor is rejected."""
-	links = get_bom_links_query().as_("bom_links")
-	tree = frappe.qb.Table("ancestor_boms")
+	"Get all ancestors of BOM."
 
-	seed = frappe.qb.from_(links).select(links.parent.as_("bom")).where(links.bom_no == new_bom)
-	recursion = frappe.qb.from_(links).join(tree).on(links.bom_no == tree.bom).select(links.parent)
-	ancestors = (
-		frappe.qb.with_(seed + recursion, "ancestor_boms", recursive=True).from_(tree).select(tree.bom)
-	).run(pluck=True)
+	ancestors = []
+	seen = set()
+	children = [new_bom]
+	while children:
+		links = get_bom_links_query().as_("bom_links")
+		parents = (
+			frappe.qb.from_(links).select(links.parent).where(links.bom_no.isin(children)).distinct()
+		).run(pluck=True)
+		children = [parent for parent in parents if parent not in seen]
+		seen.update(children)
+		ancestors.extend(children)
 
-	if new_bom in ancestors:
+	if new_bom in seen:
 		frappe.throw(_("BOM recursion: {0} cannot be an ancestor of itself").format(new_bom))
 
 	return ancestors

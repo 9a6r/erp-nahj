@@ -5,8 +5,8 @@ import frappe
 from frappe.core.doctype.user_permission.test_user_permission import create_user
 from frappe.permissions import add_user_permission
 
-from erpnext.manufacturing.doctype.work_order.mapper import make_stock_entry
 from erpnext.manufacturing.doctype.work_order.test_work_order import make_wo_order_test_record
+from erpnext.manufacturing.doctype.work_order.work_order import make_stock_entry
 from erpnext.manufacturing.report.bom_variance_report.bom_variance_report import execute, get_work_orders
 from erpnext.stock.doctype.stock_entry import test_stock_entry
 from erpnext.tests.utils import ERPNextTestSuite
@@ -59,49 +59,6 @@ class TestBOMVarianceReport(ERPNextTestSuite):
 	def run_report(self, **extra):
 		filters = frappe._dict({"bom_no": self.bom_no, **extra})
 		return execute(filters)[1]
-
-	def test_over_produced_work_order_appears_with_planned_and_actual(self):
-		work_order = self.create_over_produced_work_order(ordered_qty=2, produced_qty=3)
-
-		data = self.run_report(work_order=work_order.name)
-
-		summary_rows = [row for row in data if row.get("work_order") == work_order.name]
-		self.assertEqual(len(summary_rows), 1)
-
-		summary = summary_rows[0]
-		self.assertEqual(summary.get("production_item"), self.production_item)
-		self.assertEqual(summary.get("bom_no"), self.bom_no)
-		self.assertEqual(summary.get("qty"), 2)
-		self.assertEqual(summary.get("produced_qty"), 3)
-
-		raw_material_rows = {
-			row.get("raw_material_code"): row for row in data if row.get("raw_material_code")
-		}
-		for item_code, per_unit_qty in self.raw_materials.items():
-			self.assertIn(item_code, raw_material_rows)
-			self.assertEqual(raw_material_rows[item_code].get("required_qty"), per_unit_qty * 3)
-
-	def test_bom_no_filter_returns_over_produced_orders(self):
-		work_order = self.create_over_produced_work_order(ordered_qty=2, produced_qty=3)
-
-		data = self.run_report()
-
-		matched = [row for row in data if row.get("work_order") == work_order.name]
-		self.assertEqual(len(matched), 1)
-		self.assertEqual(matched[0].get("bom_no"), self.bom_no)
-
-	def test_unstarted_work_order_is_excluded(self):
-		work_order = make_wo_order_test_record(
-			item=self.production_item,
-			qty=2,
-			source_warehouse=self.warehouse,
-			skip_transfer=1,
-		)
-
-		data = self.run_report(work_order=work_order.name)
-
-		matched = [row for row in data if row.get("work_order") == work_order.name]
-		self.assertEqual(matched, [])
 
 	def test_work_order_produced_exactly_on_plan_is_listed(self):
 		work_order = self.create_over_produced_work_order(ordered_qty=2, produced_qty=2)

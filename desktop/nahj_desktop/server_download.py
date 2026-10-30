@@ -4,22 +4,26 @@ import os
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-from .server import IMAGE_SHA256, ServerError, data_path
+from .server import IMAGE_SHA256, RELEASE, ServerError, data_path
 
-URL = 'https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.3.0/nahj-server-0.3.0-amd64.tar.gz'
-SIZE = 1370682143
+URL = RELEASE['url']
+SIZE = RELEASE['size']
+FILENAME = RELEASE['archive']
+PUBLISHED = RELEASE['published']
 
 
 def download(progress, cache=None):
     cache = Path(cache) if cache else data_path().parent / 'downloads'
     cache.mkdir(parents=True, exist_ok=True, mode=0o700)
-    final = cache / 'nahj-server-0.3.0-amd64.tar.gz'
+    final = cache / FILENAME
     partial = final.with_suffix(final.suffix + '.part')
     if final.exists():
         with final.open('rb') as stream:
             if hashlib.file_digest(stream, 'sha256').hexdigest() == IMAGE_SHA256:
                 return final
         raise ServerError('The cached server image failed verification. Select a verified archive or remove the damaged download.')
+    if not PUBLISHED:
+        raise ServerError('This server release is still under validation. Select the verified local archive; automatic download is available after publication.')
     offset = partial.stat().st_size if partial.exists() else 0
     if offset > SIZE:
         raise ServerError('The partial download exceeds the expected image size.')

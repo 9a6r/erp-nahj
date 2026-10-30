@@ -7,7 +7,7 @@ from collections import OrderedDict
 import frappe
 from frappe import _, qb
 from frappe.query_builder import Case, CustomFunction
-from frappe.query_builder.functions import Coalesce, DateDiff, Max, Sum
+from frappe.query_builder.functions import Coalesce, Max, Sum
 from frappe.utils import date_diff, flt, nowdate
 from frappe.utils.nestedset import get_descendants_of
 
@@ -60,16 +60,12 @@ def get_data(filters):
 	sii = qb.DocType("Sales Invoice Item")
 	si = qb.DocType("Sales Invoice")
 
-	# Use the application's today (nowdate, System Settings timezone) rather than the database
-	# server's CURRENT_DATE: the two differ by a day when the DB server runs in a different timezone
-	# (e.g. UTC DB + IST app near midnight), which made delay_days non-deterministic on postgres CI.
-	# DateDiff is cross-database: DATEDIFF() on MariaDB, date subtraction on postgres; it casts the
-	# string date to a date on postgres. delivery_date is functionally dependent on the grouped
-	# soi.name primary key, so this is valid under both.
-	delay = DateDiff(nowdate(), soi.delivery_date)
+	# use the app's today rather than the DB server's CURRENT_DATE so delay_days is timezone-stable
+	datediff = CustomFunction("DATEDIFF", ["end_date", "start_date"])
+	delay = datediff(nowdate(), soi.delivery_date)
 	conversion_rate = Coalesce(so.conversion_rate, 1)
-	is_closed = (so.status == "Closed") | (soi.closed == 1)
-	no_delay = so.status.isin(["Completed", "To Bill"]) | is_closed
+	is_closed = so.status == "Closed"
+	no_delay = so.status.isin(["Completed", "To Bill", "Closed"])
 
 	# credit notes don't reduce the order's billed_amt, so exclude them to keep billed qty in step
 	counts_as_billed = (Coalesce(si.is_return, 0) == 0) | (
@@ -96,7 +92,6 @@ def get_data(filters):
 			Case().when(no_delay, 0).else_(delay).as_("delay"),
 			soi.qty,
 			soi.delivered_qty,
-			soi.closed,
 			Case().when(is_closed, 0).else_(soi.qty - soi.delivered_qty).as_("pending_qty"),
 			(
 				Coalesce(Sum(Case().when(counts_as_billed, sii.qty * sii.conversion_factor).else_(0)), 0)
@@ -222,9 +217,7 @@ def prepare_data(data, so_elapsed_time, filters):
 		completed += row["billed_amount"]
 		pending += row["pending_amount"]
 
-		row["qty_to_bill"] = (
-			0 if row["status"] == "Closed" or row["closed"] else flt(row["qty"]) - flt(row["billed_qty"])
-		)
+		row["qty_to_bill"] = 0 if row["status"] == "Closed" else flt(row["qty"]) - flt(row["billed_qty"])
 		row["delay"] = 0 if row["delay"] and row["delay"] < 0 else row["delay"]
 		row["time_taken_to_deliver"] = (
 			so_elapsed_time.get((row.sales_order, row.item_code))

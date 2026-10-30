@@ -1,12 +1,13 @@
 # Copyright (c) 2025, Frappe Technologies Pvt. Ltd. and Contributors
 # MIT License. See license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe import _
 from frappe.utils import add_days, flt, getdate, today
 
 from erpnext.accounts.report.consolidated_trial_balance.consolidated_trial_balance import execute
-from erpnext.setup.utils import get_exchange_rate
 from erpnext.tests.utils import ERPNextTestSuite
 
 
@@ -17,6 +18,20 @@ class ForeignCurrencyTranslationReserveNotFoundError(frappe.ValidationError):
 class TestConsolidatedTrialBalance(ERPNextTestSuite):
 	def setUp(self):
 		from erpnext.accounts.utils import get_fiscal_year
+
+		self.exchange_rate = 80
+		for module in (
+			"erpnext.accounts.doctype.gl_entry.gl_entry",
+			"erpnext.accounts.report.consolidated_trial_balance.consolidated_trial_balance",
+		):
+			self.enterContext(
+				patch(
+					f"{module}.get_exchange_rate",
+					side_effect=lambda from_currency, to_currency, *args: (
+						1 if from_currency == to_currency else self.exchange_rate
+					),
+				)
+			)
 
 		create_journal_entry(
 			company="Parent Group Company India",
@@ -50,7 +65,7 @@ class TestConsolidatedTrialBalance(ERPNextTestSuite):
 			return execute(filters)[1][-1]["closing_credit"]
 
 		group_total = total_closing_credit(["Parent Group Company India"])
-		expected_total = flt(100000 + 50000 + 1000 * flt(get_exchange_rate("USD", "INR")))
+		expected_total = flt(100000 + 50000 + 1000 * self.exchange_rate)
 
 		self.assertEqual(group_total, expected_total)
 		# a subsidiary selected along with its group is counted once
@@ -82,14 +97,12 @@ class TestConsolidatedTrialBalance(ERPNextTestSuite):
 		report = execute(filters)
 		total_row = report[1][-1]
 
-		exchange_rate = get_exchange_rate("USD", "INR")
-
 		fctr = [d for d in report[1] if d.get("account") == _("Foreign Currency Translation Reserve")]
 
 		if not fctr:
 			raise ForeignCurrencyTranslationReserveNotFoundError
 
-		ccu_total_credit = 1000 * flt(exchange_rate)
+		ccu_total_credit = 1000 * self.exchange_rate
 
 		self.assertEqual(total_row["closing_debit"], total_row["closing_credit"])
 		self.assertNotEqual(total_row["closing_credit"], ccu_total_credit)
@@ -128,8 +141,6 @@ class TestConsolidatedTrialBalance(ERPNextTestSuite):
 
 	def test_opening_balance_sheet_amounts_translated_at_closing_rate(self):
 		year_start = frappe.db.get_value("Fiscal Year", self.fiscal_year, "year_start_date")
-		set_usd_rate(year_start, 80)
-		set_usd_rate(today(), 85)
 		create_journal_entry(
 			company="Child Company US",
 			acc1="Cash - CCU",
@@ -145,6 +156,8 @@ class TestConsolidatedTrialBalance(ERPNextTestSuite):
 				pluck="debit_in_reporting_currency",
 			)
 		)
+		# entries were posted at 80; the report's closing rate is 85
+		self.exchange_rate = 85
 		# Cash: 100000 INR plus 1100 USD at the closing rate of 85
 		expected_cash_credit = 100000 + 1100 * 85
 		expected_reserve_debit = expected_cash_credit - (100000 + usd_expenses_in_inr)
@@ -189,20 +202,3 @@ def create_journal_entry(**args):
 	)
 	je.save()
 	je.submit()
-
-
-def set_usd_rate(date, rate):
-	frappe.db.delete(
-		"Currency Exchange", {"date": getdate(date), "from_currency": "USD", "to_currency": "INR"}
-	)
-	frappe.get_doc(
-		{
-			"doctype": "Currency Exchange",
-			"date": date,
-			"from_currency": "USD",
-			"to_currency": "INR",
-			"exchange_rate": rate,
-			"for_buying": 1,
-			"for_selling": 1,
-		}
-	).insert()

@@ -11,15 +11,6 @@ frappe.ui.form.on("Territory", {
 				},
 			};
 		};
-
-		frm.set_query("parent_territory", function (doc) {
-			return {
-				filters: [
-					["Territory", "is_group", "=", 1],
-					["Territory", "name", "!=", doc.territory_name],
-				],
-			};
-		});
 	},
 	refresh: function (frm) {
 		frm.trigger("set_root_readonly");
@@ -34,3 +25,13 @@ frappe.ui.form.on("Territory", {
 		}
 	},
 });
+
+//get query select territory
+cur_frm.fields_dict["parent_territory"].get_query = function (doc, cdt, cdn) {
+	return {
+		filters: [
+			["Territory", "is_group", "=", 1],
+			["Territory", "name", "!=", doc.territory_name],
+		],
+	};
+};

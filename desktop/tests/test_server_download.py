@@ -15,10 +15,15 @@ class Response(BytesIO):
 
 
 class DownloadTests(unittest.TestCase):
+    def setUp(self):
+        published = patch.object(download, 'PUBLISHED', True)
+        published.start()
+        self.addCleanup(published.stop)
+
     def test_resume_verifies_complete_file(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)
-            part = cache / 'nahj-server-0.3.0-amd64.tar.gz.part'
+            part = cache / (download.FILENAME + '.part')
             part.write_bytes(b'abc')
             with patch.object(download, 'SIZE', 6), patch.object(download, 'IMAGE_SHA256', hashlib.sha256(b'abcdef').hexdigest()), patch.object(download, 'urlopen', return_value=Response(b'def')) as request:
                 result = download.download(lambda _: None, cache)
@@ -34,9 +39,16 @@ class DownloadTests(unittest.TestCase):
 
     def test_corrupt_cached_archive_never_used(self):
         with tempfile.TemporaryDirectory() as directory:
-            (Path(directory) / 'nahj-server-0.3.0-amd64.tar.gz').write_bytes(b'bad')
+            (Path(directory) / download.FILENAME).write_bytes(b'bad')
             with patch.object(download, 'urlopen') as request:
                 with self.assertRaises(ServerError):
+                    download.download(lambda _: None, directory)
+            request.assert_not_called()
+
+    def test_unpublished_archive_does_not_attempt_a_dead_download(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(download, 'PUBLISHED', False), patch.object(download, 'urlopen') as request:
+                with self.assertRaisesRegex(ServerError, 'under validation'):
                     download.download(lambda _: None, directory)
             request.assert_not_called()
 

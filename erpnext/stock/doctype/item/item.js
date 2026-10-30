@@ -6,26 +6,6 @@ frappe.provide("erpnext.item");
 const SALES_DOCTYPES = ["Quotation", "Sales Order", "Delivery Note", "Sales Invoice"];
 const PURCHASE_DOCTYPES = ["Purchase Order", "Purchase Receipt", "Purchase Invoice"];
 
-const virtual_field_map = {
-	default_warehouse: "vf_default_warehouse",
-	default_price_list: "vf_default_price_list",
-	default_discount_account: "vf_default_discount_account",
-	default_inventory_account: "vf_default_inventory_account",
-	buying_cost_center: "vf_buying_cost_center",
-	default_supplier: "vf_default_supplier",
-	expense_account: "vf_expense_account",
-	default_provisional_account: "vf_default_provisional_account",
-	purchase_expense_account: "vf_purchase_expense_account",
-	purchase_expense_contra_account: "vf_purchase_expense_contra_account",
-	expenses_added_to_stock_account: "vf_expenses_added_to_stock_account",
-	expenses_added_to_stock_contra_account: "vf_expenses_added_to_stock_contra_account",
-	selling_cost_center: "vf_selling_cost_center",
-	income_account: "vf_income_account",
-	default_cogs_account: "vf_default_cogs_account",
-	deferred_expense_account: "vf_deferred_expense_account",
-	deferred_revenue_account: "vf_deferred_revenue_account",
-};
-
 frappe.ui.form.on("Item", {
 	stock_uom(frm) {
 		// Each factor is relative to Stock UOM and becomes invalid when it changes.
@@ -62,21 +42,7 @@ frappe.ui.form.on("Item", {
 		}
 	},
 
-	allow_negative_stock(frm) {
-		erpnext.utils.confirm_negative_stock(frm);
-	},
-
-	restrict_to_companies(frm) {
-		if (!frm.doc.restrict_to_companies) {
-			frm.set_value("allowed_companies", []);
-		}
-	},
-
 	setup: function (frm) {
-		frm.set_query("item_group", () => ({ filters: { is_group: 0 } }));
-		frm.set_query("allowed_companies", () => ({
-			query: "erpnext.stock.doctype.company_restriction.company_restriction.company_query",
-		}));
 		frm.add_fetch("attribute", "numeric_values", "numeric_values");
 		frm.add_fetch("attribute", "from_range", "from_range");
 		frm.add_fetch("attribute", "to_range", "to_range");
@@ -171,7 +137,7 @@ frappe.ui.form.on("Item", {
 		if (frappe.defaults.get_default("item_naming_by") != "Naming Series" || frm.doc.variant_of) {
 			frm.toggle_display("naming_series", false);
 		} else {
-			erpnext.toggle_naming_series(frm);
+			erpnext.toggle_naming_series();
 		}
 
 		frm.toggle_display(["standard_rate"], frappe.model.can_create("Item Price"));
@@ -397,53 +363,6 @@ frappe.ui.form.on("Item", {
 	},
 });
 
-frappe.ui.form.on("Item Default", {
-	form_render: function (frm, cdt, cdn) {
-		if (!frm.fields_dict["item_defaults"]) return;
-
-		const row = locals[cdt][cdn];
-		if (!row || !row.company) {
-			Object.values(virtual_field_map).forEach((vf) => frappe.model.set_value(cdt, cdn, vf, ""));
-			return;
-		}
-
-		const $grid_row = frm.fields_dict["item_defaults"].grid.wrapper.find(`.grid-row[data-name="${cdn}"]`);
-
-		if (!$grid_row.find(".item-defaults-desc").length) {
-			$grid_row.find(".grid-form-body").prepend(`
-				<div class="row">
-					<div class="col-xs-12">
-						<div class="item-defaults-desc" style="
-							background: var(--control-bg);
-							border-radius: var(--border-radius-sm);
-							padding: 6px 6px 8px 14px;
-							color: var(--text-muted);
-
-						">
-							${__(
-								"Left column shows inherited defaults (Item Group → Company / Stock Settings). Right column is where you set overrides for this item only."
-							)}
-						</div>
-					</div>
-				</div>
-			`);
-		}
-
-		erpnext.item.populate_virtual_fields(frm, cdt, cdn, row);
-	},
-
-	company: function (frm, cdt, cdn) {
-		if (!frm.fields_dict["item_defaults"]) return;
-
-		const row = locals[cdt][cdn];
-		if (!row || !row.company) {
-			Object.values(virtual_field_map).forEach((vf) => frappe.model.set_value(cdt, cdn, vf, ""));
-			return;
-		}
-		erpnext.item.populate_virtual_fields(frm, cdt, cdn, row);
-	},
-});
-
 frappe.ui.form.on("Item Reorder", {
 	reorder_levels_add: function (frm, cdt, cdn) {
 		var row = frappe.get_doc(cdt, cdn);
@@ -547,93 +466,6 @@ function render_serial_batch_banner(wrapper) {
 }
 
 $.extend(erpnext.item, {
-	populate_virtual_fields: function (frm, cdt, cdn, row) {
-		if (!frm.doc.item_group || !row.company) {
-			Object.values(virtual_field_map).forEach((vf) => frappe.model.set_value(cdt, cdn, vf, ""));
-			return;
-		}
-
-		const company = row.company;
-		const item_group = frm.doc.item_group;
-
-		frappe.call({
-			method: "frappe.client.get",
-			args: { doctype: "Item Group", name: frm.doc.item_group },
-			freeze: false,
-			callback: function (r) {
-				if (!r.message) return;
-
-				const current_row = locals[cdt][cdn];
-				if (!current_row || current_row.company !== company || frm.doc.item_group !== item_group)
-					return;
-
-				const group_defaults =
-					(r.message.item_group_defaults || []).find((d) => d.company === company) || {};
-
-				// Set Item Group values immediately; collect fields that need company fallback
-				const needs_company_fallback = [];
-				Object.entries(virtual_field_map).forEach(([real_field, vf_field]) => {
-					if (group_defaults[real_field]) {
-						frappe.model.set_value(cdt, cdn, vf_field, group_defaults[real_field]);
-					} else {
-						frappe.model.set_value(cdt, cdn, vf_field, "");
-						needs_company_fallback.push(real_field);
-					}
-				});
-
-				if (!needs_company_fallback.length) {
-					setTimeout(() => erpnext.item.update_vf_labels(frm, cdn, {}), 50);
-					return;
-				}
-				frappe.call({
-					method: "erpnext.setup.doctype.item_group.item_group.get_company_resolved_defaults",
-					args: { company: company },
-					freeze: false,
-					callback: function (cr) {
-						const current_row = locals[cdt][cdn];
-						if (
-							!current_row ||
-							current_row.company !== company ||
-							frm.doc.item_group !== item_group
-						)
-							return;
-
-						const company_defaults = cr.message || {};
-						const from_company = {};
-
-						needs_company_fallback.forEach((real_field) => {
-							const val = company_defaults[real_field] || "";
-							if (val) from_company[real_field] = val;
-							frappe.model.set_value(cdt, cdn, virtual_field_map[real_field], val || "—");
-						});
-
-						setTimeout(() => erpnext.item.update_vf_labels(frm, cdn, from_company), 50);
-					},
-				});
-			},
-		});
-	},
-
-	update_vf_labels: function (frm, cdn, from_company) {
-		const $grid_row = frm.fields_dict["item_defaults"].grid.wrapper.find(`.grid-row[data-name="${cdn}"]`);
-		if (!$grid_row.length) return;
-
-		Object.entries(virtual_field_map).forEach(([real_field, vf_field]) => {
-			const $label = $grid_row
-				.find(`[data-fieldname="${vf_field}"]`)
-				.find(".control-label, label")
-				.first();
-			if (!$label.length) return;
-
-			if (!$label.data("base-label")) {
-				$label.data("base-label", $label.text().trim());
-			}
-			const base = $label.data("base-label");
-
-			$label.text(from_company[real_field] ? `${base} (Company)` : `${base} (Item Group)`);
-		});
-	},
-
 	setup_queries: function (frm) {
 		frm.fields_dict["item_defaults"].grid.get_field("expense_account").get_query = function (
 			doc,
@@ -808,9 +640,9 @@ $.extend(erpnext.item, {
 		let fields = [
 			"purchase_expense_account",
 			"purchase_expense_contra_account",
-			"default_cogs_account",
 			"expenses_added_to_stock_account",
 			"expenses_added_to_stock_contra_account",
+			"default_cogs_account",
 		];
 
 		fields.forEach((field) => {
@@ -1647,7 +1479,7 @@ frappe.tour["Item"] = [
 	},
 	{
 		fieldname: "include_item_in_manufacturing",
-		title: "Include Item in Manufacturing",
+		title: __("Include Item in Manufacturing"),
 		description: __(
 			"This is for raw material Items that'll be used to create finished goods. If the Item is an additional service like 'washing' that'll be used in the BOM, keep this unchecked."
 		),

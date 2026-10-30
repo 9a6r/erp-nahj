@@ -6,7 +6,7 @@ import sys
 
 def main():
     parser = argparse.ArgumentParser(prog='nahj-desktop', description='Nahj business workspace')
-    parser.add_argument('--version', action='version', version='Nahj Desktop 0.3.0')
+    parser.add_argument('--version', action='version', version='Nahj Desktop 0.3.1-rc1')
     parser.add_argument('--check', action='store_true', help='Check desktop runtime dependencies')
     parser.add_argument('--graphics-compatibility', action='store_true', help='Use compatible rendering for virtual machines and older graphics drivers')
     args = parser.parse_args()

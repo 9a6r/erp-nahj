@@ -38,7 +38,7 @@
  ],
  "icon": "calendar-clock",
  "links": [],
- "modified": "2026-09-29 12:00:00.000000",
+ "modified": "2026-09-24 14:00:00.000000",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Payment Terms Template",
@@ -86,14 +86,6 @@
    "select": 1
   },
   {
-   "role": "Purchase Master Manager",
-   "select": 1
-  },
-  {
-   "role": "Sales Master Manager",
-   "select": 1
-  },
-  {
    "read": 1,
    "role": "Maintenance Manager"
   },
@@ -106,6 +98,10 @@
    "role": "Purchase Manager"
   },
   {
+   "role": "Purchase Master Manager",
+   "select": 1
+  },
+  {
    "read": 1,
    "role": "Purchase User"
   },
@@ -114,12 +110,12 @@
    "role": "Sales Manager"
   },
   {
-   "read": 1,
-   "role": "Sales User"
+   "role": "Sales Master Manager",
+   "select": 1
   },
   {
    "read": 1,
-   "role": "Manufacturing Manager"
+   "role": "Sales User"
   }
  ],
  "sort_field": "creation",

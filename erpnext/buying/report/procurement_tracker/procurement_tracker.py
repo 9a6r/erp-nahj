@@ -8,8 +8,6 @@ from frappe.query_builder import Case
 from frappe.query_builder.functions import Max, Sum
 from frappe.utils import flt
 
-from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_companies_condition
-
 
 def execute(filters=None):
 	columns = get_columns(filters)
@@ -212,7 +210,11 @@ def get_ordered_qty_by_request_item(request_items):
 
 def get_request_qty_column(parent, child):
 	"""Order line quantity in its request's unit: finished goods for subcontracting."""
-	return Case().when(parent.is_subcontracted == 1, child.fg_item_qty).else_(child.stock_qty)
+	return (
+		Case()
+		.when((parent.is_subcontracted == 1) & (parent.is_old_subcontracting_flow == 0), child.fg_item_qty)
+		.else_(child.stock_qty)
+	)
 
 
 def get_actual_cost(po, pi_records):
@@ -258,9 +260,6 @@ def get_mapped_mr_details(filters, request_items):
 			& (parent.material_request_type.isin(("Purchase", "Subcontracting")))
 		)
 	)
-	if condition := get_allowed_companies_condition(parent.company, "Material Request"):
-		query = query.where(condition)
-
 	mr_records = {}
 	if request_items:
 		for record in query.where(child.name.isin(list(request_items))).run(as_dict=True):
@@ -366,7 +365,5 @@ def get_po_entries(filters):
 		)
 	)
 	query = apply_filters_on_query(filters, parent, child, query)
-	if condition := get_allowed_companies_condition(parent.company, "Purchase Order"):
-		query = query.where(condition)
 
 	return query.run(as_dict=True)

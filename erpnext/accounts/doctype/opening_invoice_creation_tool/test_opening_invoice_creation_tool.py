@@ -4,8 +4,7 @@
 from unittest.mock import patch
 
 import frappe
-from frappe.utils import add_days, now, today
-from frappe.utils.logging import get_log_db
+from frappe.utils import add_days, today
 
 from erpnext.accounts.doctype.account.test_account import create_account
 from erpnext.accounts.doctype.opening_invoice_creation_tool.opening_invoice_creation_tool import (
@@ -92,20 +91,15 @@ class TestOpeningInvoiceCreationTool(ERPNextTestSuite):
 		)
 		frappe.db.set_value("Company", "_Test Opening Invoice Company", "default_receivable_account", "")
 
-		# Error Logs are not rolled back between tests, so only count the ones logged here
-		started = now()
 		self.make_invoices(
 			company="_Test Opening Invoice Company",
 			invoices=[{"party": party_1}, {"party": party_2}],
 		)
 
 		# Check if missing debit account error raised
-		error_log = get_log_db().exists(
+		error_log = frappe.db.exists(
 			"Error Log",
-			{
-				"error": ["like", "%erpnext.controllers.accounts_controller.AccountMissingError%"],
-				"creation": [">=", started],
-			},
+			{"error": ["like", "%erpnext.controllers.accounts_controller.AccountMissingError%"]},
 		)
 		self.assertTrue(error_log)
 

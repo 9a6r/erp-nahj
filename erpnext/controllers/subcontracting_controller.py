@@ -9,7 +9,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.model.mapper import get_mapped_doc
-from frappe.utils import cint, escape_html, flt, get_link_to_form
+from frappe.utils import cint, flt, get_link_to_form
 
 from erpnext.controllers.stock_controller import StockController
 from erpnext.stock.doctype.batch.batch import get_batch_qty
@@ -21,15 +21,23 @@ from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle impor
 )
 from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
 from erpnext.stock.serial_batch_bundle import SerialBatchCreation
-from erpnext.stock.serial_batch_identity import SerialBatchIdentity
-from erpnext.stock.utils import _get_incoming_rate, get_valuation_method
-from erpnext.subcontracting.doctype.subcontracting_bom.subcontracting_bom import get_applicable_bom_items
+from erpnext.stock.utils import _get_incoming_rate
 
 
 class SubcontractingController(StockController):
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
-		if self.doctype == "Subcontracting Inward Order":
+		if self.get("is_old_subcontracting_flow"):
+			self.subcontract_data = frappe._dict(
+				{
+					"order_doctype": "Purchase Order",
+					"order_field": "purchase_order",
+					"rm_detail_field": "po_detail",
+					"receipt_supplied_items_field": "Purchase Receipt Item Supplied",
+					"order_supplied_items_field": "Purchase Order Item Supplied",
+				}
+			)
+		elif self.doctype == "Subcontracting Inward Order":
 			self.subcontract_data = frappe._dict(
 				{
 					"order_doctype": "Subcontracting Inward Order",
@@ -92,12 +100,7 @@ class SubcontractingController(StockController):
 					}
 				)
 
-				rate = (
-					0.0
-					if row.reference_name in rejected_return_rows
-					and get_valuation_method(row.rm_item_code, self.company) != "Standard Cost"
-					else _get_incoming_rate(kwargs)
-				)
+				rate = 0.0 if row.reference_name in rejected_return_rows else _get_incoming_rate(kwargs)
 				precision = frappe.get_precision("Subcontracting Receipt Supplied Item", "rate")
 				if flt(rate, precision) != flt(row.rate, precision):
 					row.rate = rate
@@ -238,9 +241,9 @@ class SubcontractingController(StockController):
 								item.idx, item.item_name
 							)
 						)
-					if bom_item not in get_applicable_bom_items(item.item_code):
+					if bom_item != item.item_code:
 						frappe.throw(
-							_("Row {0}: Please select a valid BOM for Item {1}.").format(
+							_("Row {0}: Please select an valid BOM for Item {1}.").format(
 								item.idx, item.item_name
 							)
 						)
@@ -478,11 +481,8 @@ class SubcontractingController(StockController):
 				from erpnext.deprecation_dumpster import deprecation_warning
 
 				deprecation_warning("unknown", "v16", "No instructions.")
-				consumed_serials = SerialBatchIdentity("Serial No").resolve(
-					row.rm_item_code, get_serial_nos(row.serial_no), ignore_permissions=True
-				)
 				self.available_materials[key]["serial_no"] = list(
-					set(self.available_materials[key]["serial_no"]) - set(consumed_serials)
+					set(self.available_materials[key]["serial_no"]) - set(get_serial_nos(row.serial_no))
 				)
 
 			# Will be deprecated in v16
@@ -540,11 +540,7 @@ class SubcontractingController(StockController):
 			)
 
 			if row.serial_no:
-				details.serial_no.extend(
-					SerialBatchIdentity("Serial No").resolve(
-						row.rm_item_code, get_serial_nos(row.serial_no), ignore_permissions=True
-					)
-				)
+				details.serial_no.extend(get_serial_nos(row.serial_no))
 			if row.batch_no:
 				details.batch_no[row.batch_no] += row.qty
 
@@ -568,7 +564,11 @@ class SubcontractingController(StockController):
 			self.__set_alternative_item_details(row)
 
 		self.__transferred_items = copy.deepcopy(self.available_materials)
-		self.__update_consumed_materials("Subcontracting Receipt")
+		if self.get("is_old_subcontracting_flow"):
+			for doctype in ["Purchase Receipt", "Purchase Invoice"]:
+				self.__update_consumed_materials(doctype)
+		else:
+			self.__update_consumed_materials("Subcontracting Receipt")
 
 	def __remove_changed_rows(self):
 		if not self.__changed_name:
@@ -626,7 +626,7 @@ class SubcontractingController(StockController):
 		filters = [
 			[doctype, "parent", "=", bom_no],
 			[doctype, "docstatus", "=", 1],
-			["BOM", "item", "in", get_applicable_bom_items(item_code)],
+			["BOM", "item", "=", item_code],
 			[doctype, "sourced_by_supplier", "=", 0],
 		]
 
@@ -726,11 +726,13 @@ class SubcontractingController(StockController):
 		return available_batches
 
 	def __get_serial_nos_for_bundle(self, qty, key):
-		available_serials = self.available_materials[key]["serial_no"]
-		numbers = SerialBatchIdentity("Serial No").get_number_map(available_serials)
-		serial_nos = sorted(available_serials, key=lambda name: numbers[name])[: cint(qty)]
-		for serial_no in serial_nos:
-			available_serials.remove(serial_no)
+		available_sns = sorted(self.available_materials[key]["serial_no"])[0 : cint(qty)]
+		serial_nos = []
+
+		for serial_no in available_sns:
+			serial_nos.append(serial_no)
+
+			self.available_materials[key]["serial_no"].remove(serial_no)
 
 		return serial_nos
 
@@ -776,6 +778,7 @@ class SubcontractingController(StockController):
 				self.set_batch_for_supplied_items()
 
 	def set_batch_for_supplied_items(self):
+		from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos_for_outward
 		from erpnext.stock.get_item_details import get_filtered_serial_nos
 
 		if self.is_return:
@@ -807,9 +810,7 @@ class SubcontractingController(StockController):
 				if serial_nos:
 					serial_nos = [sn.get("serial_no") for sn in serial_nos]
 					serial_nos = get_filtered_serial_nos(serial_nos, self, "supplied_items")
-					row.serial_no = "\n".join(
-						SerialBatchIdentity("Serial No").get_numbers(row.rm_item_code, serial_nos)
-					)
+					row.serial_no = "\n".join(serial_nos)
 
 			elif (
 				item_details.has_batch_no
@@ -934,9 +935,7 @@ class SubcontractingController(StockController):
 		key = (rm_obj.rm_item_code, item_row.item_code, item_row.get(self.subcontract_data.order_field))
 		if self.available_materials.get(key) and self.available_materials[key]["serial_no"]:
 			used_serial_nos = self.available_materials[key]["serial_no"][0 : cint(rm_obj.consumed_qty)]
-			rm_obj.serial_no = "\n".join(
-				SerialBatchIdentity("Serial No").get_numbers(rm_obj.rm_item_code, used_serial_nos)
-			)
+			rm_obj.serial_no = "\n".join(used_serial_nos)
 
 			# Removed the used serial nos from the list
 			for sn in used_serial_nos:
@@ -1119,16 +1118,8 @@ class SubcontractingController(StockController):
 			link = get_link_to_form(
 				self.subcontract_data.order_doctype, row.get(self.subcontract_data.order_field)
 			)
-			msg = _("The Batch No {0} has not been supplied against the {1} {2}").format(
-				frappe.bold(
-					", ".join(
-						SerialBatchIdentity("Batch").get_label(batch_no) for batch_no in incorrect_batches
-					)
-				),
-				self.subcontract_data.order_doctype,
-				link,
-			)
-			frappe.throw(msg, title=_("Incorrect Batch Consumed"))
+			msg = f"The Batch No {frappe.bold(', '.join(incorrect_batches))} has not supplied against the {self.subcontract_data.order_doctype} {link}"
+			frappe.throw(_(msg), title=_("Incorrect Batch Consumed"))
 
 	def __validate_serial_no(self, row, key, bundle_entries):
 		if self.__transferred_items.get(key).get("serial_no"):
@@ -1136,15 +1127,12 @@ class SubcontractingController(StockController):
 			incorrect_sn = serial_nos.difference(self.__transferred_items.get(key).get("serial_no"))
 
 			if incorrect_sn:
-				numbers = SerialBatchIdentity("Serial No").get_number_map(incorrect_sn)
-				incorrect_sn = "\n".join(escape_html(numbers.get(name, name)) for name in incorrect_sn)
+				incorrect_sn = "\n".join(incorrect_sn)
 				link = get_link_to_form(
 					self.subcontract_data.order_doctype, row.get(self.subcontract_data.order_field)
 				)
-				msg = _("The Serial Nos {0} have not been supplied against the {1} {2}").format(
-					incorrect_sn, self.subcontract_data.order_doctype, link
-				)
-				frappe.throw(msg, title=_("Incorrect Serial Number Consumed"))
+				msg = f"The Serial Nos {incorrect_sn} has not supplied against the {self.subcontract_data.order_doctype} {link}"
+				frappe.throw(_(msg), title=_("Incorrect Serial Number Consumed"))
 
 	def __validate_supplied_or_received_items(self):
 		if self.doctype not in ["Purchase Invoice", "Purchase Receipt", "Subcontracting Receipt"]:
@@ -1221,17 +1209,24 @@ class SubcontractingController(StockController):
 
 	def set_consumed_qty_in_subcontract_order(self):
 		# Update consumed qty back in the subcontract order
-		if self.doctype in ["Subcontracting Order", "Subcontracting Receipt"]:
+		if self.doctype in ["Subcontracting Order", "Subcontracting Receipt"] or self.get(
+			"is_old_subcontracting_flow"
+		):
 			self.__get_subcontract_orders()
 			itemwise_consumed_qty = defaultdict(float)
+			if self.get("is_old_subcontracting_flow"):
+				doctypes = ["Purchase Receipt", "Purchase Invoice"]
+			else:
+				doctypes = ["Subcontracting Receipt"]
 
-			consumed_items, receipt_items = self.__update_consumed_materials(
-				"Subcontracting Receipt", return_consumed_items=True
-			)
+			for doctype in doctypes:
+				consumed_items, receipt_items = self.__update_consumed_materials(
+					doctype, return_consumed_items=True
+				)
 
-			for row in consumed_items:
-				key = (row.rm_item_code, row.main_item_code, receipt_items.get(row.reference_name))
-				itemwise_consumed_qty[key] += row.consumed_qty
+				for row in consumed_items:
+					key = (row.rm_item_code, row.main_item_code, receipt_items.get(row.reference_name))
+					itemwise_consumed_qty[key] += row.consumed_qty
 
 			self.__update_consumed_qty_in_subcontract_order(itemwise_consumed_qty)
 
@@ -1316,10 +1311,32 @@ class SubcontractingController(StockController):
 			via_landed_cost_voucher=via_landed_cost_voucher,
 		)
 
-	def get_supplied_items_cost(self, item_row_id):
+	def get_supplied_items_cost(self, item_row_id, reset_outgoing_rate=True):
 		supplied_items_cost = 0.0
 		for item in self.get("supplied_items"):
 			if item.reference_name == item_row_id:
+				if (
+					self.get("is_old_subcontracting_flow")
+					and reset_outgoing_rate
+					and frappe.get_cached_value("Item", item.rm_item_code, "is_stock_item")
+				):
+					rate = _get_incoming_rate(
+						{
+							"item_code": item.rm_item_code,
+							"warehouse": self.supplier_warehouse,
+							"posting_date": self.posting_date,
+							"posting_time": self.posting_time,
+							"qty": -1 * item.consumed_qty,
+							"voucher_detail_no": item.name,
+							"serial_and_batch_bundle": item.get("serial_and_batch_bundle"),
+							"serial_no": item.get("serial_no"),
+							"batch_no": item.get("batch_no"),
+						}
+					)
+
+					if rate > 0:
+						item.rate = rate
+
 				item.amount = flt(flt(item.consumed_qty) * flt(item.rate), item.precision("amount"))
 				supplied_items_cost += item.amount
 
@@ -1443,10 +1460,7 @@ def get_pending_subcontracted_quantity(doctype, name):
 
 @frappe.whitelist()
 def make_rm_stock_entry(
-	subcontract_order: str,
-	rm_items: list | None = None,
-	order_doctype: str = "Subcontracting Order",
-	target_doc: str | dict | Document | None = None,
+	subcontract_order, rm_items=None, order_doctype="Subcontracting Order", target_doc=None
 ):
 	if subcontract_order:
 		subcontract_order = frappe.get_doc(order_doctype, subcontract_order)
@@ -1509,18 +1523,16 @@ def make_rm_stock_entry(
 							items_dict = {
 								rm_item_code: {
 									rm_detail_field: rm_item.get("name"),
-									"item_code": rm_item_code,
 									"item_name": rm_item.get("item_name")
 									or item_wh.get(rm_item_code, {}).get("item_name", ""),
 									"description": item_wh.get(rm_item_code, {}).get("description", ""),
 									"qty": qty,
-									"s_warehouse": rm_item.get("warehouse")
+									"from_warehouse": rm_item.get("warehouse")
 									or rm_item.get("reserve_warehouse"),
-									"t_warehouse": source_doc.supplier_warehouse,
+									"to_warehouse": source_doc.supplier_warehouse,
 									"stock_uom": rm_item.get("stock_uom"),
 									"serial_and_batch_bundle": rm_item.get("serial_and_batch_bundle"),
 									"main_item_code": fg_item_code,
-									"subcontracted_item": fg_item_code,
 									"allow_alternative_item": item_wh.get(rm_item_code, {}).get(
 										"allow_alternative_item"
 									),
@@ -1534,7 +1546,7 @@ def make_rm_stock_entry(
 								}
 							}
 
-							target_doc.append("items", items_dict[rm_item_code])
+							target_doc.add_to_stock_entry_detail(items_dict)
 
 			stock_entry = get_mapped_doc(
 				order_doctype,
@@ -1581,9 +1593,7 @@ def add_items_in_ste(ste_doc, row, qty, rm_details, rm_detail_field="sco_rm_deta
 			"t_warehouse": row.item_details["s_warehouse"],
 			"item_code": row.item_details["rm_item_code"],
 			"subcontracted_item": row.item_details["main_item_code"],
-			"serial_no": "\n".join(
-				SerialBatchIdentity("Serial No").get_numbers(row.item_details["rm_item_code"], row.serial_no)
-			),
+			"serial_no": "\n".join(row.serial_no) if row.serial_no else "",
 			"use_serial_batch_fields": 1,
 		}
 	)
@@ -1637,7 +1647,7 @@ def make_return_stock_entry_for_subcontract(
 
 
 @frappe.whitelist()
-def get_materials_from_supplier(source_name: str, target_doc: str | dict | Document | None = None):
+def get_materials_from_supplier(source_name: str, target_doc: Document | str | None = None):
 	args = frappe.flags.args or {}
 
 	subcontract_order = args.get("subcontract_order") or source_name

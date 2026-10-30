@@ -3,7 +3,6 @@
 
 
 import json
-from typing import Any
 
 import frappe
 from frappe import _, throw
@@ -300,17 +299,12 @@ class Warehouse(NestedSet):
 
 
 @frappe.whitelist()
-def get_children(
-	doctype: str,
-	parent: str | None = None,
-	company: str | None = None,
-	is_root: bool = False,
-	include_disabled: bool | str = False,
-):
+def get_children(doctype, parent=None, company=None, is_root=False, include_disabled=False):
 	if is_root:
 		parent = ""
 
-	include_disabled = frappe.parse_json(include_disabled)
+	if isinstance(include_disabled, str):
+		include_disabled = json.loads(include_disabled)
 
 	fields = ["name as value", "is_group as expandable"]
 
@@ -325,7 +319,7 @@ def get_children(
 	return frappe.get_list(doctype, fields=fields, filters=filters, order_by="name")
 
 
-@frappe.whitelist(methods=["POST"])
+@frappe.whitelist()
 def add_node():
 	from frappe.desk.treeview import make_tree_args
 
@@ -338,13 +332,12 @@ def add_node():
 
 
 @frappe.whitelist(methods=["POST"])
-def convert_to_group_or_ledger(docname: str | None = None):
+def convert_to_group_or_ledger(docname=None):
 	if not docname:
 		docname = frappe.form_dict.docname
 
-	# Converting a warehouse between group and ledger restructures the tree, so it needs write on
-	# the warehouse being converted. `Warehouse` write is held by Item Manager alone, which is also
-	# who can open the form this button sits on (warehouse.js:104).
+	# Converting a warehouse restructures the tree, so it needs write on the warehouse being converted,
+	# which Item Manager holds -- the same role that can open this form.
 	warehouse = frappe.get_doc("Warehouse", docname)
 	warehouse.check_permission("write")
 
@@ -411,11 +404,9 @@ def apply_warehouse_filter(query, sle, filters):
 
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
-def get_warehouses_for_reorder(
-	doctype: str, txt: Any, searchfield: Any, start: int, page_len: int, filters: dict
-):
-	# Reached from the Item form's reorder table (item.js:774); `read` on Warehouse is the target
-	# right and costs none of the roles that can edit an Item.
+def get_warehouses_for_reorder(doctype, txt, searchfield, start, page_len, filters):
+	# Reached from the Item form's reorder table; `read` on Warehouse costs none of the roles that can
+	# edit an Item.
 	frappe.has_permission("Warehouse", throw=True)
 
 	filters = frappe._dict(filters or {})

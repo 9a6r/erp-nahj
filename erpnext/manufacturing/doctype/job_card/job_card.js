@@ -98,41 +98,6 @@ frappe.ui.form.on("Job Card", {
 		}
 	},
 
-	set_corrective_job_card_labels(frm) {
-		const is_corrective_job_card = Boolean(frm.doc.is_corrective_job_card);
-
-		frm.set_df_property(
-			"for_quantity",
-			"label",
-			is_corrective_job_card ? __("Qty To Correct") : __("Qty To Manufacture")
-		);
-		frm.set_df_property(
-			"total_completed_qty",
-			"label",
-			is_corrective_job_card ? __("Total Corrected Qty") : __("Total Completed Qty")
-		);
-	},
-
-	toggle_material_tables(frm) {
-		const backflush_based_on_material_transfer =
-			frm.doc.__onload?.backflush_raw_materials_based_on === "Material Transferred for Manufacture";
-		const show_material_tables =
-			backflush_based_on_material_transfer ||
-			frm.doc.__onload?.transfer_material_against === "Job Card" ||
-			Boolean(frm.doc.track_semi_finished_goods) ||
-			Boolean(frm.doc.items?.length) ||
-			Boolean(frm.doc.secondary_items?.length);
-
-		frm.toggle_display(
-			["section_break_8", "items", "secondary_items_section", "secondary_items"],
-			show_material_tables
-		);
-	},
-
-	track_semi_finished_goods(frm) {
-		frm.trigger("toggle_material_tables");
-	},
-
 	setup_stock_entry(frm) {
 		const { doc } = frm;
 		const can_make_stock_entry =
@@ -204,8 +169,6 @@ frappe.ui.form.on("Job Card", {
 		}
 
 		frm.trigger("make_fields_read_only");
-		frm.trigger("set_corrective_job_card_labels");
-		frm.trigger("toggle_material_tables");
 
 		if (!frm.is_new() && doc.__onload?.work_order_closed) {
 			frm.disable_save();
@@ -346,12 +309,11 @@ frappe.ui.form.on("Job Card", {
 		const accounted_qty = flt(doc.total_completed_qty) + flt(doc.process_loss_qty) + flt(doc.pending_qty);
 		const needs_end_time = !!doc.__onload?.enforce_time_logs;
 
-		return (
-			!!last_log &&
-			(!needs_end_time || !!last_log.to_time) &&
-			flt(doc.for_quantity) > 0 &&
-			flt(accounted_qty, qty_precision) >= flt(doc.for_quantity, qty_precision)
-		);
+		const qty_done =
+			!flt(doc.for_quantity) ||
+			flt(accounted_qty, qty_precision) >= flt(doc.for_quantity, qty_precision);
+
+		return !!last_log && (!needs_end_time || !!last_log.to_time) && qty_done;
 	},
 
 	get_job_steps_html(frm, has_items) {
@@ -619,7 +581,7 @@ frappe.ui.form.on("Job Card", {
 		if (frm.doc.docstatus === 1 && frm.doc.for_quantity > frm.doc.manufactured_qty) {
 			frm.add_custom_button(__("Make Subcontracting PO"), () => {
 				frappe.model.open_mapped_doc({
-					method: "erpnext.manufacturing.doctype.job_card.mapper.make_subcontracting_po",
+					method: "erpnext.manufacturing.doctype.job_card.job_card.make_subcontracting_po",
 					frm: frm,
 				});
 			}).addClass("btn-primary");
@@ -646,7 +608,7 @@ frappe.ui.form.on("Job Card", {
 				reference_name: frm.doc.name,
 				item_code: frm.doc.production_item,
 				item_name: frm.doc.item_name,
-				item_serial_no: frm.doc.serial_no ? frm.doc.serial_no.split("\n")[0] : null,
+				item_serial_no: frm.doc.serial_no,
 				batch_no: frm.doc.batch_no,
 				quality_inspection_template: frm.doc.quality_inspection_template,
 			};
@@ -667,7 +629,6 @@ frappe.ui.form.on("Job Card", {
 						label: __("Corrective Operation"),
 						options: "Operation",
 						fieldname: "operation",
-						reqd: 1,
 						get_query() {
 							return { filters: { is_corrective_operation: 1 } };
 						},
@@ -677,7 +638,6 @@ frappe.ui.form.on("Job Card", {
 						label: __("For Operation"),
 						options: "Operation",
 						fieldname: "for_operation",
-						reqd: 1,
 						get_query() {
 							return { filters: { name: ["in", operations] } };
 						},
@@ -687,17 +647,16 @@ frappe.ui.form.on("Job Card", {
 				frappe.prompt(
 					fields,
 					(d) => frm.events.make_corrective_job_card(frm, d.operation, d.for_operation),
-					__("Select Corrective Operation"),
-					__("Create")
+					__("Select Corrective Operation")
 				);
 			},
-			__("Create")
+			__("Make")
 		);
 	},
 
 	make_corrective_job_card(frm, operation, for_operation) {
 		frappe.call({
-			method: "erpnext.manufacturing.doctype.job_card.mapper.make_corrective_job_card",
+			method: "erpnext.manufacturing.doctype.job_card.job_card.make_corrective_job_card",
 			args: {
 				source_name: frm.doc.name,
 				operation: operation,
@@ -1030,10 +989,6 @@ frappe.ui.form.on("Job Card", {
 	},
 
 	for_quantity(frm) {
-		if (frm.doc.is_corrective_job_card) {
-			return;
-		}
-
 		frm.doc.items = [];
 		frm.call({
 			method: "get_required_items",
@@ -1046,7 +1001,7 @@ frappe.ui.form.on("Job Card", {
 
 	make_material_request(frm, only_shortage = false) {
 		frappe.model.open_mapped_doc({
-			method: "erpnext.manufacturing.doctype.job_card.mapper.make_material_request",
+			method: "erpnext.manufacturing.doctype.job_card.job_card.make_material_request",
 			frm: frm,
 			args: only_shortage === true ? { only_shortage: 1 } : null,
 			run_link_triggers: true,
@@ -1055,7 +1010,7 @@ frappe.ui.form.on("Job Card", {
 
 	make_stock_entry(frm) {
 		frappe.model.open_mapped_doc({
-			method: "erpnext.manufacturing.doctype.job_card.mapper.make_stock_entry",
+			method: "erpnext.manufacturing.doctype.job_card.job_card.make_stock_entry",
 			frm: frm,
 			run_link_triggers: true,
 		});

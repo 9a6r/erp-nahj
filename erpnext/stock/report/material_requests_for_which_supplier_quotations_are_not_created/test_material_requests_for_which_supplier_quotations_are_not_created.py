@@ -6,7 +6,7 @@ import os
 
 import frappe
 
-from erpnext.stock.doctype.material_request.mapper import make_supplier_quotation
+from erpnext.stock.doctype.material_request.material_request import make_supplier_quotation
 from erpnext.stock.doctype.material_request.test_material_request import make_material_request
 from erpnext.tests.utils import ERPNextTestSuite
 

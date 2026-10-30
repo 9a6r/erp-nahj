@@ -22,8 +22,6 @@
   "amount",
   "column_break_11",
   "transferred_qty",
-  "requested_qty",
-  "picked_qty",
   "consumed_qty",
   "returned_qty",
   "subcontracted_qty",
@@ -73,7 +71,7 @@
   },
   {
    "fieldname": "description",
-   "fieldtype": "Text Editor",
+   "fieldtype": "Text",
    "label": "Description",
    "read_only": 1
   },
@@ -94,22 +92,6 @@
    "fieldtype": "Float",
    "in_list_view": 1,
    "label": "Transferred Qty",
-   "read_only": 1
-  },
-  {
-   "depends_on": "eval:!parent.skip_transfer",
-   "fieldname": "requested_qty",
-   "fieldtype": "Float",
-   "label": "Requested Qty",
-   "no_copy": 1,
-   "read_only": 1
-  },
-  {
-   "depends_on": "eval:!parent.skip_transfer",
-   "fieldname": "picked_qty",
-   "fieldtype": "Float",
-   "label": "Picked Qty",
-   "no_copy": 1,
    "read_only": 1
   },
   {

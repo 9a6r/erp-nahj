@@ -31,23 +31,18 @@ def execute(filters=None):
 def get_data(filters, dimension_list):
 	company_currency = erpnext.get_company_currency(filters.company)
 
-	acc = frappe.get_all(
-		"Account",
-		filters={"company": filters.company},
-		fields=[
-			"name",
-			"account_number",
-			"parent_account",
-			"lft",
-			"rgt",
-			"root_type",
-			"report_type",
-			"account_name",
-			"include_in_gross",
-			"account_type",
-			"is_group",
-		],
-		order_by="lft",
+	acc = frappe.db.sql(
+		"""
+		select
+			name, account_number, parent_account, lft, rgt, root_type,
+			report_type, account_name, include_in_gross, account_type, is_group
+		from
+			`tabAccount`
+		where
+			company=%s
+			order by lft""",
+		(filters.company),
+		as_dict=True,
 	)
 
 	if not acc:
@@ -55,17 +50,16 @@ def get_data(filters, dimension_list):
 
 	accounts, accounts_by_name, parent_children_map = filter_accounts(acc)
 
-	lft_rgt = frappe.get_all(
-		"Account",
-		filters={"company": filters.company},
-		fields=[{"MIN": "lft", "as": "min_lft"}, {"MAX": "rgt", "as": "max_rgt"}],
+	min_lft, max_rgt = frappe.db.sql(
+		"""select min(lft), max(rgt) from `tabAccount`
+		where company=%s""",
+		(filters.company),
 	)[0]
-	min_lft, max_rgt = lft_rgt.min_lft, lft_rgt.max_rgt
 
-	account = frappe.get_all(
-		"Account",
-		filters={"lft": [">=", min_lft], "rgt": ["<=", max_rgt], "company": filters.company},
-		pluck="name",
+	account = frappe.db.sql_list(
+		"""select name from `tabAccount`
+		where lft >= %s and rgt <= %s and company = %s""",
+		(min_lft, max_rgt, filters.company),
 	)
 
 	gl_entries_by_account = {}
@@ -81,41 +75,46 @@ def get_data(filters, dimension_list):
 
 
 def set_gl_entries_by_account(dimension_list, filters, account, gl_entries_by_account):
-	dimension_field = frappe.scrub(filters.get("dimension"))
+	condition = get_condition(filters.get("dimension"))
+
+	if account:
+		condition += " and account in ({})".format(", ".join([frappe.db.escape(d) for d in account]))
 
 	gl_filters = {
 		"company": filters.get("company"),
-		dimension_field: ["in", list(set(dimension_list))],
-		"posting_date": ["between", [filters.get("from_date"), filters.get("to_date")]],
-		"is_cancelled": 0,
+		"from_date": filters.get("from_date"),
+		"to_date": filters.get("to_date"),
+		"finance_book": cstr(filters.get("finance_book")),
 	}
-	if account:
-		gl_filters["account"] = ["in", account]
 
-	query = frappe.qb.get_query(
-		"GL Entry",
-		filters=gl_filters,
-		ignore_permissions=False,
-		fields=[
-			"posting_date",
-			"account",
-			dimension_field,
-			"debit",
-			"credit",
-			"is_opening",
-			"fiscal_year",
-			"debit_in_account_currency",
-			"credit_in_account_currency",
-			"account_currency",
-		],
-		order_by="account, posting_date",
-	)
-	gl_entry = frappe.qb.DocType("GL Entry")
-	query = query.where(
-		gl_entry.finance_book.isin([cstr(filters.get("finance_book")), ""]) | gl_entry.finance_book.isnull()
-	).where(gl_entry.voucher_type != "Period Closing Voucher")
+	gl_filters["dimensions"] = tuple(set(dimension_list))
 
-	for entry in query.run(as_dict=True):
+	if filters.get("include_default_book_entries"):
+		gl_filters["company_fb"] = frappe.get_cached_value("Company", filters.company, "default_finance_book")
+
+	gl_entries = frappe.db.sql(
+		"""
+		select
+			posting_date, account, {dimension}, debit, credit, is_opening, fiscal_year,
+			debit_in_account_currency, credit_in_account_currency, account_currency
+		from
+			`tabGL Entry`
+		where
+			company=%(company)s
+		{condition}
+		and posting_date >= %(from_date)s
+		and posting_date <= %(to_date)s
+		and is_cancelled = 0
+		and ifnull(finance_book, '') in (%(finance_book)s, '')
+		and voucher_type != 'Period Closing Voucher'
+		order by account, posting_date""".format(
+			dimension=frappe.scrub(filters.get("dimension")), condition=condition
+		),
+		gl_filters,
+		as_dict=True,
+	)  # nosec
+
+	for entry in gl_entries:
 		gl_entries_by_account.setdefault(entry.account, []).append(entry)
 
 
@@ -179,6 +178,14 @@ def accumulate_values_into_parents(accounts, accounts_by_name, dimension_list):
 				accounts_by_name[d.parent_account][frappe.scrub(dimension)] = accounts_by_name[
 					d.parent_account
 				].get(frappe.scrub(dimension), 0.0) + d.get(frappe.scrub(dimension), 0.0)
+
+
+def get_condition(dimension):
+	conditions = []
+
+	conditions.append(f"{frappe.scrub(dimension)} in %(dimensions)s")
+
+	return " and {}".format(" and ".join(conditions)) if conditions else ""
 
 
 def get_dimensions(filters):

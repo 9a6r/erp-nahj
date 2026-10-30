@@ -252,7 +252,7 @@ def reconcile_based_on_filters(doc: None | str = None) -> None:
 			log = frappe.new_doc("Process Payment Reconciliation Log")
 			log.process_pr = doc
 			log.status = "Running"
-			log = log.save()
+			log = log.save(ignore_permissions=True)
 
 			job_name = f"process_{doc}_fetch_and_allocate"
 			if not is_job_running(job_name):
@@ -370,7 +370,7 @@ def fetch_and_allocate(doc: str) -> None:
 				reconcile_log.allocated = True
 				reconcile_log.total_allocations = len(reconcile_log.get("allocations"))
 				reconcile_log.reconciled_entries = 0
-				reconcile_log.save()
+				reconcile_log.save(ignore_permissions=True)
 
 				# generate reconcile job name
 				allocation = get_next_allocation(log)
@@ -417,6 +417,15 @@ def reconcile(doc: None | str = None) -> None:
 					for x in allocations:
 						pr.append("allocation", x)
 
+					pr.get_nonreconciled_payment_entries()
+					pr.get_invoice_entries(
+						vouchers=[
+							frappe._dict(voucher_type=x.invoice_type, voucher_no=x.invoice_number)
+							for x in allocations
+						]
+					)
+					pr.validate_allocation()
+
 					skip_ref_details_update_for_pe = check_multi_currency(pr)
 					# reconcile
 					pr.reconcile_allocations(skip_ref_details_update_for_pe=skip_ref_details_update_for_pe)
@@ -433,9 +442,7 @@ def reconcile(doc: None | str = None) -> None:
 					# Update reconciled flag
 					allocation_names = [x.name for x in allocations]
 					ppa = qb.DocType("Process Payment Reconciliation Log Allocations")
-					qb.update(ppa).set(ppa.reconciled, 1).where(
-						ppa.name.isin(allocation_names)
-					).run()  # smallint, not bool
+					qb.update(ppa).set(ppa.reconciled, True).where(ppa.name.isin(allocation_names)).run()
 
 					# Update reconciled count
 					reconciled_count = frappe.db.count(
@@ -481,7 +488,7 @@ def reconcile(doc: None | str = None) -> None:
 				finally:
 					if reconciled_entries == total_allocations:
 						frappe.db.set_value("Process Payment Reconciliation Log", log, "status", "Reconciled")
-						frappe.db.set_value("Process Payment Reconciliation Log", log, "reconciled", 1)
+						frappe.db.set_value("Process Payment Reconciliation Log", log, "reconciled", True)
 						frappe.db.set_value("Process Payment Reconciliation", doc, "status", "Completed")
 					else:
 						if frappe.db.get_value("Process Payment Reconciliation", doc, "status") != "Paused":
@@ -505,7 +512,7 @@ def reconcile(doc: None | str = None) -> None:
 								)
 			else:
 				frappe.db.set_value("Process Payment Reconciliation Log", log, "status", "Reconciled")
-				frappe.db.set_value("Process Payment Reconciliation Log", log, "reconciled", 1)
+				frappe.db.set_value("Process Payment Reconciliation Log", log, "reconciled", True)
 				frappe.db.set_value("Process Payment Reconciliation", doc, "status", "Completed")
 
 
@@ -544,7 +551,8 @@ def check_multi_currency(pr_doc):
 def is_any_doc_running(for_filter: str | dict | None = None) -> str | None:
 	running_doc = None
 	if for_filter:
-		for_filter = frappe.parse_json(for_filter)
+		if isinstance(for_filter, str):
+			for_filter = json.loads(for_filter)
 
 		running_doc = frappe.db.get_value(
 			"Process Payment Reconciliation",

@@ -5,7 +5,6 @@ import frappe
 from frappe.utils.data import getdate, today
 
 from erpnext.setup.doctype.employee.test_employee import make_employee
-from erpnext.support.doctype.warranty_claim.warranty_claim import make_maintenance_visit
 from erpnext.tests.utils import ERPNextTestSuite
 
 
@@ -43,48 +42,6 @@ class TestWarrantyClaim(ERPNextTestSuite):
 		visit.insert(ignore_permissions=True)
 		visit.submit()
 		return visit
-
-	def test_make_maintenance_visit_maps_new_visit_when_none_completed(self):
-		# No "Fully Completed" visit yet -> converted query returns nothing,
-		# so a fresh Maintenance Visit draft is mapped from the claim.
-		claim = self.make_warranty_claim()
-
-		target = make_maintenance_visit(claim.name)
-
-		self.assertIsNotNone(target)
-		self.assertEqual(target.doctype, "Maintenance Visit")
-		self.assertTrue(target.is_new())
-		# item_code present -> a purpose row is mapped and back-linked to the claim
-		self.assertEqual(len(target.purposes), 1)
-		row = target.purposes[0]
-		self.assertEqual(row.item_code, "_Test Item")
-		self.assertEqual(row.prevdoc_doctype, "Warranty Claim")
-		self.assertEqual(row.prevdoc_docname, claim.name)
-
-	def test_make_maintenance_visit_returns_none_when_fully_completed_exists(self):
-		# A submitted, "Fully Completed" visit pointing at the claim must be
-		# found by the converted join query -> no new visit is mapped.
-		claim = self.make_warranty_claim()
-		visit = self.make_maintenance_visit_for_claim(claim, "Fully Completed")
-
-		# Sanity: the seeded visit really is the one the query should match.
-		self.assertEqual(visit.docstatus, 1)
-		self.assertEqual(visit.completion_status, "Fully Completed")
-		self.assertEqual(visit.purposes[0].prevdoc_docname, claim.name)
-
-		self.assertIsNone(make_maintenance_visit(claim.name))
-
-	def test_make_maintenance_visit_ignores_partially_completed(self):
-		# A "Partially Completed" visit must NOT satisfy the query, so a new
-		# visit is still mapped (the completion_status filter is exercised).
-		claim = self.make_warranty_claim()
-		self.make_maintenance_visit_for_claim(claim, "Partially Completed")
-
-		target = make_maintenance_visit(claim.name)
-
-		self.assertIsNotNone(target)
-		self.assertTrue(target.is_new())
-		self.assertEqual(target.doctype, "Maintenance Visit")
 
 	def test_cancel_blocked_by_active_maintenance_visit(self):
 		claim = self.make_warranty_claim()

@@ -7,7 +7,7 @@ import frappe.permissions
 from frappe.utils import add_months, nowdate
 
 from erpnext.selling.doctype.product_bundle.test_product_bundle import make_product_bundle
-from erpnext.selling.doctype.sales_order.mapper import make_delivery_note, make_material_request
+from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note, make_material_request
 from erpnext.selling.doctype.sales_order.test_sales_order import create_dn_against_so, make_sales_order
 from erpnext.selling.report.pending_so_items_for_purchase_request.pending_so_items_for_purchase_request import (
 	execute,
@@ -46,7 +46,7 @@ class TestPendingSOItemsForPurchaseRequest(ERPNextTestSuite):
 		so = make_sales_order(
 			item_list=[
 				{"item_code": item, "warehouse": "_Test Warehouse - _TC", "qty": 4, "rate": 100},
-				{"item_code": bundle, "qty": 3, "rate": 100},
+				{"item_code": bundle, "warehouse": "_Test Warehouse - _TC", "qty": 3, "rate": 100},
 			]
 		)
 
@@ -81,12 +81,12 @@ class TestPendingSOItemsForPurchaseRequest(ERPNextTestSuite):
 	def test_disabled_bundle_still_shows_components(self):
 		item = make_item("_Test PSO Disabled Comp", {"is_stock_item": 1}).name
 		bundle = make_item("_Test PSO Disabled Bundle", {"is_stock_item": 0, "is_sales_item": 1}).name
-		pb = make_product_bundle(bundle, [item], qty=2)
+		make_product_bundle(bundle, [item], qty=2)
 		so = make_sales_order(
 			item_list=[{"item_code": bundle, "warehouse": "_Test Warehouse - _TC", "qty": 3, "rate": 100}]
 		)
 
-		frappe.db.set_value("Product Bundle", pb.name, "is_active", 0)
+		frappe.db.set_value("Product Bundle", bundle, "disabled", 1)
 
 		codes = {r["item_code"] for r in execute()[1] if r["sales_order_no"] == so.name}
 		self.assertIn(item, codes)

@@ -36,33 +36,8 @@ class PaymentOrder(Document):
 	# end: auto-generated types
 
 	def validate(self):
-		self.validate_reference_type()
 		self.validate_company_bank_account()
 		self.validate_reference_company()
-
-	def before_mapping(self, source_doc, table_maps):
-		self.validate_reference_type(source_doc.doctype)
-
-	def validate_reference_type(self, payment_order_type=None):
-		payment_order_type = payment_order_type or self.payment_order_type
-		if not payment_order_type:
-			return
-
-		for row in self.references:
-			if payment_order_type == "Payment Request" and row.payment_request:
-				continue
-			if (
-				payment_order_type == "Payment Entry"
-				and row.reference_doctype == "Payment Entry"
-				and not row.payment_request
-			):
-				continue
-
-			frappe.throw(
-				_("Row #{0}: Only {1} references are allowed in this Payment Order.").format(
-					row.idx, _(payment_order_type)
-				)
-			)
 
 	def validate_reference_company(self):
 		if not self.payment_order_type:
@@ -135,7 +110,7 @@ class PaymentOrder(Document):
 			frappe.db.set_value(self.payment_order_type, d.get(ref_doc_field), ref_field, status)
 
 
-def _readable_payment_order(filters: dict) -> str | None:
+def _readable_payment_order(filters):
 	"""Authorise the parent before reading its rows.
 
 	A child table carries no permissions of its own, so a read of it has to be authorised on the
@@ -152,7 +127,7 @@ def _readable_payment_order(filters: dict) -> str | None:
 
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
-def get_mop_query(doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: dict):
+def get_mop_query(doctype, txt, searchfield, start, page_len, filters):
 	if not _readable_payment_order(filters):
 		return []
 
@@ -169,7 +144,7 @@ def get_mop_query(doctype: str, txt: str, searchfield: str, start: int, page_len
 
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
-def get_supplier_query(doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: dict):
+def get_supplier_query(doctype, txt, searchfield, start, page_len, filters):
 	if not _readable_payment_order(filters):
 		return []
 
@@ -189,7 +164,7 @@ def get_supplier_query(doctype: str, txt: str, searchfield: str, start: int, pag
 
 
 @frappe.whitelist()
-def make_payment_records(name: str, supplier: str, mode_of_payment: str | None = None):
+def make_payment_records(name, supplier, mode_of_payment=None):
 	doc = frappe.get_doc("Payment Order", name)
 	doc.check_permission()
 	make_journal_entry(doc, supplier, mode_of_payment)

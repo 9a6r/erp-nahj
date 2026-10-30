@@ -55,6 +55,17 @@ class TestSalesFunnel(ERPNextTestSuite):
 			}
 		).insert(ignore_permissions=True)
 
+	def roles_that_read(self, *doctypes):
+		roles = set()
+		for doctype in doctypes:
+			perms = frappe.get_all(
+				"Custom DocPerm", filters={"parent": doctype, "read": 1, "permlevel": 0}, pluck="role"
+			) or frappe.get_all(
+				"DocPerm", filters={"parent": doctype, "read": 1, "permlevel": 0}, pluck="role"
+			)
+			roles.update(perms)
+		return roles
+
 	def test_funnel_lead_and_opportunity_counts(self):
 		company = "_Test Company"
 		# validate_filters() rejects from_date >= to_date, and the query matches on
@@ -169,17 +180,6 @@ class TestSalesFunnel(ERPNextTestSuite):
 		after = self.get_pipeline_stage_value(get_pipeline_data(from_date, to_date, company), "Prospecting")
 		self.assertEqual(after - baseline, 4000)
 
-	def roles_that_read(self, *doctypes):
-		roles = set()
-		for doctype in doctypes:
-			perms = frappe.get_all(
-				"Custom DocPerm", filters={"parent": doctype, "read": 1, "permlevel": 0}, pluck="role"
-			) or frappe.get_all(
-				"DocPerm", filters={"parent": doctype, "read": 1, "permlevel": 0}, pluck="role"
-			)
-			roles.update(perms)
-		return roles
-
 	def test_funnel_counts_respect_user_permissions(self):
 		company = "_Test Company"
 		from_date, to_date = today(), add_days(today(), 1)
@@ -189,7 +189,7 @@ class TestSalesFunnel(ERPNextTestSuite):
 		lead.db_set("territory", territories[1])
 
 		roles = self.roles_that_read("Lead", "Opportunity", "Quotation", "Customer", "Company")
-		email = f"funnel-perm-{random_string(6).lower()}@example.com"
+		email = f"funnel-perm-{random_string(6)}@example.com"
 		frappe.get_doc(
 			{
 				"doctype": "User",

@@ -5,11 +5,6 @@ import frappe
 from frappe import _
 from frappe.utils import today
 
-from erpnext.stock.doctype.company_restriction.company_restriction import (
-	get_allowed_masters_condition,
-	get_allowed_warehouses_condition,
-)
-
 
 def execute(filters=None):
 	frappe.has_permission("Item Price", "read", throw=True)
@@ -115,23 +110,19 @@ def get_item_price_qty_data(filters):
 	bin = frappe.qb.DocType("Bin")
 	item = frappe.qb.DocType("Item")
 
-	bin_join = item_price.item_code == bin.item_code
-	if condition := get_allowed_warehouses_condition(bin.warehouse):
-		bin_join &= condition
-
 	query = (
 		frappe.qb.from_(item_price)
 		.inner_join(item)
 		.on(item.name == item_price.item_code)
 		.left_join(bin)
-		.on(bin_join)
+		.on(item_price.item_code == bin.item_code)
 		.select(
 			item_price.item_code,
 			item_price.item_name,
 			item_price.name.as_("price_list_name"),
 			item_price.brand.as_("brand"),
-			item_price.uom,
 			item_price.currency,
+			item_price.uom,
 			item.stock_uom,
 			item_price.customer,
 			item_price.supplier,
@@ -146,9 +137,6 @@ def get_item_price_qty_data(filters):
 
 	if filters.get("item_code"):
 		query = query.where(item_price.item_code == filters.get("item_code"))
-
-	if condition := get_allowed_masters_condition(item_price.item_code, "Item"):
-		query = query.where(condition)
 
 	item_results = query.run(as_dict=True)
 
@@ -171,8 +159,8 @@ def get_item_price_qty_data(filters):
 				"buying_rate": 0.0,
 				"selling_price_list": "",
 				"selling_rate": 0.0,
-				"uom": item_dict.uom,
 				"currency": item_dict.currency,
+				"uom": item_dict.uom,
 				"customer": item_dict.customer,
 				"supplier": item_dict.supplier,
 			}

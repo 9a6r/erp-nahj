@@ -32,7 +32,7 @@ class SupplierScorecardStanding(Document):
 
 
 @frappe.whitelist()
-def get_scoring_standing(standing_name: str):
+def get_scoring_standing(standing_name):
 	standing = frappe.get_doc("Supplier Scorecard Standing", standing_name)
 	standing.check_permission("read")
 
@@ -41,7 +41,6 @@ def get_scoring_standing(standing_name: str):
 
 @frappe.whitelist()
 def get_standings_list():
-	"""Returns a list of all Supplier Scorecard Standings."""
 	standings = frappe.get_list("Supplier Scorecard Standing", fields=["name"])
 
 	return standings

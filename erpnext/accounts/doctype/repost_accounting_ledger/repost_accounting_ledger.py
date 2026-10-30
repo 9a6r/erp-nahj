@@ -467,19 +467,24 @@ def get_child_docs(doc: list) -> list:
 
 
 def validate_docs_for_deferred_accounting(sales_docs, purchase_docs):
-	docs_with_deferred_revenue = frappe.db.get_all(
-		"Sales Invoice Item",
-		filters={"parent": ["in", sales_docs], "docstatus": 1, "enable_deferred_revenue": True},
-		fields=["parent"],
-		as_list=1,
-	)
+	docs_with_deferred_revenue = ()
+	docs_with_deferred_expense = ()
 
-	docs_with_deferred_expense = frappe.db.get_all(
-		"Purchase Invoice Item",
-		filters={"parent": ["in", purchase_docs], "docstatus": 1, "enable_deferred_expense": 1},
-		fields=["parent"],
-		as_list=1,
-	)
+	if sales_docs:
+		docs_with_deferred_revenue = frappe.db.get_all(
+			"Sales Invoice Item",
+			filters={"parent": ["in", sales_docs], "docstatus": 1, "enable_deferred_revenue": True},
+			fields=["parent"],
+			as_list=1,
+		)
+
+	if purchase_docs:
+		docs_with_deferred_expense = frappe.db.get_all(
+			"Purchase Invoice Item",
+			filters={"parent": ["in", purchase_docs], "docstatus": 1, "enable_deferred_expense": 1},
+			fields=["parent"],
+			as_list=1,
+		)
 
 	if docs_with_deferred_revenue or docs_with_deferred_expense:
 		frappe.throw(
@@ -511,12 +516,9 @@ def validate_docs_for_voucher_types(doc_voucher_types):
 
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
-def get_repost_allowed_types(
-	doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: dict
-):
-	# Reached only from this doctype's own form (repost_accounting_ledger.js:8), and Repost
-	# Accounting Ledger is System-Manager-only, so the form is the boundary. `filters` is passed
-	# straight to db.get_all, which is why reaching it needs to be gated rather than merely typed.
+def get_repost_allowed_types(doctype, txt, searchfield, start, page_len, filters):
+	# Reached only from this System-Manager-only doctype's own form, so the form is the boundary.
+	# `filters` is passed straight to db.get_all, which is why reaching it has to be gated.
 	frappe.has_permission("Repost Accounting Ledger", throw=True)
 
 	if txt:

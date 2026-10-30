@@ -59,12 +59,11 @@ class TestAvailableStockForPackingItems(ERPNextTestSuite):
 		return name
 
 	def make_active_bundle(self, parent, components):
-		"""components: list of (item_code, qty_per_bundle). Submitted => is_active, docstatus 1."""
+		"""components: list of (item_code, qty_per_bundle). A Product Bundle is active while disabled=0."""
 		bundle = frappe.get_doc({"doctype": "Product Bundle", "new_item_code": parent})
 		for item_code, qty in components:
 			bundle.append("items", {"item_code": item_code, "qty": qty})
 		bundle.insert()
-		bundle.submit()
 		return bundle
 
 	def report_rows_for(self, parent):
@@ -158,9 +157,21 @@ class TestAvailableStockForPackingItems(ERPNextTestSuite):
 		# Sanity: while active it shows up...
 		self.assertTrue(self.report_rows_for(parent))
 
-		# ...and disappears once cancelled (is_active cleared, docstatus 2).
-		bundle.cancel()
+		# ...and disappears once disabled.
+		bundle.db_set("disabled", 1)
 		self.assertEqual(self.report_rows_for(parent), [])
+
+	def test_fractional_bundles_are_floored(self):
+		comp_a = self.make_component()
+		parent = self.make_bundle_parent()
+
+		# 13 / 2 = 6.5 -> only 6 complete bundles can be packed
+		self.set_bin_projected_qty(comp_a, WAREHOUSE, 13)
+		self.make_active_bundle(parent, [(comp_a, 2)])
+
+		rows = self.report_rows_for(parent)
+		self.assertEqual(len(rows), 1)
+		self.assertEqual(flt(rows[0][5]), 6.0)
 
 	def test_fractional_stock_not_lost_to_float_error(self):
 		# a fractional-UOM component can have a non-integer qty per bundle, which triggers the float case
@@ -196,26 +207,6 @@ class TestAvailableStockForPackingItems(ERPNextTestSuite):
 		self.make_active_bundle(parent, [(comp_a, 3)])
 
 		self.assertEqual(self.report_rows_for(parent), [])
-
-	def test_company_filter_scopes_warehouses(self):
-		comp_a = self.make_component()
-		parent = self.make_bundle_parent()
-		other_company_wh = self.make_company_warehouse("_Test Company 1")
-
-		self.set_bin_projected_qty(comp_a, WAREHOUSE, 10)  # _Test Company
-		self.set_bin_projected_qty(comp_a, other_company_wh, 8)  # _Test Company 1
-		self.make_active_bundle(parent, [(comp_a, 2)])
-
-		_columns, data = execute(filters={"company": "_Test Company"})
-		rows = [row for row in data if row and row[0] == parent]
-
-		# only the selected company's warehouse is reported
-		self.assertEqual({row[4] for row in rows}, {WAREHOUSE})
-
-	def make_company_warehouse(self, company):
-		name = f"_Test Pack WH {random_string(6)}"
-		wh = frappe.get_doc({"doctype": "Warehouse", "warehouse_name": name, "company": company}).insert()
-		return wh.name
 
 	def make_secondary_warehouse(self):
 		"""A second leaf warehouse under _Test Company so two warehouses can be asserted."""

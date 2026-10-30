@@ -78,10 +78,13 @@ class Issue(Document):
 		if self.is_new() and self.via_customer_portal:
 			self.flags.create_communication = True
 
-		if is_website_user():
+		# a web form saves with ignore_permissions, so its submitter is never trusted with these fields
+		if is_website_user() or frappe.flags.in_web_form:
 			self.restore_staff_only_fields()
 
-		if not self.raised_by:
+		if frappe.flags.in_web_form and self.is_new():
+			self.raised_by = frappe.session.user
+		elif not self.raised_by:
 			self.raised_by = frappe.session.user
 
 		self.set_lead_contact(self.raised_by)
@@ -104,7 +107,7 @@ class Issue(Document):
 			close_all_assignments(self.doctype, self.name, ignore_permissions=True)
 
 	def restore_staff_only_fields(self):
-		"""Customer and status are set by the support team, not by portal users."""
+		"""Customer and status are set by the support team, not by portal or web form users."""
 		doc_before_save = self.get_doc_before_save()
 		self.customer = doc_before_save.customer if doc_before_save else None
 		self.status = doc_before_save.status if doc_before_save else "Open"
@@ -162,19 +165,31 @@ class Issue(Document):
 		communication.flags.ignore_mandatory = True
 		communication.save()
 
-	def get_timeline_communications(self, after=None) -> tuple[set[str], set[str]]:
+	def get_timeline_communications(self, after=None, after_name=None):
 		"""Return the Communications on this Issue's timeline, split by how they are attached.
 
 		Mirrors the two sources `frappe.desk.form.load.get_communication_data` reads, since
 		Split is offered on every timeline item. `after` matches `communication_date`, what
 		the timeline is ordered by, not `creation`: a pulled email is created when fetched.
+
+		`communication_date` is not unique and the timeline carries no secondary sort, so the
+		boundary is the pair (communication_date, name) rather than the date alone. Without the
+		tie-break, two messages written in the same second both move however the split point was
+		chosen, and one of them can be a message shown below it.
 		"""
 		date_filter = {"communication_date": (">=", after)} if after else {}
 
-		referenced = frappe.get_all(
-			"Communication",
-			filters={"reference_doctype": "Issue", "reference_name": self.name, **date_filter},
-			pluck="name",
+		def at_or_after(rows):
+			if not after or not after_name:
+				return {row.name for row in rows}
+			return {row.name for row in rows if (row.communication_date, row.name) >= (after, after_name)}
+
+		referenced = at_or_after(
+			frappe.get_all(
+				"Communication",
+				filters={"reference_doctype": "Issue", "reference_name": self.name, **date_filter},
+				fields=["name", "communication_date"],
+			)
 		)
 
 		link_parents = frappe.get_all(
@@ -183,21 +198,21 @@ class Issue(Document):
 			pluck="parent",
 		)
 		linked = (
-			frappe.get_all(
-				"Communication",
-				filters={"name": ("in", link_parents), **date_filter},
-				pluck="name",
+			at_or_after(
+				frappe.get_all(
+					"Communication",
+					filters={"name": ("in", link_parents), **date_filter},
+					fields=["name", "communication_date"],
+				)
 			)
 			if link_parents
-			else []
+			else set()
 		)
 
-		return set(referenced), set(linked)
+		return referenced, linked
 
 	@frappe.whitelist(methods=["POST"])
 	def split_issue(self, subject: str, communication_id: str):
-		from copy import deepcopy
-
 		self.check_permission("write")
 
 		referenced, linked = self.get_timeline_communications()
@@ -211,15 +226,18 @@ class Issue(Document):
 
 		comm_to_split_from = frappe.get_doc("Communication", communication_id)
 
+		# Bug: Pressing enter doesn't send subject
+		from copy import deepcopy
+
 		replicated_issue = deepcopy(self)
 		replicated_issue.subject = subject
 		replicated_issue.issue_split_from = self.name
 		replicated_issue.first_response_time = 0
 		replicated_issue.first_responded_on = None
 		replicated_issue.creation = now_datetime()
+		replicated_issue.opening_time = None
 		replicated_issue.status = "Open"
 		replicated_issue.opening_date = getdate()
-		replicated_issue.opening_time = None
 		replicated_issue.resolution_time = None
 		replicated_issue.user_resolution_time = None
 		replicated_issue.sla_resolution_date = None
@@ -236,9 +254,11 @@ class Issue(Document):
 
 		frappe.get_doc(replicated_issue).insert()
 
-		# Move the whole timeline from the split point onwards, both the Communications that
-		# reference this Issue and the ones only joined to it through a Timeline Link.
-		referenced, linked = self.get_timeline_communications(after=comm_to_split_from.communication_date)
+		# Move the whole timeline from the split point on: Communications referencing this Issue and those
+		# joined to it only through a Timeline Link.
+		referenced, linked = self.get_timeline_communications(
+			after=comm_to_split_from.communication_date, after_name=comm_to_split_from.name
+		)
 
 		for name in sorted(referenced | linked):
 			doc = frappe.get_doc("Communication", name)
@@ -246,8 +266,8 @@ class Issue(Document):
 			if name in referenced:
 				doc.reference_name = replicated_issue.name
 
-			# A Timeline Link is this Issue's own handle on the Communication, so it moves with
-			# the split. Its reference belongs to some other document and is left alone.
+			# A Timeline Link is this Issue's own handle on the Communication, so it moves with the split.
+			# Its reference belongs to another document and is left alone.
 			for link in doc.timeline_links:
 				if link.link_doctype == "Issue" and link.link_name == self.name:
 					link.link_name = replicated_issue.name
@@ -304,7 +324,7 @@ def get_issue_list(doctype, txt, filters, limit_start, limit_page_length=20, ord
 
 
 @frappe.whitelist(methods=["POST"])
-def set_multiple_status(names: str | list, status: str):
+def set_multiple_status(names, status):
 	for name in frappe.parse_json(names):
 		if not isinstance(name, str):
 			frappe.throw(_("Invalid name"), frappe.PermissionError)
@@ -313,7 +333,7 @@ def set_multiple_status(names: str | list, status: str):
 
 
 @frappe.whitelist(methods=["POST"])
-def set_status(name: str, status: str):
+def set_status(name, status):
 	frappe.has_permission("Issue", "write", name, throw=True)
 	issue = frappe.get_doc("Issue", name)
 	issue.status = status
@@ -359,21 +379,20 @@ def has_website_permission(doc, ptype, user, verbose=False):
 
 def update_issue(contact, method):
 	"""Called when Contact is deleted"""
-	frappe.db.set_value("Issue", {"contact": contact.name}, "contact", "")
+	frappe.db.sql("""UPDATE `tabIssue` set contact='' where contact=%s""", contact.name)
 
 
 @frappe.whitelist()
-def make_task(source_name: str, target_doc: str | dict | Document | None = None):
+def make_task(source_name, target_doc=None):
 	return get_mapped_doc("Issue", source_name, {"Issue": {"doctype": "Task"}}, target_doc)
 
 
-@frappe.whitelist(methods=["POST"])
+@frappe.whitelist()
 def make_issue_from_communication(communication: str, ignore_communication_links: bool = False):
 	"""raise a issue from email"""
 
-	# `communication` is caller supplied and nothing checked it. Communication grants read to `All`
-	# only for the owner (if_owner) and carries a has_permission hook, so doc= is what decides
-	# access; the desk button only appears on an email the caller already has open.
+	# Communication grants read to `All` only for the owner and carries a has_permission hook, so doc=
+	# is what decides access.
 	frappe.has_permission("Communication", doc=communication, throw=True)
 
 	doc = frappe.get_doc("Communication", communication)

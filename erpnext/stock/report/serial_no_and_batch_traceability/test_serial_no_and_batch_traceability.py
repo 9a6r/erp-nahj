@@ -9,8 +9,9 @@ from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.stock.doctype.serial_and_batch_bundle.test_serial_and_batch_bundle import (
 	make_serial_batch_bundle,
 )
-from erpnext.stock.doctype.stock_entry.services.serial_batch import (
+from erpnext.stock.doctype.stock_entry.stock_entry import (
 	get_fg_mapping,
+	get_fg_quotas,
 	get_fg_target,
 	get_fg_values,
 	get_raw_material_entries,
@@ -62,9 +63,6 @@ class TestSerialNoAndBatchTraceability(ERPNextTestSuite):
 
 		receipt_row = traced[receipt.name]
 		self.assertEqual(receipt_row["serial_no"], serial_no)
-		self.assertEqual(
-			receipt_row["serial_no_number"], frappe.db.get_value("Serial No", serial_no, "serial_no")
-		)
 		self.assertEqual(receipt_row["item_code"], SERIAL_ITEM)
 		self.assertEqual(receipt_row["reference_doctype"], "Stock Entry")
 		self.assertEqual(receipt_row["warehouse"], "Stores - _TC")
@@ -86,8 +84,7 @@ class TestSerialNoAndBatchTraceability(ERPNextTestSuite):
 		delivery_note = create_delivery_note(
 			item_code=SERIAL_ITEM,
 			qty=1,
-			serial_no=frappe.db.get_value("Serial No", serial_no, "serial_no"),
-			use_serial_batch_fields=1,
+			serial_no=[serial_no],
 			warehouse="Stores - _TC",
 			customer="_Test Customer",
 			posting_date="2026-06-03",
@@ -109,9 +106,6 @@ class TestSerialNoAndBatchTraceability(ERPNextTestSuite):
 		forward_row = traced[delivery_note.name]
 		self.assertEqual(forward_row["reference_doctype"], "Delivery Note")
 		self.assertEqual(forward_row["serial_no"], serial_no)
-		self.assertEqual(
-			forward_row["serial_no_number"], frappe.db.get_value("Serial No", serial_no, "serial_no")
-		)
 		self.assertEqual(forward_row["direction"], "Forward")
 		self.assertEqual(forward_row["customer"], delivery_note.customer)
 		self.assertLess(forward_row["qty"], 0)
@@ -282,11 +276,6 @@ class TestSerialNoAndBatchTraceability(ERPNextTestSuite):
 
 		mapping = get_fg_mapping(repack.name)
 		self.assertEqual([row.value for row in mapping["fg_values"]], fg_serial_nos)
-		# shown by the physical serial no, which differs from the name when serial nos are hash named
-		self.assertEqual(
-			[row.label for row in mapping["fg_values"]],
-			[frappe.db.get_value("Serial No", name, "serial_no") for name in fg_serial_nos],
-		)
 
 		# map in reverse order, so it differs from what the auto mapping would do
 		expected = dict(zip(rm_serial_nos, reversed(fg_serial_nos), strict=True))
@@ -410,7 +399,6 @@ class TestSerialNoAndBatchTraceability(ERPNextTestSuite):
 		fg_values = get_fg_values(repack.name)
 		self.assertEqual([row.fg_field for row in fg_values], ["fg_batch_no"])
 		fg_batch_no = fg_values[0].value
-		self.assertEqual(fg_values[0].label, frappe.db.get_value("Batch", fg_batch_no, "batch_id"))
 		self.assertEqual({row.fg_batch_no for row in get_raw_material_entries(repack.name)}, {fg_batch_no})
 
 		rows = self.run_report(item_code=fg_item, batches=[fg_batch_no], traceability_direction="Backward")
@@ -455,6 +443,48 @@ class TestSerialNoAndBatchTraceability(ERPNextTestSuite):
 			[(row["item_code"], row["batch_no"], row["qty"]) for row in fg_rows],
 			[(batch_fg_item, fg_values[2].value, 1)],
 		)
+
+	@ERPNextTestSuite.change_settings(
+		"Stock Settings",
+		{"auto_create_serial_and_batch_bundle_for_outward": 1, "auto_map_raw_materials_to_finished_goods": 1},
+	)
+	def test_auto_mapping_follows_finished_good_qty(self):
+		"""A finished good batch of 3 takes three times the raw material serials of a single finished good serial."""
+		# 5 raw material serials split 1.25 / 3.75, so the leftover one goes to the batch, not the serial
+		for rm_qty, expected_counts in ((4, (1, 3)), (5, (1, 4))):
+			with self.subTest(rm_qty=rm_qty):
+				rm_item = self.make_rm_item()
+				serial_fg_item, batch_fg_item = self.make_fg_item(), self.make_fg_item(batch=True)
+				self.receive(rm_item, qty=rm_qty)
+				repack = self.make_repack(
+					[(rm_item, rm_qty, None)], [(serial_fg_item, 1, None), (batch_fg_item, 3, None)]
+				)
+
+				fg_values = get_fg_values(repack.name)
+				self.assertEqual(
+					[(row.fg_field, row.qty) for row in fg_values], [("fg_serial_no", 1), ("fg_batch_no", 3)]
+				)
+
+				raw_materials = get_raw_material_entries(repack.name)
+				self.assertEqual(
+					[row.fg_serial_no or row.fg_batch_no for row in raw_materials],
+					[fg_values[0].value] * expected_counts[0] + [fg_values[1].value] * expected_counts[1],
+				)
+
+	def test_fg_quotas(self):
+		targets = ["a", "b", "c"]
+		for count, fg_qty, expected in (
+			(5, {"a": 1, "b": 3}, {"a": 1, "b": 4}),
+			(4, {"a": 1, "b": 3}, {"a": 1, "b": 3}),
+			(5, {"a": 1, "b": 1, "c": 1}, {"a": 2, "b": 2, "c": 1}),
+			(2, {"a": 1, "b": 1, "c": 1}, {"a": 1, "b": 1, "c": 0}),
+			(3, {"a": 2.5, "b": 0.5}, {"a": 3, "b": 0}),
+		):
+			fg_targets = [target for target in targets if target in fg_qty]
+			with self.subTest(count=count, fg_qty=fg_qty):
+				quotas = get_fg_quotas(count, fg_targets, fg_qty)
+				self.assertEqual(quotas, expected)
+				self.assertEqual(sum(quotas.values()), count)
 
 	@ERPNextTestSuite.change_settings(
 		"Stock Settings",

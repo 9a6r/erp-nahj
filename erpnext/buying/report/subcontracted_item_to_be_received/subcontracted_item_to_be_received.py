@@ -5,8 +5,6 @@
 import frappe
 from frappe import _
 
-from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_companies_condition
-
 
 def execute(filters=None):
 	if filters.from_date > filters.to_date:
@@ -24,7 +22,7 @@ def get_columns(filters):
 			"label": _("Subcontract Order"),
 			"fieldtype": "Link",
 			"fieldname": "subcontract_order",
-			"options": "Subcontracting Order",
+			"options": filters.order_type,
 			"width": 150,
 		},
 		{"label": _("Date"), "fieldtype": "Date", "fieldname": "date", "hidden": 1, "width": 150},
@@ -61,7 +59,7 @@ def get_columns(filters):
 def get_data(data, filters):
 	orders = get_subcontract_orders(filters)
 	orders_name = [order.name for order in orders]
-	subcontracted_items = get_subcontract_order_supplied_item("Subcontracting Order", orders_name)
+	subcontracted_items = get_subcontract_order_supplied_item(filters.order_type, orders_name)
 	for item in subcontracted_items:
 		for order in orders:
 			if order.name == item.parent and item.received_qty < item.qty:
@@ -87,12 +85,11 @@ def get_subcontract_orders(filters):
 		["status", "!=", "Closed"],
 	]
 
-	order = frappe.qb.DocType("Subcontracting Order")
-	if condition := get_allowed_companies_condition(order.company, "Subcontracting Order"):
-		record_filters.append(condition)
+	if filters.order_type == "Purchase Order":
+		record_filters.append(["is_old_subcontracting_flow", "=", 1])
 
 	return frappe.get_all(
-		"Subcontracting Order", filters=record_filters, fields=["name", "transaction_date", "supplier"]
+		filters.order_type, filters=record_filters, fields=["name", "transaction_date", "supplier"]
 	)
 
 

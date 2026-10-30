@@ -4,7 +4,7 @@
 import frappe
 from frappe.utils import add_days, today
 
-from erpnext.accounts.doctype.sales_invoice.mapper import make_sales_return
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 from erpnext.accounts.report.sales_partners_commission.sales_partners_commission import execute
 from erpnext.selling.doctype.customer.test_customer import make_customer

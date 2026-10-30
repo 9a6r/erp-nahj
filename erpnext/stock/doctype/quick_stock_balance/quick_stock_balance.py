@@ -9,6 +9,7 @@ from frappe.permissions import has_user_permission
 from frappe.query_builder import Order
 from frappe.query_builder.functions import Sum
 from frappe.utils import cstr, flt
+from frappe.utils.nestedset import get_descendants_of
 from pypika import analytics as an
 
 from erpnext import _refuse, require_user_permission
@@ -41,12 +42,13 @@ class QuickStockBalance(Document):
 def get_stock_item_details(warehouse: str, date: str, item: str | None = None, barcode: str | None = None):
 	if not frappe.has_permission("Item", "read"):
 		_refuse()
+
 	warehouse = cstr(warehouse)
 	if not warehouse or not has_user_permission(frappe.get_doc("Warehouse", warehouse)):
 		_refuse()
 	if frappe.db.get_value("Warehouse", warehouse, "is_group"):
-		for child_warehouse in frappe.db.get_descendants("Warehouse", warehouse):
-			require_user_permission("Warehouse", child_warehouse)
+		for descendant in get_descendants_of("Warehouse", warehouse, ignore_permissions=True):
+			require_user_permission("Warehouse", descendant)
 
 	out = {}
 	if barcode:

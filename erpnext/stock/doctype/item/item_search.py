@@ -8,7 +8,6 @@ from frappe.search.sqlite_search import SQLiteSearch, SQLiteSearchIndexMissingEr
 MINIMUM_TERM_LENGTH = 3
 CANDIDATE_LIMIT = 25000
 LIKE_WILDCARDS = r"[%_]"
-QUEUE_PREFIX = "Item:"
 BARCODE_COLUMN = "barcodes"
 TOKENIZER = "trigram remove_diacritics 1"
 
@@ -159,22 +158,13 @@ class ItemSearch(SQLiteSearch):
 				"SELECT name FROM search_fts WHERE search_fts MATCH ? LIMIT ?",
 				(match_query, CANDIDATE_LIMIT),
 			).fetchall()
-			queued = connection.execute(
-				"SELECT doc_id FROM search_index_queue LIMIT ?", (CANDIDATE_LIMIT,)
-			).fetchall()
 		except sqlite3.Error:
 			frappe.log_error("Item search index lookup failed")
 			return None
 		finally:
 			connection.close()
 
-		names = [row["name"] for row in matched]
-		return names + [doc_id.removeprefix(QUEUE_PREFIX) for doc_id in queued_item_ids(queued)]
-
-
-def queued_item_ids(rows) -> list[str]:
-	"""Items waiting to be re-indexed. Their indexed text is stale or absent, so they stay candidates."""
-	return [row["doc_id"] for row in rows if row["doc_id"].startswith(QUEUE_PREFIX)]
+		return [row["name"] for row in matched]
 
 
 def build_match_query(txt: str) -> str | None:
@@ -213,10 +203,25 @@ def get_barcodes_by_item(item_codes: list[str]) -> dict[str, str]:
 	return barcodes
 
 
-def queue_item(item_code: str, drop: str | None = None):
-	"""Queue one Item, and drop the name a rename replaced.
+def reindex_item(doc, method=None):
+	"""Queue an Item on every save.
 
-	Queues before dropping, so a failure leaves the replaced name in the index rather than losing
+	Item Barcode rows raise no document events, so the Item save is the only signal one moved, and
+	no indexed field of the Item need have changed.
+	"""
+	queue_item(doc.name)
+
+
+def reindex_renamed_item(doc, method=None, old=None, new=None, merge=False):
+	"""A rename writes the new name straight to the table without saving the Item, so on_update
+	never runs and the index would keep answering with the name that is gone."""
+	queue_item(doc.name, drop=old)
+
+
+def queue_item(item_code: str, drop: str | None = None):
+	"""Index one Item, and drop the name a rename replaced.
+
+	Indexes before dropping, so a failure leaves the replaced name in the index rather than losing
 	both: a name nobody holds is an extra candidate the query filters out, a missing one hides a row.
 
 	A failed write must not fail the Item save, and must not leave the index answering either.

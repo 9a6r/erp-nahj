@@ -397,7 +397,7 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 				method: "erpnext.assets.doctype.asset_capitalization.asset_capitalization.get_warehouse_details",
 				child: item,
 				args: {
-					ctx: {
+					args: {
 						item_code: item.item_code,
 						warehouse: cstr(item.warehouse),
 						qty: -1 * flt(item.stock_qty),
@@ -485,4 +485,4 @@ erpnext.assets.AssetCapitalization = class AssetCapitalization extends erpnext.s
 	}
 };
 
-frappe.ui.form.set_controller("Asset Capitalization", erpnext.assets.AssetCapitalization);
+cur_frm.cscript = new erpnext.assets.AssetCapitalization({ frm: cur_frm });

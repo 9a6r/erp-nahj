@@ -119,7 +119,7 @@
  ],
  "icon": "calendar-clock",
  "links": [],
- "modified": "2026-09-29 12:00:00.000000",
+ "modified": "2026-09-16 11:42:07.000000",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "Payment Term",
@@ -184,14 +184,9 @@
   {
    "role": "Sales User",
    "select": 1
-  },
-  {
-   "role": "Manufacturing Manager",
-   "select": 1
   }
  ],
  "quick_entry": 1,
- "row_format": "Dynamic",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": [],

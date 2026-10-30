@@ -3,9 +3,8 @@ from unittest.mock import patch
 import frappe
 from frappe.utils import add_days
 
-from erpnext.accounts.doctype.sales_invoice.mapper import make_sales_return
-from erpnext.controllers.item_close import update_closed_status
-from erpnext.selling.doctype.sales_order.mapper import make_delivery_note, make_sales_invoice
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
+from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note, make_sales_invoice
 from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 from erpnext.selling.report.sales_order_analysis.sales_order_analysis import (
 	AGGREGATED_FIELDS,
@@ -83,7 +82,7 @@ class TestSalesOrderAnalysis(ERPNextTestSuite):
 		expected_value = {
 			"status": "To Deliver and Bill",
 			"sales_order": so.name,
-			"delay_days": frappe.utils.date_diff(frappe.utils.datetime.date.today(), so.delivery_date),
+			"delay_days": frappe.utils.date_diff(frappe.utils.nowdate(), so.delivery_date),
 			"qty": 10,
 			"delivered_qty": 0,
 			"pending_qty": 10,
@@ -110,7 +109,7 @@ class TestSalesOrderAnalysis(ERPNextTestSuite):
 		expected_value = {
 			"status": "To Deliver",
 			"sales_order": so.name,
-			"delay_days": frappe.utils.date_diff(frappe.utils.datetime.date.today(), so.delivery_date),
+			"delay_days": frappe.utils.date_diff(frappe.utils.nowdate(), so.delivery_date),
 			"qty": 10,
 			"delivered_qty": 0,
 			"pending_qty": 10,
@@ -137,7 +136,7 @@ class TestSalesOrderAnalysis(ERPNextTestSuite):
 		expected_value = {
 			"status": "To Bill",
 			"sales_order": so.name,
-			"delay_days": frappe.utils.date_diff(frappe.utils.datetime.date.today(), so.delivery_date),
+			"delay_days": frappe.utils.date_diff(frappe.utils.nowdate(), so.delivery_date),
 			"qty": 10,
 			"delivered_qty": 10,
 			"pending_qty": 0,
@@ -165,7 +164,7 @@ class TestSalesOrderAnalysis(ERPNextTestSuite):
 		expected_value = {
 			"status": "Completed",
 			"sales_order": so.name,
-			"delay_days": frappe.utils.date_diff(frappe.utils.datetime.date.today(), so.delivery_date),
+			"delay_days": frappe.utils.date_diff(frappe.utils.nowdate(), so.delivery_date),
 			"qty": 10,
 			"delivered_qty": 10,
 			"pending_qty": 0,
@@ -227,7 +226,7 @@ class TestSalesOrderAnalysis(ERPNextTestSuite):
 		expected_value = {
 			"status": "To Deliver and Bill",
 			"sales_order": so.name,
-			"delay_days": frappe.utils.date_diff(frappe.utils.datetime.date.today(), so.delivery_date),
+			"delay_days": frappe.utils.date_diff(frappe.utils.nowdate(), so.delivery_date),
 			"qty": 10,
 			"delivered_qty": 3,
 			"pending_qty": 7,
@@ -263,7 +262,7 @@ class TestSalesOrderAnalysis(ERPNextTestSuite):
 		expected_value = {
 			"status": "To Bill",
 			"sales_order": so.name,
-			"delay_days": frappe.utils.date_diff(frappe.utils.datetime.date.today(), so.delivery_date),
+			"delay_days": frappe.utils.date_diff(frappe.utils.nowdate(), so.delivery_date),
 			"qty": 10,
 			"delivered_qty": 10,
 			"pending_qty": 0,
@@ -372,6 +371,30 @@ class TestSalesOrderAnalysis(ERPNextTestSuite):
 			[("_Test Company", 16), ("_Test Company 1", 4)],
 		)
 
+	def test_12_company_falls_back_to_the_default(self):
+		transaction_date = "2021-06-01"
+		item, so = self.create_sales_order(transaction_date)
+		filters = {"from_date": "2021-06-01", "to_date": "2021-06-30"}
+
+		with patch("erpnext.get_default_company", return_value="_Test Company"):
+			columns, data, message, chart = execute(filters)
+
+		self.assertEqual(len(data), 1)
+		self.assertEqual(data[0]["sales_order"], so.name)
+
+		with patch("erpnext.get_default_company", return_value="_Test Company 1"):
+			columns, data, message, chart = execute(filters)
+
+		self.assertNotIn(so.name, [row["sales_order"] for row in data])
+
+	def test_13_company_is_mandatory_without_a_default(self):
+		with patch("erpnext.get_default_company", return_value=None):
+			self.assertRaises(
+				frappe.ValidationError,
+				execute,
+				{"from_date": "2021-06-01", "to_date": "2021-06-30"},
+			)
+
 	def test_14_user_permission_restricts_rows_and_chart(self):
 		transaction_date = "2021-06-01"
 		item = create_item("_Test SOA Perm Item", is_stock_item=0).item_code
@@ -431,65 +454,6 @@ class TestSalesOrderAnalysis(ERPNextTestSuite):
 			with self.subTest(key=key, val=val):
 				self.assertEqual(data[0][key], val)
 
-	def test_18_individually_closed_row_has_nothing_pending(self):
-		transaction_date = "2021-06-01"
-		closed_item = create_item("_Test SOA Closed Row", is_stock_item=0).item_code
-		open_item = create_item("_Test SOA Open Row", is_stock_item=0).item_code
-		delivery_date = add_days(transaction_date, 15)
-		so = make_sales_order(
-			transaction_date=transaction_date,
-			item_list=[
-				{"item_code": closed_item, "qty": 5, "rate": 100, "delivery_date": delivery_date},
-				{"item_code": open_item, "qty": 3, "rate": 100, "delivery_date": delivery_date},
-			],
-		)
-		update_closed_status("Sales Order", so.name, [so.items[0].name], 1)
-
-		columns, data, message, chart = execute(
-			{
-				"company": "_Test Company",
-				"from_date": "2021-06-01",
-				"to_date": "2021-06-30",
-				"sales_order": [so.name],
-			}
-		)
-		rows = {row["item_code"]: row for row in data}
-		self.assertEqual((rows[closed_item]["pending_qty"], rows[closed_item]["qty_to_bill"]), (0, 0))
-		self.assertEqual((rows[closed_item]["pending_amount"], rows[closed_item]["delay"]), (0, 0))
-		self.assertEqual((rows[open_item]["pending_qty"], rows[open_item]["qty_to_bill"]), (3, 3))
-
-	def test_19_group_by_so_delay_ignores_closed_rows(self):
-		transaction_date = "2021-06-01"
-		early = create_item("_Test SOA Delay A", is_stock_item=0).item_code
-		late = create_item("_Test SOA Delay Z", is_stock_item=0).item_code
-		delivery_date = add_days(transaction_date, 15)
-		expected_delay = frappe.utils.date_diff(frappe.utils.nowdate(), delivery_date)
-
-		def grouped_delay(closed_item):
-			so = make_sales_order(
-				transaction_date=transaction_date,
-				item_list=[
-					{"item_code": early, "qty": 2, "rate": 100, "delivery_date": delivery_date},
-					{"item_code": late, "qty": 2, "rate": 100, "delivery_date": delivery_date},
-				],
-			)
-			idx = 0 if closed_item == early else 1
-			update_closed_status("Sales Order", so.name, [so.items[idx].name], 1)
-			columns, data, message, chart = execute(
-				{
-					"company": "_Test Company",
-					"from_date": "2021-06-01",
-					"to_date": "2021-06-30",
-					"sales_order": [so.name],
-					"group_by_so": 1,
-				}
-			)
-			return data[0]["delay"]
-
-		# whichever row is closed (it sorts first or second), the open row's delay must survive
-		self.assertEqual(grouped_delay(early), expected_delay)
-		self.assertEqual(grouped_delay(late), expected_delay)
-
 	def test_16_credit_note_keeps_billed_qty_consistent_with_amount(self):
 		transaction_date = "2021-06-01"
 		item, so = self.create_sales_order(transaction_date)
@@ -536,30 +500,32 @@ class TestSalesOrderAnalysis(ERPNextTestSuite):
 			)
 			return [row["sales_order"] for row in data]
 
-		# the parent group resolves to its children, a sibling child does not
 		self.assertIn(so.name, orders_for(group))
 		self.assertNotIn(so.name, orders_for(sibling))
 
-	def test_12_company_falls_back_to_the_default(self):
+	def test_18_group_by_so_delay_ignores_zero_delay_rows(self):
 		transaction_date = "2021-06-01"
-		item, so = self.create_sales_order(transaction_date)
-		filters = {"from_date": "2021-06-01", "to_date": "2021-06-30"}
+		early = create_item("_Test SOA Delay A", is_stock_item=0).item_code
+		late = create_item("_Test SOA Delay Z", is_stock_item=0).item_code
+		overdue_date = add_days(transaction_date, 15)
+		not_due_date = add_days(frappe.utils.nowdate(), 10)
+		so = make_sales_order(
+			transaction_date=transaction_date,
+			item_list=[
+				{"item_code": early, "qty": 2, "rate": 100, "delivery_date": not_due_date},
+				{"item_code": late, "qty": 2, "rate": 100, "delivery_date": overdue_date},
+			],
+		)
 
-		with patch("erpnext.get_default_company", return_value="_Test Company"):
-			columns, data, message, chart = execute(filters)
-
+		columns, data, message, chart = execute(
+			{
+				"company": "_Test Company",
+				"from_date": "2021-06-01",
+				"to_date": "2021-06-30",
+				"sales_order": [so.name],
+				"group_by_so": 1,
+			}
+		)
 		self.assertEqual(len(data), 1)
-		self.assertEqual(data[0]["sales_order"], so.name)
-
-		with patch("erpnext.get_default_company", return_value="_Test Company 1"):
-			columns, data, message, chart = execute(filters)
-
-		self.assertNotIn(so.name, [row["sales_order"] for row in data])
-
-	def test_13_company_is_mandatory_without_a_default(self):
-		with patch("erpnext.get_default_company", return_value=None):
-			self.assertRaises(
-				frappe.ValidationError,
-				execute,
-				{"from_date": "2021-06-01", "to_date": "2021-06-30"},
-			)
+		# the first line is not yet due (delay 0); it must not mask the overdue second line
+		self.assertEqual(data[0]["delay"], frappe.utils.date_diff(frappe.utils.nowdate(), overdue_date))

@@ -103,7 +103,7 @@ class TimesheetDetail(Document):
 		if flt(self.hours) < 0:
 			frappe.throw(_("Row {0}: Hours value must be greater than zero.").format(self.idx))
 		if self.from_time and self.to_time and time_diff_in_hours(self.to_time, self.from_time) < 0:
-			frappe.throw(_("To Time cannot be before From Time"))
+			frappe.throw(_("To Time cannot be before from date"))
 
 	def validate_parent_project(self, parent_project: str):
 		"""Validate that project is same as Timesheet's parent project."""

@@ -35,10 +35,8 @@
   {
    "fetch_from": "asset_name.asset_category",
    "fieldname": "asset_category",
-   "fieldtype": "Link",
-   "label": "Asset Category",
-   "options": "Asset Category",
-   "read_only": 1
+   "fieldtype": "Read Only",
+   "label": "Asset Category"
   },
   {
    "fetch_from": "asset_name.item_code",
@@ -108,7 +106,7 @@
  ],
  "icon": "wrench",
  "links": [],
- "modified": "2026-10-05 12:00:00.000000",
+ "modified": "2024-03-27 13:06:34.491299",
  "modified_by": "Administrator",
  "module": "Assets",
  "name": "Asset Maintenance",

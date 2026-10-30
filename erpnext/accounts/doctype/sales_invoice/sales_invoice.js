@@ -3,6 +3,8 @@
 
 frappe.provide("erpnext.accounts");
 
+cur_frm.cscript.tax_table = "Sales Taxes and Charges";
+
 erpnext.accounts.taxes.setup_tax_validations("Sales Invoice");
 erpnext.accounts.payment_triggers.setup("Sales Invoice");
 erpnext.accounts.pos.setup("Sales Invoice");
@@ -128,7 +130,7 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 					if (should_create_delivery_note) {
 						this.frm.add_custom_button(
 							__("Delivery Note"),
-							() => this.make_delivery_note(),
+							this.frm.cscript["Make Delivery Note"],
 							__("Create")
 						);
 					}
@@ -194,7 +196,7 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 				);
 
 				frappe.call({
-					method: "erpnext.accounts.doctype.sales_invoice.mapper.get_received_items",
+					method: "erpnext.accounts.doctype.sales_invoice.sales_invoice.get_received_items",
 					args: {
 						reference_name: me.frm.doc.name,
 						doctype: "Purchase Invoice",
@@ -223,21 +225,21 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 
 	make_invoice_discounting() {
 		frappe.model.open_mapped_doc({
-			method: "erpnext.accounts.doctype.sales_invoice.mapper.create_invoice_discounting",
+			method: "erpnext.accounts.doctype.sales_invoice.sales_invoice.create_invoice_discounting",
 			frm: this.frm,
 		});
 	}
 
 	make_dunning() {
 		frappe.model.open_mapped_doc({
-			method: "erpnext.accounts.doctype.sales_invoice.mapper.create_dunning",
+			method: "erpnext.accounts.doctype.sales_invoice.sales_invoice.create_dunning",
 			frm: this.frm,
 		});
 	}
 
 	make_maintenance_schedule() {
 		frappe.model.open_mapped_doc({
-			method: "erpnext.accounts.doctype.sales_invoice.mapper.make_maintenance_schedule",
+			method: "erpnext.accounts.doctype.sales_invoice.sales_invoice.make_maintenance_schedule",
 			frm: this.frm,
 		});
 	}
@@ -385,7 +387,7 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 			__("Sales Order"),
 			function () {
 				erpnext.utils.map_current_doc({
-					method: "erpnext.selling.doctype.sales_order.mapper.make_sales_invoice",
+					method: "erpnext.selling.doctype.sales_order.sales_order.make_sales_invoice",
 					source_doctype: "Sales Order",
 					target: me.frm,
 					setters: {
@@ -409,7 +411,7 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 			__("Quotation"),
 			function () {
 				erpnext.utils.map_current_doc({
-					method: "erpnext.selling.doctype.quotation.mapper.make_sales_invoice",
+					method: "erpnext.selling.doctype.quotation.quotation.make_sales_invoice",
 					source_doctype: "Quotation",
 					target: me.frm,
 					setters: [
@@ -423,7 +425,7 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 					],
 					get_query_filters: {
 						docstatus: 1,
-						status: ["!=", "Lost"],
+						status: ["not in", ["Lost", "Expired"]],
 						company: me.frm.doc.company,
 					},
 					allow_child_item_selection: true,
@@ -443,11 +445,11 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 				if (!me.frm.doc.customer) {
 					frappe.throw({
 						title: __("Mandatory"),
-						message: __("Please select a Customer"),
+						message: __("Please Select a Customer"),
 					});
 				}
 				erpnext.utils.map_current_doc({
-					method: "erpnext.stock.doctype.delivery_note.mapper.make_sales_invoice",
+					method: "erpnext.stock.doctype.delivery_note.delivery_note.make_sales_invoice",
 					source_doctype: "Delivery Note",
 					target: me.frm,
 					date_field: "posting_date",
@@ -527,7 +529,7 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 	make_inter_company_invoice() {
 		let me = this;
 		frappe.model.open_mapped_doc({
-			method: "erpnext.accounts.doctype.sales_invoice.mapper.make_inter_company_purchase_invoice",
+			method: "erpnext.accounts.doctype.sales_invoice.sales_invoice.make_inter_company_purchase_invoice",
 			frm: me.frm,
 		});
 	}
@@ -593,13 +595,6 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 	set_dynamic_labels() {
 		super.set_dynamic_labels();
 		this.frm.events.hide_fields(this.frm);
-		const hide_update_stock = cint(this.frm.doc.is_debit_note) || cint(this.frm.doc.has_subcontracted);
-		// frm.set_df_property mutates a per-document copy, not the doctype's shared field
-		// metadata, so this always reflects the original (Customize Form) hidden value.
-		const hidden_by_customization = cint(
-			frappe.meta.get_docfield("Sales Invoice", "update_stock")?.hidden
-		);
-		this.frm.set_df_property("update_stock", "hidden", hide_update_stock || hidden_by_customization);
 	}
 
 	items_on_form_rendered() {
@@ -612,7 +607,7 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 
 	make_sales_return() {
 		frappe.model.open_mapped_doc({
-			method: "erpnext.accounts.doctype.sales_invoice.mapper.make_sales_return",
+			method: "erpnext.accounts.doctype.sales_invoice.sales_invoice.make_sales_return",
 			frm: this.frm,
 		});
 	}
@@ -740,31 +735,28 @@ erpnext.accounts.SalesInvoiceController = class SalesInvoiceController extends (
 	is_return() {
 		this.toggle_get_items();
 	}
-
-	make_delivery_note() {
-		frappe.model.open_mapped_doc({
-			method: "erpnext.accounts.doctype.sales_invoice.mapper.make_delivery_note",
-			frm: this.frm,
-		});
-	}
 };
 
-frappe.ui.form.set_controller("Sales Invoice", erpnext.accounts.SalesInvoiceController);
+// for backward compatibility: combine new and previous states
+extend_cscript(cur_frm.cscript, new erpnext.accounts.SalesInvoiceController({ frm: cur_frm }));
 
-frappe.ui.form.on("Sales Invoice Item", {
-	income_account: function (frm, cdt, cdn) {
-		erpnext.utils.copy_value_in_all_rows(frm.doc, cdt, cdn, "items", "income_account");
-	},
+cur_frm.cscript["Make Delivery Note"] = function () {
+	frappe.model.open_mapped_doc({
+		method: "erpnext.accounts.doctype.sales_invoice.sales_invoice.make_delivery_note",
+		frm: cur_frm,
+	});
+};
 
-	expense_account: function (frm, cdt, cdn) {
-		erpnext.utils.copy_value_in_all_rows(frm.doc, cdt, cdn, "items", "expense_account");
-	},
-});
+cur_frm.cscript.income_account = function (doc, cdt, cdn) {
+	erpnext.utils.copy_value_in_all_rows(doc, cdt, cdn, "items", "income_account");
+};
+
+cur_frm.cscript.expense_account = function (doc, cdt, cdn) {
+	erpnext.utils.copy_value_in_all_rows(doc, cdt, cdn, "items", "expense_account");
+};
 
 frappe.ui.form.on("Sales Invoice", {
 	setup: function (frm) {
-		frm.cscript.tax_table = "Sales Taxes and Charges";
-
 		frm.add_fetch("customer", "tax_id", "tax_id");
 		frm.add_fetch("payment_term", "invoice_portion", "invoice_portion");
 		frm.add_fetch("payment_term", "description", "description");
@@ -1193,20 +1185,22 @@ frappe.ui.form.on("Sales Invoice", {
 		);
 	},
 
-	is_debit_note: function (frm) {
-		if (frm.doc.is_debit_note) {
-			frm.set_value("update_stock", 0);
-		}
-		// visibility handled by set_dynamic_labels()
-		frm.cscript.set_dynamic_labels();
-	},
-
 	refresh: function (frm) {
 		if (frm.doc.is_debit_note) {
 			frm.set_df_property("return_against", "label", __("Adjustment Against"));
 		}
 
 		frm.set_df_property("update_stock", "read_only", frm.doc.has_subcontracted);
+		// frm.set_df_property mutates a per-document copy, not the doctype's shared field
+		// metadata, so this always reflects the original (Customize Form) hidden value.
+		const hidden_by_customization = cint(
+			frappe.meta.get_docfield("Sales Invoice", "update_stock")?.hidden
+		);
+		frm.set_df_property(
+			"update_stock",
+			"hidden",
+			cint(frm.doc.has_subcontracted) || hidden_by_customization
+		);
 	},
 });
 

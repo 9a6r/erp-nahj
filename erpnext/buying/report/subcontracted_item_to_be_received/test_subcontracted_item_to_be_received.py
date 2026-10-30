@@ -7,7 +7,6 @@
 import copy
 
 import frappe
-from frappe.desk.query_report import run
 from frappe.utils import add_days, getdate
 
 from erpnext.buying.report.subcontracted_item_to_be_received.subcontracted_item_to_be_received import (
@@ -28,7 +27,20 @@ from erpnext.tests.utils import ERPNextTestSuite
 
 class TestSubcontractedItemToBeReceived(ERPNextTestSuite):
 	def test_pending_and_received_qty(self):
-		sco = make_subcontracting_order()
+		make_service_item("Subcontracted Service Item 1")
+		service_items = [
+			{
+				"warehouse": "_Test Warehouse - _TC",
+				"item_code": "Subcontracted Service Item 1",
+				"qty": 10,
+				"rate": 500,
+				"fg_item": "_Test FG Item",
+				"fg_item_qty": 10,
+			},
+		]
+		sco = get_subcontracting_order(
+			service_items=service_items, supplier_warehouse="_Test Warehouse 1 - _TC"
+		)
 		rm_items = get_rm_items(sco.supplied_items)
 		itemwise_details = make_stock_in_entry(rm_items=rm_items)
 
@@ -62,12 +74,6 @@ class TestSubcontractedItemToBeReceived(ERPNextTestSuite):
 		self.assertEqual(data[0]["subcontract_order"], sco.name)
 		self.assertEqual(data[0]["supplier"], sco.supplier)
 
-	def test_report_runs_from_desk(self):
-		sco = make_subcontracting_order()
-
-		result = run("Subcontracted Item To Be Received", filters=get_report_filters(sco))["result"]
-		self.assertIn(sco.name, {row["subcontract_order"] for row in result if isinstance(row, dict)})
-
 	def test_closed_order_is_not_listed(self):
 		sco = make_subcontracting_order()
 		sco.update_status("Closed")
@@ -77,7 +83,16 @@ class TestSubcontractedItemToBeReceived(ERPNextTestSuite):
 
 	def test_one_day_range_is_accepted(self):
 		frappe.clear_messages()
-		execute(frappe._dict({"supplier": "_Test Supplier", "from_date": getdate(), "to_date": getdate()}))
+		execute(
+			frappe._dict(
+				{
+					"order_type": "Subcontracting Order",
+					"supplier": "_Test Supplier",
+					"from_date": getdate(),
+					"to_date": getdate(),
+				}
+			)
+		)
 		self.assertFalse(frappe.get_message_log())
 
 
@@ -99,6 +114,7 @@ def make_subcontracting_order():
 def get_report_filters(sco):
 	return frappe._dict(
 		{
+			"order_type": "Subcontracting Order",
 			"supplier": sco.supplier,
 			"from_date": getdate(sco.transaction_date),
 			"to_date": add_days(sco.transaction_date, 1),

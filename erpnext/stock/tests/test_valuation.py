@@ -1,4 +1,5 @@
 import json
+import unittest
 
 import frappe
 from hypothesis import given
@@ -11,7 +12,7 @@ from erpnext.tests.utils import ERPNextTestSuite
 
 qty_gen = st.floats(min_value=-1e6, max_value=1e6)
 value_gen = st.floats(min_value=1, max_value=1e6)
-stock_queue_generator = st.lists(st.tuples(qty_gen, value_gen), min_size=10, max_size=50)
+stock_queue_generator = st.lists(st.tuples(qty_gen, value_gen), min_size=10)
 
 
 class TestFIFOValuation(ERPNextTestSuite):

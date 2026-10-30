@@ -65,7 +65,7 @@ erpnext.maintenance.MaintenanceSchedule = class MaintenanceSchedule extends frap
 				__("Sales Order"),
 				function () {
 					erpnext.utils.map_current_doc({
-						method: "erpnext.selling.doctype.sales_order.mapper.make_maintenance_schedule",
+						method: "erpnext.selling.doctype.sales_order.sales_order.make_maintenance_schedule",
 						source_doctype: "Sales Order",
 						target: me.frm,
 						setters: {
@@ -134,7 +134,7 @@ erpnext.maintenance.MaintenanceSchedule = class MaintenanceSchedule extends frap
 										},
 									},
 								],
-								primary_action_label: "Create Visit",
+								primary_action_label: __("Create Visit"),
 								primary_action(values) {
 									frappe.call({
 										method: "erpnext.maintenance.doctype.maintenance_schedule.maintenance_schedule.make_maintenance_visit",
@@ -163,4 +163,4 @@ erpnext.maintenance.MaintenanceSchedule = class MaintenanceSchedule extends frap
 	}
 };
 
-frappe.ui.form.set_controller("Maintenance Schedule", erpnext.maintenance.MaintenanceSchedule);
+extend_cscript(cur_frm.cscript, new erpnext.maintenance.MaintenanceSchedule({ frm: cur_frm }));

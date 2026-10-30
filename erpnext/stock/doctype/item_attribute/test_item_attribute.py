@@ -5,7 +5,6 @@
 import frappe
 
 from erpnext.stock.doctype.item_attribute.item_attribute import ItemAttributeIncrementError
-from erpnext.tests.assertions import assert_raises_with_savepoint
 from erpnext.tests.utils import ERPNextTestSuite
 
 
@@ -124,7 +123,7 @@ class TestItemAttribute(ERPNextTestSuite):
 			"item_attribute_values",
 			[d for d in attribute.item_attribute_values if d.attribute_value != "Red"],
 		)
-		with assert_raises_with_savepoint(self, frappe.ValidationError):
+		with self.assertRaises(frappe.ValidationError):
 			attribute.save()
 
 		attribute.reload()

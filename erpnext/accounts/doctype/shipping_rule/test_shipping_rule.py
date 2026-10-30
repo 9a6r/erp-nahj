@@ -1,5 +1,6 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
+import unittest
 
 import frappe
 
@@ -27,7 +28,9 @@ class TestShippingRule(ERPNextTestSuite):
 					shipping_rule.insert()
 
 	def test_account_company_on_update(self):
-		shipping_rule = create_shipping_rule("Selling", "Standard Delivery")
+		shipping_rule = frappe.copy_doc(self.globalTestRecords["Shipping Rule"][0])
+		shipping_rule.label = "Standard Delivery"
+		shipping_rule.insert()
 		shipping_rule.company = "_Test Company 1"
 		shipping_rule.cost_center = None
 		with self.assertRaisesRegex(frappe.ValidationError, "does not belong to Company"):
@@ -119,5 +122,5 @@ def create_shipping_rule(shipping_rule_type, shipping_rule_name):
 		},
 	)
 	sr.insert(ignore_permissions=True)
-
+	sr.submit()
 	return sr

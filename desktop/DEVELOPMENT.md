@@ -57,12 +57,26 @@ bench --site <site> run-tests --module erpnext.tests.test_banking_language --ski
 
 ## Release validation
 
+The current results and remaining gates are in [VERIFICATION-0.3.1.md](VERIFICATION-0.3.1.md).
+Build the pinned stable image using [server-image/README.md](server-image/README.md).
+`tests/integration_business.py` creates real posted transactions and is only for
+a disposable site with `nahj_disposable_test_site` explicitly enabled. Set
+`NAHJ_ACCEPTANCE_SITE` to that site and run it with the bench virtualenv Python
+from the bench's `sites` directory. Never run it against company data.
+
+The renderer bridge in `nahj_desktop/runtime.py` is mounted by the desktop
+controller. It forwards a backend/worker container's canonical loopback HTTP
+port to the private frontend, retaining canonical URLs and cookies for PDF
+assets. It is not an externally listening proxy. Port 8000 is reserved for the
+application backend. Validate PDF generation after service restart as well as
+initial startup.
+
 Before distributing a release, check the following on a supported Arch installation:
 
 - Install, upgrade and remove the package with pacman as a normal desktop user.
 - Start from the application launcher on Wayland and X11.
 - Verify Arabic and English, keyboard focus and a 1366×768 display at normal scale and fractional scaling.
-- Connect to an ERPNext 17 test site; verify login, logout, permissions, forms and bank reconciliation.
+- Connect to an ERPNext 16.53 / Frappe 16.54 test site; verify login, logout, permissions, forms and bank reconciliation.
 - Import a statement, download a report, print a document and check file selection dialogs.
 - Interrupt the network and reconnect without losing unsaved fields by merely opening settings.
 - Validate enterprise certificates and any required SSO integration separately. Automatic cross-origin SSO redirects are currently delegated to the organization browser.

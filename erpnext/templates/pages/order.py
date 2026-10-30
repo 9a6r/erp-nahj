@@ -44,8 +44,8 @@ def get_context(context):
 		if customer_loyalty_program:
 			from erpnext.accounts.doctype.loyalty_program.loyalty_program import get_loyalty_details
 
-			# website permission on the order is already checked above; this page only needs
-			# the customer's own point balance, so skip the desk-permission wrapper
+			# website permission on the order is checked above; this page needs only the customer's own point
+			# balance, so skip the desk-permission wrapper.
 			loyalty_details = get_loyalty_details(context.doc.customer, customer_loyalty_program)
 			context.available_loyalty_points = int(loyalty_details.get("loyalty_points"))
 

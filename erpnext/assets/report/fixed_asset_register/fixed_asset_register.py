@@ -15,6 +15,7 @@ from erpnext.accounts.report.financial_statements import (
 	validate_fiscal_year,
 )
 from erpnext.accounts.utils import get_fiscal_year
+from erpnext.assets.doctype.asset.asset import _get_asset_value_after_depreciation
 
 
 def execute(filters=None):
@@ -53,16 +54,10 @@ def get_data(filters):
 	revaluation_amount_map = get_asset_value_adjustment_map(filters, finance_book)
 
 	group_by = frappe.scrub(filters.get("group_by"))
-	end_date = get_report_end_date(filters)
 
 	if group_by in ("asset_category", "location"):
 		data = get_group_by_data(
-			group_by,
-			conditions,
-			assets_linked_to_fb,
-			depreciation_amount_map,
-			revaluation_amount_map,
-			end_date,
+			group_by, conditions, assets_linked_to_fb, depreciation_amount_map, revaluation_amount_map
 		)
 		return data
 
@@ -82,17 +77,21 @@ def get_data(filters):
 		"available_for_use_date",
 		"purchase_invoice",
 		"opening_accumulated_depreciation",
-		"disposal_date",
 	]
-	assets_record = frappe.get_list("Asset", filters=conditions, fields=fields)
+	assets_record = frappe.db.get_all("Asset", filters=conditions, fields=fields)
 
 	for asset in assets_record:
-		if asset.calculate_depreciation and asset.asset_id not in assets_linked_to_fb:
+		if assets_linked_to_fb and asset.calculate_depreciation and asset.asset_id not in assets_linked_to_fb:
 			continue
 
 		depreciation_amount = depreciation_amount_map.get(asset.asset_id) or 0.0
 		revaluation_amount = revaluation_amount_map.get(asset.asset_id, 0.0)
-		asset_value = get_asset_value(asset, depreciation_amount, revaluation_amount, end_date)
+		asset_value = (
+			asset.net_purchase_amount
+			- asset.opening_accumulated_depreciation
+			- depreciation_amount
+			+ revaluation_amount
+		)
 
 		row = {
 			"asset_id": asset.asset_id,
@@ -115,33 +114,6 @@ def get_data(filters):
 		data.append(row)
 
 	return data
-
-
-def get_asset_value(asset, depreciation_amount: float, revaluation_amount: float, end_date=None) -> float:
-	"""An asset disposed by the end of the period is no longer in the books, so it carries no value."""
-	if is_disposed_by(asset, end_date):
-		return 0.0
-
-	return (
-		asset.net_purchase_amount
-		- asset.opening_accumulated_depreciation
-		- depreciation_amount
-		+ revaluation_amount
-	)
-
-
-def is_disposed_by(asset, end_date) -> bool:
-	if asset.status not in ("Sold", "Scrapped", "Capitalized"):
-		return False
-
-	return not (end_date and asset.disposal_date) or getdate(asset.disposal_date) <= getdate(end_date)
-
-
-def get_report_end_date(filters):
-	if filters.filter_based_on == "Date Range":
-		return filters.to_date
-	if filters.filter_based_on == "Fiscal Year":
-		return filters.year_end_date
 
 
 def get_conditions(filters):
@@ -270,7 +242,7 @@ def get_assets_linked_to_fb(filters):
 			(afb.finance_book.isin([cstr(filters.finance_book), ""])) | (afb.finance_book.isnull())
 		)
 
-	assets_linked_to_fb = set(chain(*query.run(as_list=1)))
+	assets_linked_to_fb = list(chain(*query.run(as_list=1)))
 
 	return assets_linked_to_fb
 
@@ -292,8 +264,9 @@ def get_asset_depreciation_amount_map(filters, finance_book):
 		.on((aca.parent == asset.asset_category) & (aca.company_name == asset.company))
 		.join(company)
 		.on(company.name == asset.company)
-		.select(asset.name.as_("asset"), Sum(gle.debit - gle.credit).as_("depreciation_amount"))
+		.select(asset.name.as_("asset"), Sum(gle.debit).as_("depreciation_amount"))
 		.where(gle.account == IfNull(aca.depreciation_expense_account, company.depreciation_expense_account))
+		.where(gle.debit != 0)
 		.where(gle.is_cancelled == 0)
 		.where(gle.is_opening == "No")
 		.where(company.name == filters.company)
@@ -378,7 +351,7 @@ def get_asset_value_adjustment_map(filters, finance_book):
 
 
 def get_group_by_data(
-	group_by, conditions, assets_linked_to_fb, depreciation_amount_map, revaluation_amount_map, end_date
+	group_by, conditions, assets_linked_to_fb, depreciation_amount_map, revaluation_amount_map
 ):
 	fields = [
 		group_by,
@@ -386,25 +359,26 @@ def get_group_by_data(
 		"net_purchase_amount",
 		"opening_accumulated_depreciation",
 		"calculate_depreciation",
-		"status",
-		"disposal_date",
 	]
-	assets = frappe.get_list("Asset", filters=conditions, fields=fields)
+	assets = frappe.db.get_all("Asset", filters=conditions, fields=fields)
 
 	data = []
 
 	for a in assets:
-		if a.calculate_depreciation and a.name not in assets_linked_to_fb:
+		if assets_linked_to_fb and a.calculate_depreciation and a.name not in assets_linked_to_fb:
 			continue
 
 		a["depreciated_amount"] = depreciation_amount_map.get(a["name"], 0.0)
 		a["revaluation_amount"] = revaluation_amount_map.get(a["name"], 0.0)
-		a["asset_value"] = get_asset_value(a, a["depreciated_amount"], a["revaluation_amount"], end_date)
+		a["asset_value"] = (
+			a["net_purchase_amount"]
+			- a["opening_accumulated_depreciation"]
+			- a["depreciated_amount"]
+			+ a["revaluation_amount"]
+		)
 
 		del a["name"]
 		del a["calculate_depreciation"]
-		del a["status"]
-		del a["disposal_date"]
 
 		idx = ([i for i, d in enumerate(data) if a[group_by] == d[group_by]] or [None])[0]
 		if idx is None:
@@ -422,30 +396,32 @@ def get_group_by_data(
 
 
 def get_purchase_receipt_supplier_map():
-	pr = frappe.qb.DocType("Purchase Receipt")
-	pri = frappe.qb.DocType("Purchase Receipt Item")
 	return frappe._dict(
-		frappe.qb.from_(pr)
-		.inner_join(pri)
-		.on(pri.parent == pr.name)
-		.select(pr.name, pr.supplier)
-		.distinct()
-		.where((pri.is_fixed_asset == 1) & (pr.docstatus == 1) & (pr.is_return == 0))
-		.run()
+		frappe.db.sql(
+			""" Select
+		pr.name, pr.supplier
+		FROM `tabPurchase Receipt` pr, `tabPurchase Receipt Item` pri
+		WHERE
+			pri.parent = pr.name
+			AND pri.is_fixed_asset=1
+			AND pr.docstatus=1
+			AND pr.is_return=0"""
+		)
 	)
 
 
 def get_purchase_invoice_supplier_map():
-	pi = frappe.qb.DocType("Purchase Invoice")
-	pii = frappe.qb.DocType("Purchase Invoice Item")
 	return frappe._dict(
-		frappe.qb.from_(pi)
-		.inner_join(pii)
-		.on(pii.parent == pi.name)
-		.select(pi.name, pi.supplier)
-		.distinct()
-		.where((pii.is_fixed_asset == 1) & (pi.docstatus == 1) & (pi.is_return == 0))
-		.run()
+		frappe.db.sql(
+			""" Select
+		pi.name, pi.supplier
+		FROM `tabPurchase Invoice` pi, `tabPurchase Invoice Item` pii
+		WHERE
+			pii.parent = pi.name
+			AND pii.is_fixed_asset=1
+			AND pi.docstatus=1
+			AND pi.is_return=0"""
+		)
 	)
 
 

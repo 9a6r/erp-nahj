@@ -148,16 +148,15 @@ jobs:
 
           uv python install 3.13
           update_to_version 15 "$(uv python find 3.13)"
-          update_to_version 16 python3.14
 
           echo "Updating to latest version"
-          fallback_to_develop=0
+          fallback_to_hotfix=0
           if [ -n "${GITHUB_BASE_REF:-}" ]; then
             frappe_ref="refs/heads/$GITHUB_BASE_REF"
-            fallback_to_develop=1
+            fallback_to_hotfix=1
           elif [ "${GITHUB_REF_TYPE:-}" = "branch" ]; then
             frappe_ref="$GITHUB_REF"
-            fallback_to_develop=1
+            fallback_to_hotfix=1
           elif [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
             frappe_ref="$GITHUB_REF"
           else
@@ -168,9 +167,9 @@ jobs:
           ls_remote_status=0
           git -C "apps/frappe" ls-remote --exit-code upstream "$frappe_ref" >/dev/null \
             || ls_remote_status=$?
-          if [ "$ls_remote_status" -eq 2 ] && [ "$fallback_to_develop" -eq 1 ]; then
-            echo "frappe has no '$frappe_ref'; falling back to develop"
-            frappe_ref=refs/heads/develop
+          if [ "$ls_remote_status" -eq 2 ] && [ "$fallback_to_hotfix" -eq 1 ]; then
+            echo "frappe has no '$frappe_ref'; falling back to version-16-hotfix"
+            frappe_ref=refs/heads/version-16-hotfix
           elif [ "$ls_remote_status" -ne 0 ]; then
             exit "$ls_remote_status"
           fi

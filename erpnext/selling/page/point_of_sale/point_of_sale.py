@@ -5,31 +5,26 @@
 import json
 
 import frappe
-from frappe import _
 from frappe.query_builder import Criterion, DocType, Order
 from frappe.utils import cint, get_datetime
 from frappe.utils.nestedset import get_root_of
 
 from erpnext.accounts.doctype.pos_invoice.pos_invoice import get_item_group, get_stock_availability
 from erpnext.accounts.doctype.pos_profile.pos_profile import get_child_nodes, get_item_groups
-from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
 from erpnext.stock.get_item_details import get_conversion_factor
-from erpnext.stock.serial_batch_identity import SerialBatchIdentity
 from erpnext.stock.utils import scan_barcode
-from erpnext.utilities.email_template import get_email_subject_and_message
 
 
-def search_by_term(search_term, warehouse, price_list, pos_profile, item_code=None, record_type=None):
-	result = search_for_serial_or_batch_or_barcode_number(search_term, pos_profile, item_code, record_type)
-	if result.get("candidates"):
-		return result
-	if not result.get("item_code"):
-		return
+def search_by_term(search_term, warehouse, price_list):
+	result = search_for_serial_or_batch_or_barcode_number(search_term) or {}
 
-	item_code = result["item_code"]
+	item_code = result.get("item_code", search_term)
 	serial_no = result.get("serial_no", "")
 	batch_no = result.get("batch_no", "")
 	barcode = result.get("barcode", "")
+
+	if not result:
+		return
 
 	item_doc = frappe.get_doc("Item", item_code)
 
@@ -114,7 +109,7 @@ def search_by_term(search_term, warehouse, price_list, pos_profile, item_code=No
 			}
 		)
 
-	return {"items": [item], "barcode_scan": True}
+	return {"items": [item]}
 
 
 def filter_result_items(result, pos_profile):
@@ -126,56 +121,22 @@ def filter_result_items(result, pos_profile):
 		result["items"] = [item for item in result.get("items") if item.get("item_group") in pos_item_groups]
 
 
-def check_pos_item_access(pos_profile: str, item_code: str | None) -> None:
-	"""Entitle a POS endpoint that takes an Item from the caller, which get_items scopes for itself."""
-	check_pos_profile_access(pos_profile)
-	if not item_code:
-		return
-	item_groups = get_item_groups(pos_profile)
-	if item_groups and frappe.db.get_value("Item", item_code, "item_group") not in item_groups:
-		frappe.throw(_("The selected Item is not available on this POS Profile"), frappe.PermissionError)
-
-
-def scope_scan_result(result, pos_profile):
-	"""Narrow a scan to the Items the profile sells, the way get_items narrows its own results."""
-	if not result:
-		return result
-	item_groups = get_item_groups(pos_profile)
-	if not item_groups:
-		return result
-
-	rows = result.get("candidates") or ([result] if result.get("item_code") else [])
-	if not rows:
-		return result
-
-	allowed = set(
-		frappe.get_all(
-			"Item",
-			filters={"name": ("in", [row["item_code"] for row in rows]), "item_group": ("in", item_groups)},
-			pluck="name",
-		)
-	)
-	rows = [row for row in rows if row["item_code"] in allowed]
-	if not rows:
-		return {}
-	if len(rows) == 1:
-		return rows[0]
-	result["candidates"] = rows
-	return result
-
-
-def check_pos_profile_access(pos_profile: str | None) -> None:
+def check_pos_profile_access(pos_profile):
 	"""The POS Profile is what entitles a caller to POS data — see the Bin/Item analysis on
 	pos_invoice.get_stock_availability. Record-level when a profile is named, so a Company User
 	Permission applies too."""
+	# select-or-read: a bare check defaults to `read`, and the shipped POS Profile rows give Sales
+	# Manager only `select`. Defaulting to read denies the role the page exists for.
+	ptype = "select" if frappe.only_has_select_perm("POS Profile") else "read"
+
 	if isinstance(pos_profile, str) and pos_profile:
-		frappe.has_permission("POS Profile", doc=pos_profile, throw=True)
+		frappe.has_permission("POS Profile", ptype, doc=pos_profile, throw=True)
 	else:
-		frappe.has_permission("POS Profile", throw=True)
+		frappe.has_permission("POS Profile", ptype, throw=True)
 
 
 @frappe.whitelist()
-def get_parent_item_group(pos_profile: str):
+def get_parent_item_group(pos_profile):
 	check_pos_profile_access(pos_profile)
 
 	# A deterministic default: get_item_groups() is list(set(...)), so [0] could land on a
@@ -201,16 +162,7 @@ def get_common_ancestor_item_group(item_groups: list[str]) -> str:
 
 
 @frappe.whitelist()
-def get_items(
-	start: str | int,
-	page_length: str | int,
-	price_list: str | None,
-	item_group: str,
-	pos_profile: str,
-	search_term: str = "",
-	item_code: str | None = None,
-	record_type: str | None = None,
-):
+def get_items(start, page_length, price_list, item_group, pos_profile, search_term=""):
 	check_pos_profile_access(pos_profile)
 
 	warehouse, hide_unavailable_items = frappe.db.get_value(
@@ -220,7 +172,7 @@ def get_items(
 	result = []
 
 	if search_term:
-		result = search_by_term(search_term, warehouse, price_list, pos_profile, item_code, record_type) or []
+		result = search_by_term(search_term, warehouse, price_list) or []
 		filter_result_items(result, pos_profile)
 		if result:
 			return result
@@ -304,7 +256,6 @@ def get_items(
 			.where(ItemPrice.selling == 1)
 			.where((ItemPrice.valid_from <= current_date) | (ItemPrice.valid_from.isnull()))
 			.where((ItemPrice.valid_upto >= current_date) | (ItemPrice.valid_upto.isnull()))
-			.orderby(ItemPrice.valid_from.isnull(), order=Order.asc)
 			.orderby(ItemPrice.valid_from, order=Order.desc)
 		).run(as_dict=True)
 
@@ -344,40 +295,14 @@ def get_items(
 
 
 @frappe.whitelist()
-def search_for_serial_or_batch_or_barcode_number(
-	search_value: str, pos_profile: str, item_code: str | None = None, record_type: str | None = None
-):
-	check_pos_item_access(pos_profile, item_code)
+def search_for_serial_or_batch_or_barcode_number(search_value: str) -> dict[str, str | None]:
+	# POS-page wrapper around scan_barcode; the page's entitlement is the POS Profile.
+	# select-or-read, as in the page entry points: this is reached in-process from get_items via
+	# search_by_term, so a bare read check breaks search for the role the page exists for.
+	ptype = "select" if frappe.only_has_select_perm("POS Profile") else "read"
+	frappe.has_permission("POS Profile", ptype, throw=True)
 
-	result = scope_scan_result(scan_barcode(search_value, item_code=item_code), pos_profile)
-	if record_type:
-		matches = [row for row in result.get("candidates", [result]) if row.get("record_type") == record_type]
-		if len(matches) != 1:
-			frappe.throw(_("The scanned record is no longer available. Please scan again."))
-		result = matches[0]
-	if result.get("record_type") == "Batch" and result.get("has_serial_no"):
-		frappe.throw(_("This item requires serial numbers. Please scan a serial number."))
-	return result
-
-
-@frappe.whitelist()
-def get_serials_by_batch(item_code: str, serial_nos: str, pos_profile: str):
-	check_pos_item_access(pos_profile, item_code)
-
-	serial_ids = SerialBatchIdentity("Serial No").resolve(item_code, get_serial_nos(serial_nos))
-	if not serial_ids:
-		return {}
-	serials = {
-		row.name: row
-		for row in frappe.get_all(
-			"Serial No", filters={"name": ("in", serial_ids)}, fields=["name", "serial_no", "batch_no"]
-		)
-	}
-	batches = {}
-	for serial_id in serial_ids:
-		serial = serials[serial_id]
-		batches.setdefault(serial.batch_no or "", []).append(serial.serial_no)
-	return batches
+	return scan_barcode(search_value)
 
 
 def get_conditions(search_term, item=None):
@@ -419,7 +344,7 @@ def get_item_group_condition(pos_profile, item=None):
 
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
-def item_group_query(doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: dict):
+def item_group_query(doctype, txt, searchfield, start, page_len, filters):
 	pos_profile = filters.get("pos_profile")
 	check_pos_profile_access(pos_profile)
 
@@ -443,7 +368,7 @@ def item_group_query(doctype: str, txt: str, searchfield: str, start: int, page_
 
 
 @frappe.whitelist()
-def check_opening_entry(user: str):
+def check_opening_entry(user):
 	# `user` was caller input, so anyone could enumerate another's open POS sessions; this is a POS Opening Entry question
 	if user != frappe.session.user:
 		frappe.has_permission("POS Opening Entry", throw=True)
@@ -459,9 +384,9 @@ def check_opening_entry(user: str):
 
 
 @frappe.whitelist(methods=["POST"])
-def create_opening_voucher(pos_profile: str, company: str, balance_details: str | list):
-	# submit() enforces POS Opening Entry rights per document, but only after the profile and company
-	# have been accepted from the caller — check the profile the session is being opened against.
+def create_opening_voucher(pos_profile, company, balance_details):
+	# submit() enforces this per document, but only after the profile and company are accepted from
+	# the caller -- check the profile the session is opened against.
 	check_pos_profile_access(pos_profile)
 
 	balance_details = frappe.parse_json(balance_details)
@@ -483,7 +408,7 @@ def create_opening_voucher(pos_profile: str, company: str, balance_details: str 
 
 
 @frappe.whitelist()
-def get_past_order_list(search_term: str, status: str, limit: int = 20):
+def get_past_order_list(search_term, status, limit=20):
 	fields = ["name", "grand_total", "currency", "customer", "customer_name", "posting_time", "posting_date"]
 	invoice_list = []
 
@@ -553,8 +478,8 @@ def get_past_order_list(search_term: str, status: str, limit: int = 20):
 	return invoice_list
 
 
-@frappe.whitelist(methods=["POST"])
-def set_customer_info(fieldname: str, customer: str, value: str = ""):
+@frappe.whitelist()
+def set_customer_info(fieldname, customer, value=""):
 	customer_doc = frappe.get_doc("Customer", customer)
 	customer_doc.check_permission("write")
 
@@ -579,9 +504,6 @@ def set_customer_info(fieldname: str, customer: str, value: str = ""):
 					& (DynamicLink.link_doctype == "Customer")
 				)
 				.orderby(Contact.is_primary_contact, order=Order.desc)
-				# tiebreaker: contacts tie on is_primary_contact (the common no-primary case) ->
-				# pick the same one on MariaDB and Postgres
-				.orderby(DynamicLink.parent, order=Order.asc)
 			)
 
 			contacts = query.run(pluck=DynamicLink.parent)
@@ -635,7 +557,7 @@ def set_customer_info(fieldname: str, customer: str, value: str = ""):
 
 
 @frappe.whitelist()
-def get_pos_profile_data(pos_profile: str):
+def get_pos_profile_data(pos_profile):
 	check_pos_profile_access(pos_profile)
 
 	pos_profile = frappe.get_doc("POS Profile", pos_profile)
@@ -648,23 +570,6 @@ def get_pos_profile_data(pos_profile: str):
 
 	pos_profile.customer_groups = _customer_groups_with_children
 	return pos_profile
-
-
-@frappe.whitelist()
-def get_receipt_email_content(doctype: str, name: str) -> dict[str, str]:
-	if doctype not in ("POS Invoice", "Sales Invoice"):
-		frappe.throw(_("Receipts can only be emailed for a POS Invoice or a Sales Invoice."))
-
-	doc = frappe.get_doc(doctype, name)
-	doc.check_permission("email")
-	template_name = doc.pos_profile and frappe.db.get_value(
-		"POS Profile", doc.pos_profile, "receipt_email_template"
-	)
-	default_text = f"{_(doctype)}: {name}"
-	subject, message = get_email_subject_and_message(
-		template_name, {"doc": doc}, default_subject=default_text, default_message=default_text
-	)
-	return {"subject": subject, "message": message}
 
 
 def add_doctype_to_results(doctype, results):
@@ -716,7 +621,7 @@ def get_invoice_filters(doctype, status, name=None):
 
 
 @frappe.whitelist()
-def get_customer_recent_transactions(customer: str):
+def get_customer_recent_transactions(customer):
 	sales_invoices = frappe.db.get_list(
 		"Sales Invoice",
 		filters={

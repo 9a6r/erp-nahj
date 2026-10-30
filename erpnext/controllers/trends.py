@@ -69,10 +69,10 @@ def validate_filters(filters):
 			frappe.throw(_("{0} is mandatory").format(_(f)))
 
 	if not frappe.db.exists("Fiscal Year", filters.get("fiscal_year")):
-		frappe.throw(_("Fiscal Year {0} does not exist").format(filters.get("fiscal_year")))
+		frappe.throw(_("Fiscal Year {0} Does Not Exist").format(filters.get("fiscal_year")))
 
 	if filters.get("based_on") == filters.get("group_by"):
-		frappe.throw(_("'Based On' and 'Group By' can not be the same"))
+		frappe.throw(_("'Based On' and 'Group By' can not be same"))
 
 	if filters.get("period_based_on") and filters.period_based_on not in ["bill_date", "posting_date"]:
 		frappe.throw(
@@ -213,9 +213,6 @@ def get_data(filters, conditions):
 					.run(as_list=1)
 				)
 
-				if not row1:
-					continue
-
 				des[ind] = row[i][0]
 				des[ind - 1] = row1[0][0]
 
@@ -262,10 +259,12 @@ def calculate_total_row(data, columns, company_currency=None):
 	total_values = {}
 	currency_col_idx = None
 	for i, col in enumerate(columns):
-		if "Float" in col or "Currency/currency" in col:
+		# based-on and group-by columns are dicts, periodic and total columns are strings
+		if isinstance(col, dict):
+			if col.get("fieldtype") == "Link" and col.get("options") == "Currency":
+				currency_col_idx = i
+		elif "Float" in col or "Currency/currency" in col:
 			total_values[i] = 0
-		if "Link/Currency" in col:
-			currency_col_idx = i
 
 	for row in data:
 		for i in total_values.keys():
@@ -337,10 +336,8 @@ def get_period_wise_terms(bet_dates, trans_date, t2):
 	]
 
 
-@frappe.whitelist()
-def get_period_date_ranges(
-	period: str, fiscal_year: str | None = None, year_start_date: DateTimeLikeObject | None = None
-):
+@frappe.whitelist(allow_guest=True)
+def get_period_date_ranges(period, fiscal_year=None, year_start_date=None):
 	from dateutil.relativedelta import relativedelta
 
 	if not year_start_date:

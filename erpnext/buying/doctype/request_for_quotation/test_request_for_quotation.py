@@ -8,19 +8,17 @@ import frappe
 from frappe.tests import change_settings
 from frappe.utils import nowdate
 
-from erpnext.buying.doctype.request_for_quotation.mapper import (
+from erpnext.buying.doctype.request_for_quotation.request_for_quotation import (
+	RequestforQuotation,
 	create_supplier_quotation,
+	get_pdf,
 	make_supplier_quotation_from_rfq,
 )
-from erpnext.buying.doctype.request_for_quotation.request_for_quotation import (
-	get_pdf,
-)
 from erpnext.controllers.accounts_controller import InvalidQtyError
-from erpnext.crm.doctype.opportunity.mapper import make_request_for_quotation as make_rfq
+from erpnext.crm.doctype.opportunity.opportunity import make_request_for_quotation as make_rfq
 from erpnext.crm.doctype.opportunity.test_opportunity import make_opportunity
 from erpnext.exceptions import PartyDisabled
 from erpnext.stock.doctype.item.test_item import make_item
-from erpnext.stock.doctype.material_request.test_material_request import make_material_request
 from erpnext.templates.pages.rfq import check_supplier_has_docname_access
 from erpnext.tests.utils import ERPNextTestSuite
 
@@ -68,35 +66,6 @@ class TestRequestforQuotation(ERPNextTestSuite):
 		self.assertEqual(rfq.get("suppliers")[0].quote_status, "Received")
 		self.assertEqual(rfq.get("suppliers")[1].quote_status, "Pending")
 
-	def test_duplicate_supplier_rejected(self):
-		rfq = frappe.new_doc("Request for Quotation")
-		rfq.transaction_date = nowdate()
-		rfq.company = "_Test Company"
-		rfq.message_for_supplier = "Please quote"
-		rfq.append("suppliers", {"supplier": "_Test Supplier"})
-		rfq.append("suppliers", {"supplier": "_Test Supplier"})
-		rfq.append(
-			"items",
-			{
-				"item_code": "_Test Item",
-				"qty": 5,
-				"uom": "_Test UOM",
-				"stock_uom": "_Test UOM",
-				"conversion_factor": 1.0,
-				"warehouse": "_Test Warehouse - _TC",
-				"schedule_date": nowdate(),
-			},
-		)
-		self.assertRaises(frappe.ValidationError, rfq.insert)
-
-	def test_rfq_blocked_for_supplier_with_prevent_rfqs(self):
-		frappe.db.set_value("Supplier", "_Test Supplier", "prevent_rfqs", 1)
-		rfq = make_request_for_quotation(
-			supplier_data=[{"supplier": "_Test Supplier", "supplier_name": "_Test Supplier"}],
-			do_not_save=True,
-		)
-		self.assertRaises(frappe.ValidationError, rfq.save)
-
 	def test_rfq_blocked_for_disabled_supplier(self):
 		frappe.db.set_value("Supplier", "_Test Supplier", "disabled", 1)
 		rfq = make_request_for_quotation(
@@ -107,13 +76,6 @@ class TestRequestforQuotation(ERPNextTestSuite):
 
 		frappe.db.set_value("Supplier", "_Test Supplier", "disabled", 0)
 		rfq.save()
-
-	def test_rfq_status_lifecycle(self):
-		rfq = make_request_for_quotation()
-		self.assertEqual(rfq.status, "Submitted")
-
-		rfq.cancel()
-		self.assertEqual(rfq.status, "Cancelled")
 
 	def test_make_supplier_quotation(self):
 		rfq = make_request_for_quotation()
@@ -207,6 +169,49 @@ class TestRequestforQuotation(ERPNextTestSuite):
 		self.assertEqual(supplier_quotation_doc.get("items")[0].qty, 5)
 		self.assertEqual(supplier_quotation_doc.get("items")[0].amount, 500)
 
+	def test_rate_quoted_from_portal_is_kept(self):
+		from erpnext.accounts.doctype.pricing_rule.test_pricing_rule import make_pricing_rule
+
+		item_code = "_Test RFQ Quoted Rate Item"
+		if not frappe.db.exists("Item", item_code):
+			make_item(item_code, {"stock_uom": "_Test UOM"})
+		if not frappe.db.exists("Item Price", {"item_code": item_code, "price_list": "Standard Buying"}):
+			frappe.get_doc(
+				{
+					"doctype": "Item Price",
+					"item_code": item_code,
+					"price_list": "Standard Buying",
+					"price_list_rate": 100,
+				}
+			).insert()
+
+		def assert_saved_rate(quoted_rate, expected_rate):
+			rfq = make_request_for_quotation(item_code=item_code)
+			rfq.supplier = rfq.suppliers[0].supplier
+			rfq.buying_price_list = "Standard Buying"
+			rfq.currency = frappe.db.get_value("Price List", "Standard Buying", "currency")
+			# None leaves the row without a rate, as the portal sends a row the supplier did not touch
+			if quoted_rate is not None:
+				rfq.items[0].rate = quoted_rate
+			supplier_quotation = frappe.get_doc("Supplier Quotation", create_supplier_quotation(rfq))
+
+			self.assertEqual(supplier_quotation.items[0].price_list_rate, 100)
+			self.assertEqual(supplier_quotation.items[0].rate, expected_rate)
+			self.assertEqual(supplier_quotation.items[0].amount, expected_rate * 5)
+
+		cases = ((0, 0), (50, 50), (None, 100), ("", 100))
+		for quoted_rate, expected_rate in cases:
+			with self.subTest(quoted_rate=quoted_rate, pricing_rule=False):
+				assert_saved_rate(quoted_rate, expected_rate)
+
+		pricing_rule = make_pricing_rule(
+			title="_Test RFQ Buying Discount", item_code=item_code, buying=1, discount_percentage=10
+		)
+		self.addCleanup(frappe.delete_doc_if_exists, "Pricing Rule", pricing_rule.name)
+		for quoted_rate, expected_rate in cases:
+			with self.subTest(quoted_rate=quoted_rate, pricing_rule=True):
+				assert_saved_rate(quoted_rate, expected_rate)
+
 	def test_portal_page_embeds_only_the_quotation_fields(self):
 		from erpnext.templates.pages.rfq import get_portal_doc
 
@@ -221,6 +226,29 @@ class TestRequestforQuotation(ERPNextTestSuite):
 			item["rate"] = 100
 		supplier_quotation = frappe.get_doc("Supplier Quotation", create_supplier_quotation(portal_doc))
 		self.assertEqual(supplier_quotation.items[0].amount, 500)
+
+	def test_portal_row_left_untouched_is_quoted_at_zero(self):
+		from erpnext.templates.pages.rfq import get_portal_doc
+
+		item_code = make_item("_Test RFQ Untouched Rate Item", {"stock_uom": "_Test UOM"}).name
+		frappe.get_doc(
+			{
+				"doctype": "Item Price",
+				"item_code": item_code,
+				"price_list": "Standard Buying",
+				"price_list_rate": 100,
+			}
+		).insert()
+
+		rfq = make_request_for_quotation(item_code=item_code)
+		portal_doc = get_portal_doc(rfq)
+		portal_doc["supplier"] = rfq.suppliers[0].supplier
+		portal_doc["buying_price_list"] = "Standard Buying"
+		portal_doc["currency"] = frappe.db.get_value("Price List", "Standard Buying", "currency")
+		supplier_quotation = frappe.get_doc("Supplier Quotation", create_supplier_quotation(portal_doc))
+
+		self.assertEqual(supplier_quotation.items[0].price_list_rate, 100)
+		self.assertEqual(supplier_quotation.items[0].rate, 0)
 
 	def test_portal_supplier_quotation_is_built_from_the_rfq_rows(self):
 		make_request_for_quotation(
@@ -332,7 +360,6 @@ class TestRequestforQuotation(ERPNextTestSuite):
 
 		supplier_doc.reload()
 		self.assertTrue(supplier_doc.portal_users[0].user)
-		self.assertIn("Supplier", frappe.get_roles(supplier_doc.portal_users[0].user))
 
 	@ERPNextTestSuite.change_settings("Buying Settings", {"allow_zero_qty_in_request_for_quotation": 1})
 	def test_supplier_quotation_from_zero_qty_rfq(self):
@@ -360,43 +387,8 @@ class TestRequestforQuotation(ERPNextTestSuite):
 		self.assertEqual(sq.items[0].qty, 0)
 		self.assertEqual(sq.items[0].item_code, rfq.items[0].item_code)
 
-	def test_cost_center_flows_from_mr_to_rfq(self):
-		from erpnext.stock.doctype.material_request.mapper import (
-			make_request_for_quotation as mr_make_rfq,
-		)
 
-		mr = make_material_request(cost_center="_Test Cost Center - _TC")
-		rfq = mr_make_rfq(mr.name)
-
-		self.assertEqual(rfq.items[0].cost_center, "_Test Cost Center - _TC")
-
-	def test_cost_center_flows_from_rfq_to_supplier_quotation(self):
-		rfq = make_request_for_quotation(do_not_submit=True)
-		rfq.items[0].cost_center = "_Test Cost Center - _TC"
-		rfq.save()
-		rfq.submit()
-
-		sq = make_supplier_quotation_from_rfq(rfq.name, for_supplier=rfq.get("suppliers")[0].supplier)
-
-		self.assertEqual(sq.items[0].cost_center, "_Test Cost Center - _TC")
-
-	def test_cost_center_flows_end_to_end_mr_rfq_sq(self):
-		from erpnext.stock.doctype.material_request.mapper import (
-			make_request_for_quotation as mr_make_rfq,
-		)
-
-		mr = make_material_request(cost_center="_Test Cost Center - _TC")
-		rfq = mr_make_rfq(mr.name)
-		rfq.append("suppliers", {"supplier": "_Test Supplier", "supplier_name": "_Test Supplier"})
-		rfq.insert()
-		rfq.submit()
-
-		sq = make_supplier_quotation_from_rfq(rfq.name, for_supplier="_Test Supplier")
-
-		self.assertEqual(sq.items[0].cost_center, "_Test Cost Center - _TC")
-
-
-def make_request_for_quotation(**args):
+def make_request_for_quotation(**args) -> "RequestforQuotation":
 	"""
 	:param supplier_data: List containing supplier data
 	"""

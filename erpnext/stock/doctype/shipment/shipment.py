@@ -237,13 +237,13 @@ def get_other_shipment(delivery_note, shipment_name, for_update=False):
 
 
 @frappe.whitelist()
-def get_address_name(ref_doctype: str, docname: str):
+def get_address_name(ref_doctype, docname):
 	frappe.has_permission(ref_doctype, "select", doc=docname, throw=True)
 	return get_party_shipping_address(ref_doctype, docname)
 
 
 @frappe.whitelist()
-def get_contact_name(ref_doctype: str, docname: str):
+def get_contact_name(ref_doctype, docname):
 	frappe.has_permission(ref_doctype, "select", doc=docname, throw=True)
 	return get_default_contact(ref_doctype, docname)
 

@@ -2,29 +2,24 @@
 # License: GNU General Public License v3. See license.txt
 
 
-from typing import Any
-
 import frappe
 from frappe import _
-from frappe.query_builder.functions import Sum
-from frappe.utils import cstr
+from frappe.query_builder.functions import Abs, Count, Date, Sum
 from frappe.utils.dashboard import cache_source
-
-from erpnext import _refuse
 
 
 @frappe.whitelist()
 @cache_source
 def get(
-	chart_name: str | None = None,
-	chart: Any = None,
-	no_cache: Any = None,
-	filters: dict | str | None = None,
-	from_date: Any = None,
-	to_date: Any = None,
-	timespan: Any = None,
-	time_interval: Any = None,
-	heatmap_year: Any = None,
+	chart_name=None,
+	chart=None,
+	no_cache=None,
+	filters=None,
+	from_date=None,
+	to_date=None,
+	timespan=None,
+	time_interval=None,
+	heatmap_year=None,
 ):
 	if filters and isinstance(filters, str):
 		filters = frappe.parse_json(filters)
@@ -32,12 +27,6 @@ def get(
 	company = filters.get("company") if filters else None
 	if not company:
 		company = frappe.defaults.get_defaults().company
-
-	company = cstr(company)
-	if not frappe.has_permission("Company", "select"):
-		_refuse()
-	if not frappe.has_permission("Warehouse", "select"):
-		_refuse()
 
 	labels, datasets = get_stock_value_by_item_group(company)
 
@@ -56,9 +45,10 @@ def get_stock_value_by_item_group(company):
 		warehouse_filters.append(["company", "=", company])
 
 	warehouses = frappe.get_list("Warehouse", pluck="name", filters=warehouse_filters)
-
 	if not warehouses:
 		return [], []
+
+	permitted_items = frappe.qb.get_query("Item", fields=["name"], ignore_permissions=False)
 
 	stock_value = Sum(doctype.stock_value)
 
@@ -73,9 +63,7 @@ def get_stock_value_by_item_group(company):
 	)
 
 	query = query.where(doctype.warehouse.isin(warehouses))
-	query = query.where(
-		doctype.item_code.isin(frappe.qb.get_query("Item", fields=["name"], ignore_permissions=False))
-	)
+	query = query.where(doctype.item_code.isin(permitted_items))
 
 	results = query.run(as_dict=True)
 

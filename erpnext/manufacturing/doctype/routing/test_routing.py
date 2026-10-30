@@ -149,8 +149,15 @@ def create_routing(**args):
 	doc.update(args)
 
 	if not args.do_not_save:
-		doc.routing_name = f"{args.routing_name}-{frappe.generate_hash(length=10)}"
-		doc.insert()
+		try:
+			doc.insert()
+		except frappe.DuplicateEntryError:
+			doc = frappe.get_doc("Routing", args.routing_name)
+			doc.delete_key("operations")
+			for operation in args.operations:
+				doc.append("operations", operation)
+
+			doc.save()
 
 	return doc
 
@@ -174,11 +181,7 @@ def setup_bom(**args):
 
 		args.raw_materials = ["Test Extra Item N-1"]
 
-	name = frappe.db.get_value(
-		"BOM",
-		{"item": args.item_code, "routing": args.routing, "docstatus": 1},
-		"name",
-	)
+	name = frappe.db.get_value("BOM", {"item": args.item_code}, "name")
 	if not name:
 		bom_doc = make_bom(
 			item=args.item_code,

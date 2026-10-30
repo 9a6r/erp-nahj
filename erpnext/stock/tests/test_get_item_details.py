@@ -19,9 +19,8 @@ class TestGetItemDetail(ERPNextTestSuite):
 		args = frappe._dict(
 			{
 				"item_code": "_Test Item",
-				"company": "_Test Company 1",
+				"company": "_Test Company",
 				"customer": "_Test Customer",
-				"currency": "USD",
 				"conversion_rate": 1.0,
 				"price_list_currency": "USD",
 				"plc_conversion_rate": 1.0,
@@ -171,7 +170,7 @@ class TestGetItemDetail(ERPNextTestSuite):
 		).insert()
 
 		# create batch
-		batch = frappe.get_doc(
+		frappe.get_doc(
 			{
 				"doctype": "Batch",
 				"batch_id": "BATCH01",
@@ -186,7 +185,7 @@ class TestGetItemDetail(ERPNextTestSuite):
 				"price_list": "Standard Selling",
 				"item_code": item.item_code,
 				"price_list_rate": 50,
-				"batch_no": batch.name,
+				"batch_no": "BATCH01",
 			}
 		).insert()
 
@@ -198,7 +197,7 @@ class TestGetItemDetail(ERPNextTestSuite):
 			warehouse="_Test Warehouse - _TC",
 			qty=100,
 			rate=100,
-			batch_no=batch.name,
+			batch_no="BATCH01",
 		)
 
 		# creating sales order just to create delivery note from it
@@ -206,7 +205,7 @@ class TestGetItemDetail(ERPNextTestSuite):
 
 		so = make_sales_order(item_code=item.item_code, qty=2, rate=75)
 
-		from erpnext.selling.doctype.sales_order.mapper import make_delivery_note
+		from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note
 
 		dn = make_delivery_note(so.name)
 
@@ -216,7 +215,7 @@ class TestGetItemDetail(ERPNextTestSuite):
 
 		# Test 2 : On saving the DN, item's batch will be fetched and rate will be updated from Item Price
 		dn.save()
-		self.assertEqual(dn.items[0].batch_no, batch.name)
+		self.assertEqual(dn.items[0].batch_no, "BATCH01")
 		self.assertEqual(dn.items[0].rate, 50)
 
 	def test_maintain_same_rate_keeps_source_rate_on_refetch(self):
@@ -226,7 +225,7 @@ class TestGetItemDetail(ERPNextTestSuite):
 		The rate is validated on save, so it can never persist changed; assert the
 		fetched rate directly to prove the newer Item Price is never picked up.
 		"""
-		from erpnext.buying.doctype.purchase_order.mapper import make_purchase_receipt
+		from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
 		from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
 		from erpnext.stock.doctype.item.test_item import make_item
 
@@ -299,7 +298,7 @@ class TestGetItemDetail(ERPNextTestSuite):
 		"""
 		from frappe.utils import flt
 
-		from erpnext.buying.doctype.purchase_order.mapper import make_purchase_receipt
+		from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
 		from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
 
 		item, price_list = "_Test Item", "_Test Buying Price List"
@@ -478,7 +477,7 @@ class TestGetItemDetail(ERPNextTestSuite):
 		"""
 		from frappe.utils import flt
 
-		from erpnext.buying.doctype.purchase_order.mapper import make_purchase_receipt
+		from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
 		from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
 
 		item = "_Test Item"
@@ -581,78 +580,105 @@ class TestGetItemDetail(ERPNextTestSuite):
 
 		has_permission.assert_called_once()
 
-	def test_rate_lock_matches_unsaved_mapped_row(self):
+	def test_rate_lock_keeps_each_rows_rate_for_batch_items(self):
+		"""Batch rows mapped PR->PI must each keep their own rate, not collapse onto the first."""
+		from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
 		from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
-		from erpnext.stock.get_item_details import get_rate_locked_source_row
-
-		original = frappe.db.get_single_value("Buying Settings", "maintain_same_rate")
-		frappe.db.set_single_value("Buying Settings", "maintain_same_rate", 1)
-		frappe.clear_cache(doctype="Buying Settings")
-
-		try:
-			first_po = create_purchase_order(rate=100)
-			second_po = create_purchase_order(rate=200)
-			pr_doc = {
-				"doctype": "Purchase Receipt",
-				"items": [
-					{"name": None, "purchase_order_item": first_po.items[0].name},
-					{"name": None, "purchase_order_item": second_po.items[0].name},
-				],
-			}
-			ctx = frappe._dict(
-				doctype="Purchase Receipt",
-				child_docname=None,
-				purchase_order_item=second_po.items[0].name,
-			)
-
-			source_row = get_rate_locked_source_row(ctx, pr_doc)
-			self.assertEqual(source_row.rate, 200)
-		finally:
-			frappe.db.set_single_value("Buying Settings", "maintain_same_rate", original)
-			frappe.clear_cache(doctype="Buying Settings")
-
-	@ERPNextTestSuite.change_settings("Selling Settings", {"maintain_same_sales_rate": 1})
-	def test_delivery_note_to_sales_invoice_keeps_item_rates(self):
-		from erpnext.stock.doctype.delivery_note.mapper import make_sales_invoice
-		from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
-
-		first_item, first_batches = self.make_batched_item_with_stock([1])
-		second_item, second_batches = self.make_batched_item_with_stock([1])
-		dn = create_delivery_note(
-			item_code=first_item,
-			qty=1,
-			rate=100,
-			batch_no=first_batches[0],
-			use_serial_batch_fields=1,
-			do_not_save=True,
-		)
-		dn.append(
-			"items",
-			{
-				"item_code": second_item,
-				"warehouse": "_Test Warehouse - _TC",
-				"qty": 1,
-				"rate": 200,
-				"conversion_factor": 1,
-				"batch_no": second_batches[0],
-				"use_serial_batch_fields": 1,
-			},
-		)
-		dn.insert()
-		dn.submit()
-
-		si = make_sales_invoice(dn.name)
-		self.assertEqual([item.rate for item in si.items], [100, 200])
-
-	def make_batched_item_with_stock(self, quantities, uoms=None, **properties):
 		from erpnext.stock.doctype.item.test_item import make_item
+		from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_invoice
 		from erpnext.stock.doctype.serial_and_batch_bundle.test_serial_and_batch_bundle import (
 			get_batch_from_bundle,
 		)
 		from erpnext.stock.doctype.stock_entry.test_stock_entry import make_stock_entry
 
+		original = frappe.db.get_single_value("Buying Settings", "maintain_same_rate")
+		frappe.db.set_single_value("Buying Settings", "maintain_same_rate", 1)
+		frappe.clear_cache(doctype="Buying Settings")
+		self.addCleanup(frappe.clear_cache, doctype="Buying Settings")
+		self.addCleanup(frappe.db.set_single_value, "Buying Settings", "maintain_same_rate", original)
+
+		def batched_item():
+			code = make_item(
+				properties={
+					"is_stock_item": 1,
+					"has_batch_no": 1,
+					"create_new_batch": 1,
+					"batch_number_series": "FBQ-.#####",
+				}
+			).name
+			se = make_stock_entry(item_code=code, target="_Test Warehouse - _TC", qty=5, basic_rate=100)
+			return code, get_batch_from_bundle(se.items[0].serial_and_batch_bundle)
+
+		item_a, batch_a = batched_item()
+		item_b, batch_b = batched_item()
+
+		# one PO with both items at different rates
+		po = create_purchase_order(item_code=item_a, qty=5, rate=28, do_not_save=True)
+		po.append(
+			"items",
+			{
+				"item_code": item_b,
+				"qty": 5,
+				"rate": 275,
+				"warehouse": "_Test Warehouse - _TC",
+				"schedule_date": frappe.utils.nowdate(),
+			},
+		)
+		po.set_missing_values()
+		po.insert()
+		po.submit()
+
+		# receive both against their own batches
+		pr = make_purchase_receipt(po.name)
+		for row in pr.items:
+			row.use_serial_batch_fields = 1
+		pr.items[0].batch_no = batch_a
+		pr.items[1].batch_no = batch_b
+		pr.insert()
+		pr.submit()
+
+		# the batch_no branch force-writes the fetched rate during mapping
+		pi = make_purchase_invoice(pr.name)
+		self.assertEqual(pi.items[0].rate, 28)
+		self.assertEqual(pi.items[1].rate, 275)  # used to collapse onto the first row (28)
+
+	def test_supplier_quotation_uses_buying_price_list_exchange_rate(self):
+		for exchange_rate, for_buying in ((90, 1), (95, 0)):
+			frappe.get_doc(
+				{
+					"doctype": "Currency Exchange",
+					"date": today(),
+					"from_currency": "EUR",
+					"to_currency": "INR",
+					"exchange_rate": exchange_rate,
+					"for_buying": for_buying,
+					"for_selling": not for_buying,
+				}
+			).insert()
+		price_list = frappe.get_doc(
+			{"doctype": "Price List", "price_list_name": "_Test EUR Buying", "currency": "EUR", "buying": 1}
+		).insert()
+
+		details = get_price_list_currency_and_exchange_rate(
+			frappe._dict(
+				doctype="Supplier Quotation",
+				price_list=price_list.name,
+				company="_Test Company",
+				transaction_date=today(),
+			)
+		)
+
+		self.assertEqual(details.plc_conversion_rate, 90)
+
+	def make_batched_item_with_stock(self, quantities, **properties):
+		from erpnext.stock.doctype.item.test_item import make_item
+		from erpnext.stock.doctype.serial_and_batch_bundle.test_serial_and_batch_bundle import (
+			get_batch_from_bundle,
+		)
+		from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
+
 		properties.update({"has_batch_no": 1, "create_new_batch": 1, "batch_number_series": "FBQ-.#####"})
-		item_code = make_item(properties=properties, uoms=uoms).name
+		item_code = make_item(properties=properties).name
 		batches = []
 		for qty in quantities:
 			se = make_stock_entry(
@@ -662,7 +688,7 @@ class TestGetItemDetail(ERPNextTestSuite):
 
 		return item_code, batches
 
-	def get_item_details_for_row(self, item_code, qty, items=None, batch_no=None):
+	def get_item_details_for_row(self, item_code, qty, batch_no=None):
 		ctx = frappe._dict(
 			{
 				"doctype": "Delivery Note",
@@ -680,55 +706,13 @@ class TestGetItemDetail(ERPNextTestSuite):
 				"ignore_pricing_rule": 1,
 			}
 		)
-		doc = {"doctype": "Delivery Note", "selling_price_list": "_Test Price List", "items": items or []}
+		doc = {"doctype": "Delivery Note", "selling_price_list": "_Test Price List", "items": []}
 		return get_item_details(ctx, doc=doc)
 
-	def get_picked_batch_no(self, item_code, qty, items=None):
-		return self.get_item_details_for_row(item_code, qty, items).get("batch_no")
-
-	def test_batch_no_set_only_when_first_batch_covers_qty(self):
-		from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
-
-		item_code, batches = self.make_batched_item_with_stock([2, 3, 14])
-		first_batch_row = [{"batch_no": batches[0], "qty": 2, "stock_qty": 2}]
-
-		with self.change_settings(
-			"Stock Settings",
-			{"pick_serial_and_batch_based_on": "FIFO", "auto_create_serial_and_batch_bundle_for_outward": 1},
-		):
-			self.assertEqual(self.get_picked_batch_no(item_code, 2), batches[0])
-			self.assertEqual(self.get_picked_batch_no(item_code, 3, items=first_batch_row), batches[1])
-			self.assertIsNone(self.get_picked_batch_no(item_code, 5))
-			self.assertIsNone(self.get_picked_batch_no(item_code, 20))
-
-			dn = create_delivery_note(item_code=item_code, qty=5, use_serial_batch_fields=1)
-			dn.reload()
-			entries = frappe.get_all(
-				"Serial and Batch Entry", {"parent": dn.items[0].serial_and_batch_bundle}, ["batch_no", "qty"]
-			)
-			self.assertEqual({d.batch_no: d.qty for d in entries}, {batches[0]: -2, batches[1]: -3})
-
-	def test_serial_nos_picked_across_batches_when_no_batch_covers_qty(self):
-		from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
-		from erpnext.stock.doctype.serial_and_batch_bundle.test_serial_and_batch_bundle import (
-			get_serial_numbers_from_bundle,
+	def get_bundle_entries(self, bundles):
+		return frappe.get_all(
+			"Serial and Batch Entry", {"parent": ("in", bundles)}, ["serial_no", "batch_no"], order_by="idx"
 		)
-
-		item_code, batches = self.make_batched_item_with_stock(
-			[2, 3], has_serial_no=1, serial_no_series="FBQ-SN-.#####"
-		)
-
-		with self.change_settings(
-			"Stock Settings",
-			{"pick_serial_and_batch_based_on": "FIFO", "auto_create_serial_and_batch_bundle_for_outward": 1},
-		):
-			details = self.get_item_details_for_row(item_code, 5)
-			self.assertIsNone(details.get("batch_no"))
-			self.assertFalse(details.get("serial_no"))
-
-			dn = create_delivery_note(item_code=item_code, qty=5, use_serial_batch_fields=1)
-			dn.reload()
-			self.assertEqual(len(get_serial_numbers_from_bundle(dn.items[0].serial_and_batch_bundle)), 5)
 
 	def test_serial_nos_auto_picked_from_selected_batch(self):
 		from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
@@ -750,20 +734,13 @@ class TestGetItemDetail(ERPNextTestSuite):
 			dn.reload()
 			self.assertFalse(dn.items[0].serial_no)
 
-			entries = frappe.get_all(
-				"Serial and Batch Entry",
-				{"parent": dn.items[0].serial_and_batch_bundle},
-				["serial_no", "batch_no"],
-			)
+			entries = self.get_bundle_entries([dn.items[0].serial_and_batch_bundle])
 			self.assertEqual(len({d.serial_no for d in entries if d.serial_no}), 3)
 			self.assertEqual({d.batch_no for d in entries}, {batches[1]})
 
 	def test_reserved_serial_nos_picked_for_sales_order_delivery(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_delivery_note
+		from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note
 		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
-		from erpnext.stock.doctype.serial_and_batch_bundle.test_serial_and_batch_bundle import (
-			get_serial_numbers_from_bundle,
-		)
 
 		item_code, batches = self.make_batched_item_with_stock(
 			[2], has_serial_no=1, serial_no_series="SRV-SN-.#####"
@@ -792,7 +769,9 @@ class TestGetItemDetail(ERPNextTestSuite):
 			self.assertFalse(dn.items[0].serial_no)
 
 			dn.submit()
-			self.assertEqual(len(get_serial_numbers_from_bundle(dn.items[0].serial_and_batch_bundle)), 2)
+			dn.reload()
+			entries = self.get_bundle_entries([dn.items[0].serial_and_batch_bundle])
+			self.assertEqual(len({d.serial_no for d in entries if d.serial_no}), 2)
 
 	@ERPNextTestSuite.change_settings("Selling Settings", {"allow_multiple_items": 1})
 	def test_rows_of_same_item_get_different_serial_nos(self):
@@ -813,17 +792,17 @@ class TestGetItemDetail(ERPNextTestSuite):
 			dn.append("items", {k: v for k, v in first_row.items() if k not in ("name", "idx")})
 			dn.save()
 			dn.submit()
+			dn.reload()
 
-			picked = frappe.get_all(
-				"Serial and Batch Entry",
-				{"parent": ("in", [row.serial_and_batch_bundle for row in dn.items])},
-				pluck="serial_no",
-			)
+			picked = [
+				d.serial_no
+				for d in self.get_bundle_entries([row.serial_and_batch_bundle for row in dn.items])
+			]
 			self.assertEqual(len(picked), 4)
 			self.assertEqual(len(set(picked)), 4)
 
 	def test_reserved_serial_nos_follow_selected_batch(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_delivery_note
+		from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note
 		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 
 		item_code, batches = self.make_batched_item_with_stock(
@@ -852,11 +831,10 @@ class TestGetItemDetail(ERPNextTestSuite):
 			)
 			dn.insert()
 			dn.submit()
+			dn.reload()
 
-			picked_batches = frappe.get_all(
-				"Serial and Batch Entry", {"parent": dn.items[0].serial_and_batch_bundle}, pluck="batch_no"
-			)
-			self.assertEqual(picked_batches, [batches[1], batches[1]])
+			entries = self.get_bundle_entries([dn.items[0].serial_and_batch_bundle])
+			self.assertEqual([d.batch_no for d in entries], [batches[1], batches[1]])
 
 	def test_item_row_and_product_bundle_get_different_serial_nos(self):
 		from erpnext.selling.doctype.product_bundle.test_product_bundle import make_product_bundle
@@ -895,124 +873,44 @@ class TestGetItemDetail(ERPNextTestSuite):
 				for row in dn.items + dn.packed_items
 				if row.serial_and_batch_bundle
 			]
-			picked = frappe.get_all("Serial and Batch Entry", {"parent": ("in", bundles)}, pluck="serial_no")
+			picked = [d.serial_no for d in self.get_bundle_entries(bundles)]
 			self.assertEqual(len(picked), 2)
 			self.assertEqual(len(set(picked)), 2)
 
-	def test_same_document_rows_reduce_batch_by_stock_qty(self):
-		item_code, batches = self.make_batched_item_with_stock(
-			[10], uoms=[{"uom": "Box", "conversion_factor": 5}]
+	def test_apply_price_list_keeps_normalised_transaction_type_for_rows(self):
+		"""A row in `items` must not replace the context's transaction type, which the
+		Pricing Rule query uses as a column name."""
+		from unittest.mock import patch
+
+		from erpnext.accounts.doctype.pricing_rule import utils as pricing_rule_utils
+		from erpnext.accounts.doctype.pricing_rule.test_pricing_rule import make_pricing_rule
+		from erpnext.stock.get_item_details import apply_price_list
+
+		pricing_rule = make_pricing_rule(
+			title="_Test Row Transaction Type Rule", selling=1, discount_percentage=10
 		)
-		box_row = [{"batch_no": batches[0], "uom": "Box", "qty": 1, "stock_qty": 5}]
+		self.addCleanup(frappe.delete_doc_if_exists, "Pricing Rule", pricing_rule.name)
 
-		with self.change_settings(
-			"Stock Settings",
-			{"pick_serial_and_batch_based_on": "FIFO", "auto_create_serial_and_batch_bundle_for_outward": 1},
-		):
-			self.assertEqual(self.get_picked_batch_no(item_code, 5, items=box_row), batches[0])
-			self.assertIsNone(self.get_picked_batch_no(item_code, 6, items=box_row))
-
-	def test_price_not_uom_dependent_is_applied_to_item_rows(self):
-		"""An Item Price saved for the stock UOM is scaled to the row UOM unless the Price List
-		is marked Price Not UOM Dependent."""
-		item_code = self.make_multi_uom_item()
-		price_list = self.make_selling_price_list("_Test UOM Price List")
-		self.make_item_price(item_code, price_list.name, 100)
-
-		for not_uom_dependent, expected_rate in ((0, 1000), (1, 100)):
-			with self.subTest(price_not_uom_dependent=not_uom_dependent):
-				price_list.price_not_uom_dependent = not_uom_dependent
-				price_list.save()
-				details = get_item_details(self.get_uom_rate_context(item_code, price_list.name))
-				self.assertEqual(details.price_list_rate, expected_rate)
-
-	def test_fallback_price_list_uses_its_own_uom_setting(self):
-		item_code = self.make_multi_uom_item()
-		selected_list = self.make_selling_price_list("_Test UOM Price List", not_uom_dependent=1)
-		default_list = self.make_selling_price_list("_Test UOM Default Price List", not_uom_dependent=0)
-		self.make_item_price(item_code, default_list.name, 100)
-
-		with self.change_settings(
-			"Selling Settings",
-			{"fallback_to_default_price_list": 1, "selling_price_list": default_list.name},
-		):
-			details = get_item_details(self.get_uom_rate_context(item_code, selected_list.name))
-
-		self.assertEqual(details.price_list_rate, 1000)
-
-	def test_supplier_quotation_uses_buying_price_list_exchange_rate(self):
-		for exchange_rate, for_buying in ((90, 1), (95, 0)):
-			frappe.get_doc(
-				{
-					"doctype": "Currency Exchange",
-					"date": today(),
-					"from_currency": "EUR",
-					"to_currency": "INR",
-					"exchange_rate": exchange_rate,
-					"for_buying": for_buying,
-					"for_selling": not for_buying,
-				}
-			).insert()
-		price_list = frappe.get_doc(
-			{"doctype": "Price List", "price_list_name": "_Test EUR Buying", "currency": "EUR", "buying": 1}
-		).insert()
-
-		details = get_price_list_currency_and_exchange_rate(
-			frappe._dict(
-				doctype="Supplier Quotation",
-				price_list=price_list.name,
-				company="_Test Company",
-				transaction_date=today(),
-			)
+		ctx = frappe._dict(
+			doctype="Sales Order",
+			company="_Test Company",
+			customer="_Test Customer",
+			currency="INR",
+			conversion_rate=1.0,
+			price_list="_Test Price List",
+			plc_conversion_rate=1.0,
+			transaction_date=today(),
+			items=[
+				frappe._dict(
+					doctype="Sales Order Item", item_code="_Test Item", qty=1, transaction_type="not_a_column"
+				)
+			],
 		)
+		with patch.object(
+			pricing_rule_utils, "_get_pricing_rules", wraps=pricing_rule_utils._get_pricing_rules
+		) as get_pricing_rules:
+			apply_price_list(ctx)
 
-		self.assertEqual(details.plc_conversion_rate, 90)
-
-	def make_multi_uom_item(self) -> str:
-		from erpnext.stock.doctype.item.test_item import make_item
-
-		return make_item(
-			properties={
-				"stock_uom": "_Test UOM",
-				"uoms": [
-					{"uom": "_Test UOM", "conversion_factor": 1},
-					{"uom": "_Test UOM 1", "conversion_factor": 10},
-				],
-			}
-		).name
-
-	def make_selling_price_list(self, name: str, not_uom_dependent: int = 0):
-		price_list = frappe.get_doc(
-			{"doctype": "Price List", "price_list_name": name, "currency": "INR", "selling": 1}
-		).insert(ignore_if_duplicate=True)
-		price_list.price_not_uom_dependent = not_uom_dependent
-		return price_list.save()
-
-	def make_item_price(self, item_code: str, price_list: str, rate: float) -> None:
-		frappe.get_doc(
-			{
-				"doctype": "Item Price",
-				"item_code": item_code,
-				"price_list": price_list,
-				"price_list_rate": rate,
-			}
-		).insert()
-
-	def get_uom_rate_context(self, item_code: str, price_list: str) -> frappe._dict:
-		return frappe._dict(
-			{
-				"item_code": item_code,
-				"company": "_Test Company",
-				"customer": "_Test Customer",
-				"currency": "INR",
-				"conversion_rate": 1.0,
-				"price_list": price_list,
-				"price_list_currency": "INR",
-				"plc_conversion_rate": 1.0,
-				"doctype": "Sales Order",
-				"uom": "_Test UOM 1",
-				"conversion_factor": 10,
-				"ignore_pricing_rule": 1,
-				"qty": 1,
-			}
+		self.assertEqual(
+			{call.args[1].transaction_type for call in get_pricing_rules.call_args_list}, {"selling"}
 		)

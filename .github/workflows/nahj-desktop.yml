@@ -1,0 +1,37 @@
+name: Nahj desktop and banking
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Desktop lifecycle regressions
+        run: PYTHONPATH=desktop python -m unittest discover -s desktop/tests -p 'test_*.py' -v
+      - name: Package source and install into an isolated prefix
+        run: |
+          bash -n desktop/install.sh desktop/package.sh desktop/server-image/entrypoint.sh
+          bash desktop/package.sh
+          make -C desktop DESTDIR="$RUNNER_TEMP/nahj-package" install
+          test -s "$RUNNER_TEMP/nahj-package/usr/share/nahj-desktop/nahj_desktop/server_release.json"
+  banking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: npm install --global yarn@1.22.22
+      - run: yarn install --frozen-lockfile && yarn build
+        working-directory: banking

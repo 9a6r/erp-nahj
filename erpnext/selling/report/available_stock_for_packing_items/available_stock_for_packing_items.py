@@ -7,18 +7,13 @@ from frappe.permissions import get_allowed_docs_for_doctype, get_user_permission
 from frappe.query_builder.functions import Sum
 from frappe.utils import floor, flt
 
-from erpnext.stock.doctype.company_restriction.company_restriction import (
-	get_allowed_masters_condition,
-	get_allowed_warehouses_condition,
-)
-
 
 def execute(filters=None):
 	if not filters:
 		filters = {}
 
 	columns = get_columns()
-	iwq_map = get_item_warehouse_quantity_map(filters.get("company"))
+	iwq_map = get_item_warehouse_quantity_map()
 	item_map = get_item_details(list(iwq_map.keys()))
 	data = []
 	for sbom, warehouse in iwq_map.items():
@@ -61,7 +56,6 @@ def get_columns():
 
 
 def get_item_details(item_codes):
-	# only the bundle items actually shown in the report need detail lookup, not the whole catalogue
 	if not item_codes:
 		return {}
 	item_map = {}
@@ -74,23 +68,18 @@ def get_item_details(item_codes):
 	return item_map
 
 
-def get_item_warehouse_quantity_map(company=None):
-	# Components of every active product bundle: (bundle item code, component item, qty per bundle)
+def get_item_warehouse_quantity_map():
 	pb = frappe.qb.DocType("Product Bundle")
 	pbi = frappe.qb.DocType("Product Bundle Item")
-	query = (
+	bundle_components = (
 		frappe.qb.from_(pbi)
 		.inner_join(pb)
 		.on(pbi.parent == pb.name)
 		.select(pb.new_item_code.as_("parent"), pbi.item_code, Sum(pbi.qty).as_("qty"))
-		.where((pb.is_active == 1) & (pb.docstatus == 1))
+		.where(pb.disabled == 0)
 		.groupby(pb.new_item_code, pbi.item_code)
+		.run(as_dict=True)
 	)
-
-	if condition := get_allowed_masters_condition(pb.new_item_code, "Item"):
-		query = query.where(condition)
-
-	bundle_components = query.run(as_dict=True)
 
 	if not bundle_components:
 		return {}
@@ -98,17 +87,12 @@ def get_item_warehouse_quantity_map(company=None):
 	component_items = list({c.item_code for c in bundle_components})
 
 	bin_projected = {
-		(b.item_code, b.warehouse): flt(b.projected_qty) for b in get_component_bins(component_items, company)
+		(b.item_code, b.warehouse): flt(b.projected_qty) for b in get_component_bins(component_items)
 	}
 
-	# Only warehouses that hold at least one component can yield a non-zero packable qty; a warehouse
-	# missing any component yields MIN()=0 and is dropped below, so scanning every warehouse in the
-	# system is wasted work. Scope the loop to warehouses present in the Bin result.
 	bin_warehouses = {wh for (_, wh) in bin_projected}
 
-	# For each (bundle, warehouse) the number of complete bundles that can be packed is the
-	# MIN over components of (component projected_qty in that warehouse / component qty per bundle).
-	# A component with no Bin in a warehouse contributes 0 (the original UNION ALL/NOT EXISTS branch).
+	# packable bundles per (bundle, warehouse) = MIN over components of projected_qty / qty per bundle
 	packable_qty = {}
 	for component in bundle_components:
 		if not component.qty:
@@ -120,8 +104,7 @@ def get_item_warehouse_quantity_map(company=None):
 
 	sbom_map = {}
 	for (parent, warehouse), qty in packable_qty.items():
-		# strip float-division noise (0.3 / 0.1 == 2.9999…) without rounding away a real fraction (8.99 / 3),
-		# then floor: only whole bundles can be packed and negative projected stock cannot
+		# round off float-division noise, then floor to whole, non-negative bundles
 		bundles = max(0, floor(flt(qty, 9)))
 		if bundles:
 			sbom_map.setdefault(parent, {})[warehouse] = bundles
@@ -129,19 +112,13 @@ def get_item_warehouse_quantity_map(company=None):
 	return sbom_map
 
 
-def get_component_bins(component_items, company=None):
+def get_component_bins(component_items):
 	bin_table = frappe.qb.DocType("Bin")
 	query = (
 		frappe.qb.from_(bin_table)
 		.select(bin_table.item_code, bin_table.warehouse, bin_table.projected_qty)
 		.where(bin_table.item_code.isin(component_items))
 	)
-
-	if company:
-		query = query.where(bin_table.company == company)
-
-	if condition := get_allowed_warehouses_condition(bin_table.warehouse):
-		query = query.where(condition)
 
 	if warehouses := get_user_permitted_warehouses():
 		query = query.where(bin_table.warehouse.isin(warehouses))

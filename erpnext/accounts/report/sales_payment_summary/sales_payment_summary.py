@@ -3,8 +3,7 @@
 
 import frappe
 from frappe import _
-from frappe.query_builder import Case
-from frappe.query_builder.functions import Coalesce, Min, Sum
+from frappe.model.db_query import DatabaseQuery
 from frappe.utils import cstr
 
 
@@ -48,23 +47,19 @@ def get_columns(filters):
 
 def get_pos_sales_payment_data(filters):
 	sales_invoice_data = get_pos_invoice_data(filters)
-	labels = get_pos_row_labels(filters)
-
-	data = []
-	for row in sales_invoice_data:
-		label = labels.get(get_pos_row_key(row)) or frappe._dict()
-		data.append(
-			[
-				row["posting_date"],
-				row["owner"],
-				label.mode_of_payment,
-				row["net_total"],
-				row["total_taxes"],
-				row["paid_amount"],
-				row["warehouse"],
-				label.cost_center,
-			]
-		)
+	data = [
+		[
+			row["posting_date"],
+			row["owner"],
+			row["mode_of_payment"],
+			row["net_total"],
+			row["total_taxes"],
+			row["paid_amount"],
+			row["warehouse"],
+			row["cost_center"],
+		]
+		for row in sales_invoice_data
+	]
 
 	return data
 
@@ -106,350 +101,189 @@ def get_sales_payment_data(filters, columns):
 	return data
 
 
-def apply_conditions(query, a, filters):
-	"""Apply the same filters get_conditions() used to build, as parameterized qb .where() clauses.
-
-	`a` is the field source for the Sales Invoice columns -- either the `tabSales Invoice`
-	DocType or a subquery aliased `a` that selects those columns. This mirrors the previous
-	raw SQL where every predicate was keyed on the `a` alias.
-	"""
+def get_conditions(filters):
+	conditions = "1=1"
 	if filters.get("from_date"):
-		query = query.where(a.posting_date >= filters.get("from_date"))
+		conditions += " and a.posting_date >= %(from_date)s"
 	if filters.get("to_date"):
-		query = query.where(a.posting_date <= filters.get("to_date"))
+		conditions += " and a.posting_date <= %(to_date)s"
 	if filters.get("company"):
-		query = query.where(a.company == filters.get("company"))
+		conditions += " and a.company=%(company)s"
 	if filters.get("customer"):
-		query = query.where(a.customer == filters.get("customer"))
+		conditions += " and a.customer = %(customer)s"
 	if filters.get("owner"):
-		query = query.where(a.owner == filters.get("owner"))
+		conditions += " and a.owner = %(owner)s"
 	if filters.get("is_pos"):
-		query = query.where(a.is_pos == filters.get("is_pos"))
-	return query
-
-
-def get_invoice_item_totals():
-	"""One row per invoice: warehouse and cost_center off its first line."""
-	sii = frappe.qb.DocType("Sales Invoice Item")
-	grouped_items = (
-		frappe.qb.from_(sii).select(sii.parent, Min(sii.idx).as_("representative_idx")).groupby(sii.parent)
-	).as_("grouped_items")
-	representative_item = frappe.qb.DocType("Sales Invoice Item").as_("representative_item")
-
-	return (
-		frappe.qb.from_(grouped_items)
-		.inner_join(representative_item)
-		.on(
-			(representative_item.parent == grouped_items.parent)
-			& (representative_item.idx == grouped_items.representative_idx)
-		)
-		.select(
-			grouped_items.parent,
-			representative_item.warehouse,
-			representative_item.cost_center,
-		)
-	)
-
-
-def get_invoice_totals():
-	"""Invoice-level aggregates, grouped by the primary key so every plain column is dependent."""
-	si = frappe.qb.DocType("Sales Invoice")
-
-	return (
-		frappe.qb.from_(si)
-		.select(
-			si.docstatus,
-			si.company,
-			si.customer,
-			si.is_pos,
-			si.name,
-			si.posting_date,
-			si.owner,
-			si.creation,
-			Sum(si.base_net_total).as_("net_total"),
-			Sum(si.base_total_taxes_and_charges).as_("total_taxes"),
-			Sum(si.base_paid_amount - si.base_change_amount).as_("paid_amount"),
-			Sum(si.outstanding_amount).as_("outstanding_amount"),
-		)
-		.where(si.name.isin(get_permitted_invoices()))
-		.groupby(si.name)
-	)
-
-
-def get_pos_row_key(row):
-	return (row.owner, row.posting_date, row.warehouse)
-
-
-def get_representative_payments():
-	"""One payment line per invoice: the first the user entered."""
-	sip = frappe.qb.DocType("Sales Invoice Payment")
-	grouped_payments = (
-		frappe.qb.from_(sip).select(sip.parent, Min(sip.idx).as_("representative_idx")).groupby(sip.parent)
-	).as_("grouped_payments")
-	representative_payment = frappe.qb.DocType("Sales Invoice Payment").as_("representative_payment")
-
-	return (
-		frappe.qb.from_(grouped_payments)
-		.inner_join(representative_payment)
-		.on(
-			(representative_payment.parent == grouped_payments.parent)
-			& (representative_payment.idx == grouped_payments.representative_idx)
-		)
-		.select(grouped_payments.parent, representative_payment.mode_of_payment.as_("mode_of_payment"))
-	)
-
-
-def get_pos_row_labels(filters):
-	"""cost_center and mode_of_payment off the earliest invoice in each row.
-
-	Ordered in Python rather than SQL, so no database collation applies to the tie-break.
-	"""
-	t1 = get_invoice_item_totals()
-	t3 = get_representative_payments()
-	a = get_invoice_totals()
-
-	query = (
-		frappe.qb.from_(t1)
-		.left_join(t3)
-		.on(t3.parent == t1.parent)
-		.join(a)
-		.on(t1.parent == a.name)
-		.select(
-			a.owner,
-			a.posting_date,
-			a.creation,
-			a.name,
-			t1.warehouse,
-			t1.cost_center,
-			t3.mode_of_payment,
-		)
-		.where(a.docstatus == 1)
-	)
-	query = apply_conditions(query, a, filters)
-
-	labels = {}
-	for row in query.run(as_dict=True):
-		key = get_pos_row_key(row)
-		current = labels.get(key)
-		if current is None or (row.creation, row.name) < (current.creation, current.name):
-			labels[key] = row
-
-	return labels
+		conditions += " and a.is_pos = %(is_pos)s"
+	if is_restricted_user():
+		if "permitted_invoices" not in filters:
+			filters["permitted_invoices"] = get_permitted_invoices(filters)
+		conditions += " and a.name in %(permitted_invoices)s"
+	return conditions
 
 
 def get_pos_invoice_data(filters):
-	t1 = get_invoice_item_totals()
-	a = get_invoice_totals()
-
-	query = (
-		frappe.qb.from_(t1)
-		.join(a)
-		.on(t1.parent == a.name)
-		.select(
-			a.posting_date,
-			a.owner,
-			Sum(a.net_total).as_("net_total"),
-			Sum(a.total_taxes).as_("total_taxes"),
-			Sum(a.paid_amount).as_("paid_amount"),
-			Sum(a.outstanding_amount).as_("outstanding_amount"),
-			t1.warehouse,
-		)
-		.where(a.docstatus == 1)
-		.groupby(a.owner, a.posting_date, t1.warehouse)
+	conditions = get_conditions(filters)
+	result = frappe.db.sql(
+		""
+		"SELECT "
+		'posting_date, owner, sum(net_total) as "net_total", sum(total_taxes) as "total_taxes", '
+		'sum(paid_amount) as "paid_amount", sum(outstanding_amount) as "outstanding_amount", '
+		"mode_of_payment, warehouse, cost_center "
+		"FROM ("
+		"SELECT "
+		"parent, item_code, warehouse, cost_center "
+		"from `tabSales Invoice Item`  group by parent"
+		") t1 "
+		"left join "
+		"(select parent, mode_of_payment from `tabSales Invoice Payment` group by parent) t3 "
+		"on (t3.parent = t1.parent) "
+		"JOIN ("
+		"SELECT "
+		"docstatus, company, customer, is_pos, name, posting_date, owner, "
+		'sum(base_net_total) as "net_total", sum(base_total_taxes_and_charges) as "total_taxes", '
+		'sum(base_paid_amount - base_change_amount) as "paid_amount", '
+		'sum(outstanding_amount) as "outstanding_amount" '
+		"FROM `tabSales Invoice` "
+		"GROUP BY name"
+		") a "
+		"ON ("
+		"t1.parent = a.name) "
+		"WHERE a.docstatus = 1"
+		f" AND {conditions} "
+		"GROUP BY "
+		"owner, posting_date, warehouse",
+		filters,
+		as_dict=1,
 	)
-	query = apply_conditions(query, a, filters)
-
-	return query.run(as_dict=True)
+	return result
 
 
 def get_sales_invoice_data(filters):
-	a = frappe.qb.DocType("Sales Invoice")
-	query = (
-		frappe.qb.from_(a)
-		.select(
-			a.posting_date,
-			a.owner,
-			Sum(a.base_net_total).as_("net_total"),
-			Sum(a.base_total_taxes_and_charges).as_("total_taxes"),
-			Sum(a.base_paid_amount).as_("paid_amount"),
-			Sum(a.outstanding_amount).as_("outstanding_amount"),
-		)
-		.where(a.docstatus == 1)
-		.where(a.name.isin(get_permitted_invoices()))
-		.groupby(a.owner, a.posting_date)
+	conditions = get_conditions(filters)
+	return frappe.db.sql(
+		f"""
+		select
+			a.posting_date, a.owner,
+			sum(a.base_net_total) as "net_total",
+			sum(a.base_total_taxes_and_charges) as "total_taxes",
+			sum(a.base_paid_amount) as "paid_amount",
+			sum(a.outstanding_amount) as "outstanding_amount"
+		from `tabSales Invoice` a
+		where a.docstatus = 1
+			and {conditions}
+			group by
+			a.owner, a.posting_date
+	""",
+		filters,
+		as_dict=1,
 	)
-	query = apply_conditions(query, a, filters)
-	return query.run(as_dict=True)
 
 
 def get_mode_of_payments(filters):
 	mode_of_payments = {}
 	invoice_list = get_invoices(filters)
-	invoice_names = [invoice["name"] for invoice in invoice_list]
+	invoice_list_names = ",".join("'" + invoice["name"] + "'" for invoice in invoice_list)
 	if invoice_list:
-		# Branch 1: payments recorded directly on the Sales Invoice
-		si1 = frappe.qb.DocType("Sales Invoice")
-		sip = frappe.qb.DocType("Sales Invoice Payment")
-		branch1 = (
-			frappe.qb.from_(si1)
-			.join(sip)
-			.on(si1.name == sip.parent)
-			.select(si1.owner, si1.posting_date, Coalesce(sip.mode_of_payment, "").as_("mode_of_payment"))
-			.where(si1.docstatus == 1)
-			.where(si1.name.isin(invoice_names))
+		inv_mop = frappe.db.sql(
+			f"""select a.owner,a.posting_date, ifnull(b.mode_of_payment, '') as mode_of_payment
+			from `tabSales Invoice` a, `tabSales Invoice Payment` b
+			where a.name = b.parent
+			and a.docstatus = 1
+			and a.name in ({invoice_list_names})
+			union
+			select a.owner,a.posting_date, ifnull(b.mode_of_payment, '') as mode_of_payment
+			from `tabSales Invoice` a, `tabPayment Entry` b,`tabPayment Entry Reference` c
+			where a.name = c.reference_name
+			and b.name = c.parent
+			and b.docstatus = 1
+			and a.name in ({invoice_list_names})
+			union
+			select si.owner, si.posting_date,
+			ifnull(a.voucher_type,'') as mode_of_payment
+			from `tabJournal Entry` a, `tabJournal Entry Account` b, `tabSales Invoice` si
+			where a.name = b.parent
+			and si.name = b.reference_name
+			and a.docstatus = 1
+			and a.voucher_type != 'Exchange Gain Or Loss'
+			and b.reference_type = 'Sales Invoice'
+			and b.reference_name in ({invoice_list_names})
+			""",
+			as_dict=1,
 		)
-
-		# Branch 2: payments via Payment Entry referencing the invoice
-		si2 = frappe.qb.DocType("Sales Invoice")
-		pe = frappe.qb.DocType("Payment Entry")
-		per = frappe.qb.DocType("Payment Entry Reference")
-		branch2 = (
-			frappe.qb.from_(si2)
-			.join(per)
-			.on(si2.name == per.reference_name)
-			.join(pe)
-			.on(pe.name == per.parent)
-			.select(si2.owner, si2.posting_date, Coalesce(pe.mode_of_payment, "").as_("mode_of_payment"))
-			.where(pe.docstatus == 1)
-			.where(si2.name.isin(invoice_names))
-		)
-
-		# Branch 3: payments via Journal Entry referencing the invoice, keyed by the invoice like branch 2
-		si3 = frappe.qb.DocType("Sales Invoice")
-		je = frappe.qb.DocType("Journal Entry")
-		jea = frappe.qb.DocType("Journal Entry Account")
-		branch3 = (
-			frappe.qb.from_(je)
-			.join(jea)
-			.on(je.name == jea.parent)
-			.join(si3)
-			.on(si3.name == jea.reference_name)
-			.select(si3.owner, si3.posting_date, Coalesce(je.voucher_type, "").as_("mode_of_payment"))
-			.where(je.docstatus == 1)
-			.where(je.voucher_type != "Exchange Gain Or Loss")
-			.where(jea.reference_type == "Sales Invoice")
-			.where(jea.reference_name.isin(invoice_names))
-		)
-
-		# bare UNION => de-duplicated rows across the three branches
-		inv_mop = (branch1.union(branch2).union(branch3)).run(as_dict=True)
 		for d in inv_mop:
 			mode_of_payments.setdefault(d["owner"] + cstr(d["posting_date"]), []).append(d.mode_of_payment)
 	return mode_of_payments
 
 
 def get_invoices(filters):
-	a = frappe.qb.DocType("Sales Invoice")
-	query = (
-		frappe.qb.from_(a).select(a.name).where(a.docstatus == 1).where(a.name.isin(get_permitted_invoices()))
+	conditions = get_conditions(filters)
+	return frappe.db.sql(
+		f"""select a.name
+		from `tabSales Invoice` a
+		where a.docstatus = 1 and {conditions}""",
+		filters,
+		as_dict=1,
 	)
-	query = apply_conditions(query, a, filters)
-	return query.run(as_dict=True)
 
 
 def get_mode_of_payment_details(filters):
 	mode_of_payment_details = {}
 	invoice_list = get_invoices(filters)
-	invoice_names = [invoice["name"] for invoice in invoice_list]
+	invoice_list_names = ",".join("'" + invoice["name"] + "'" for invoice in invoice_list)
 	if invoice_list:
-		# Branch 1: amounts paid directly on the Sales Invoice
-		si1 = frappe.qb.DocType("Sales Invoice")
-		sip = frappe.qb.DocType("Sales Invoice Payment")
-		mop1 = Coalesce(sip.mode_of_payment, "")
-		branch1 = (
-			frappe.qb.from_(si1)
-			.join(sip)
-			.on(si1.name == sip.parent)
-			.select(
-				si1.owner,
-				si1.posting_date,
-				mop1.as_("mode_of_payment"),
-				Sum(sip.base_amount).as_("paid_amount"),
-			)
-			.where(si1.docstatus == 1)
-			.where(si1.name.isin(invoice_names))
-			.groupby(si1.owner, si1.posting_date, mop1)
+		inv_mop_detail = frappe.db.sql(
+			f"""
+			select t.owner,
+			       t.posting_date,
+				   t.mode_of_payment,
+				   sum(t.paid_amount) as paid_amount
+			from (
+				select a.owner, a.posting_date,
+				ifnull(b.mode_of_payment, '') as mode_of_payment, sum(b.base_amount) as paid_amount
+				from `tabSales Invoice` a, `tabSales Invoice Payment` b
+				where a.name = b.parent
+				and a.docstatus = 1
+				and a.name in ({invoice_list_names})
+				group by a.owner, a.posting_date, mode_of_payment
+				union all
+				select a.owner,a.posting_date,
+				ifnull(b.mode_of_payment, '') as mode_of_payment,
+				sum(c.allocated_amount * case when b.payment_type = 'Receive'
+					then b.source_exchange_rate else b.target_exchange_rate end) as paid_amount
+				from `tabSales Invoice` a, `tabPayment Entry` b,`tabPayment Entry Reference` c
+				where a.name = c.reference_name
+				and b.name = c.parent
+				and b.docstatus = 1
+				and a.name in ({invoice_list_names})
+				group by a.owner, a.posting_date, mode_of_payment
+				union all
+				select si.owner, si.posting_date,
+				ifnull(a.voucher_type,'') as mode_of_payment, sum(b.credit)
+				from `tabJournal Entry` a, `tabJournal Entry Account` b, `tabSales Invoice` si
+				where a.name = b.parent
+				and si.name = b.reference_name
+				and a.docstatus = 1
+				and a.voucher_type != 'Exchange Gain Or Loss'
+				and b.reference_type = 'Sales Invoice'
+				and b.reference_name in ({invoice_list_names})
+				group by si.owner, si.posting_date, mode_of_payment
+			) t
+			group by t.owner, t.posting_date, t.mode_of_payment
+			""",
+			as_dict=1,
 		)
 
-		# Branch 2: amounts allocated via Payment Entry
-		si2 = frappe.qb.DocType("Sales Invoice")
-		pe = frappe.qb.DocType("Payment Entry")
-		per = frappe.qb.DocType("Payment Entry Reference")
-		mop2 = Coalesce(pe.mode_of_payment, "")
-		party_account_rate = (
-			Case().when(pe.payment_type == "Receive", pe.source_exchange_rate).else_(pe.target_exchange_rate)
-		)
-		branch2 = (
-			frappe.qb.from_(si2)
-			.join(per)
-			.on(si2.name == per.reference_name)
-			.join(pe)
-			.on(pe.name == per.parent)
-			.select(
-				si2.owner,
-				si2.posting_date,
-				mop2.as_("mode_of_payment"),
-				Sum(per.allocated_amount * party_account_rate).as_("paid_amount"),
-			)
-			.where(pe.docstatus == 1)
-			.where(si2.name.isin(invoice_names))
-			.groupby(si2.owner, si2.posting_date, mop2)
-		)
-
-		# Branch 3: amounts credited via Journal Entry, keyed by the invoice like branch 2
-		si3 = frappe.qb.DocType("Sales Invoice")
-		je = frappe.qb.DocType("Journal Entry")
-		jea = frappe.qb.DocType("Journal Entry Account")
-		mop3 = Coalesce(je.voucher_type, "")
-		branch3 = (
-			frappe.qb.from_(je)
-			.join(jea)
-			.on(je.name == jea.parent)
-			.join(si3)
-			.on(si3.name == jea.reference_name)
-			.select(
-				si3.owner, si3.posting_date, mop3.as_("mode_of_payment"), Sum(jea.credit).as_("paid_amount")
-			)
-			.where(je.docstatus == 1)
-			.where(je.voucher_type != "Exchange Gain Or Loss")
-			.where(jea.reference_type == "Sales Invoice")
-			.where(jea.reference_name.isin(invoice_names))
-			.groupby(si3.owner, si3.posting_date, mop3)
-		)
-
-		# UNION ALL: equal totals from different sources must all be summed
-		t = branch1.union_all(branch2).union_all(branch3)
-		inv_mop_detail = (
-			frappe.qb.from_(t)
-			.select(
-				t.owner,
-				t.posting_date,
-				t.mode_of_payment,
-				Sum(t.paid_amount).as_("paid_amount"),
-			)
-			.groupby(t.owner, t.posting_date, t.mode_of_payment)
-			.run(as_dict=True)
-		)
-
-		# change amount paid back in cash, subtracted from the matching mode-of-payment detail below
-		sic = frappe.qb.DocType("Sales Invoice")
-		sipc = frappe.qb.DocType("Sales Invoice Payment")
-		mopc = Coalesce(sipc.mode_of_payment, "")
-		inv_change_amount = (
-			frappe.qb.from_(sic)
-			.join(sipc)
-			.on(sic.name == sipc.parent)
-			.select(
-				sic.owner,
-				sic.posting_date,
-				mopc.as_("mode_of_payment"),
-				Sum(sic.base_change_amount).as_("change_amount"),
-			)
-			.where(sic.name.isin(invoice_names))
-			.where(sipc.type == "Cash")
-			.where(sic.base_change_amount > 0)
-			.groupby(sic.owner, sic.posting_date, mopc)
-			.run(as_dict=True)
+		inv_change_amount = frappe.db.sql(
+			f"""select a.owner, a.posting_date,
+			ifnull(b.mode_of_payment, '') as mode_of_payment, sum(a.base_change_amount) as change_amount
+			from `tabSales Invoice` a, `tabSales Invoice Payment` b
+			where a.name = b.parent
+			and a.name in ({invoice_list_names})
+			and b.type = 'Cash'
+			and a.base_change_amount > 0
+			group by a.owner, a.posting_date, mode_of_payment""",
+			as_dict=1,
 		)
 
 		for d in inv_change_amount:
@@ -470,6 +304,21 @@ def get_mode_of_payment_details(filters):
 	return mode_of_payment_details
 
 
-def get_permitted_invoices():
-	"""Sales Invoices the session user may read, as a subquery."""
-	return frappe.qb.get_query("Sales Invoice", fields=["name"], ignore_permissions=False)
+def is_restricted_user() -> bool:
+	"""Whether the session user may read only some Sales Invoices."""
+	if not frappe.has_permission("Sales Invoice", "read"):
+		return True
+	return bool(DatabaseQuery("Sales Invoice").build_match_conditions(as_condition=True))
+
+
+def get_permitted_invoices(filters) -> tuple[str, ...]:
+	"""Submitted Sales Invoices of the period that the session user may read."""
+	invoice_filters = [["docstatus", "=", 1], ["company", "=", filters.get("company")]]
+	if filters.get("from_date"):
+		invoice_filters.append(["posting_date", ">=", filters.get("from_date")])
+	if filters.get("to_date"):
+		invoice_filters.append(["posting_date", "<=", filters.get("to_date")])
+
+	names = frappe.get_list("Sales Invoice", filters=invoice_filters, pluck="name", limit_page_length=0)
+	# an empty tuple is not valid SQL, and no invoice has an empty name
+	return tuple(names) or ("",)

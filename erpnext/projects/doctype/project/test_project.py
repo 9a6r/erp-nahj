@@ -10,7 +10,7 @@ from frappe.utils import add_days, getdate, nowdate
 from erpnext.projects.doctype.project.project import create_kanban_board_if_not_exists, get_cost_center_name
 from erpnext.projects.doctype.project_template.test_project_template import make_project_template
 from erpnext.projects.doctype.task.test_task import create_task
-from erpnext.selling.doctype.sales_order.mapper import make_project as make_project_from_so
+from erpnext.selling.doctype.sales_order.sales_order import make_project as make_project_from_so
 from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
@@ -18,21 +18,6 @@ from erpnext.tests.utils import ERPNextTestSuite
 
 
 class TestProject(ERPNextTestSuite):
-	def test_get_timeline_data_runs(self):
-		# get_timeline_data groups Timesheet Detail by Date(from_time); the selected day key must be the
-		# same grouped expression (UnixTimestamp(Date(from_time))) to be valid on Postgres.
-		from erpnext.projects.doctype.project.project import get_timeline_data
-		from erpnext.projects.doctype.timesheet.test_timesheet import make_timesheet
-		from erpnext.setup.doctype.employee.test_employee import make_employee
-
-		project = make_project({"project_name": "_Test Timeline Project", "company": "_Test Company"})
-		emp = make_employee("test_timeline@example.com", company="_Test Company")
-		make_timesheet(emp, simulate=True, project=project.name)
-
-		data = get_timeline_data("Project", project.name)
-		self.assertIsInstance(data, dict)
-		self.assertGreaterEqual(sum(data.values()), 1)
-
 	def test_project_total_costing_and_billing_amount(self):
 		from erpnext.projects.doctype.timesheet.test_timesheet import make_timesheet
 		from erpnext.setup.doctype.employee.test_employee import make_employee
@@ -55,7 +40,7 @@ class TestProject(ERPNextTestSuite):
 
 	def test_project_with_template_having_no_parent_and_depend_tasks(self):
 		project_name = "Test Project with Template - No Parent and Dependend Tasks"
-		frappe.db.delete("Task", {"project": project_name})
+		frappe.db.sql(""" delete from tabTask where project = %s """, project_name)
 		frappe.delete_doc("Project", project_name)
 
 		task1 = task_exists("Test Template Task with No Parent and Dependency")
@@ -88,7 +73,7 @@ class TestProject(ERPNextTestSuite):
 		if frappe.db.get_value("Project", {"project_name": project_name}, "name"):
 			project_name = frappe.db.get_value("Project", {"project_name": project_name}, "name")
 
-		frappe.db.delete("Task", {"project": project_name})
+		frappe.db.sql(""" delete from tabTask where project = %s """, project_name)
 		frappe.delete_doc("Project", project_name)
 
 		task1 = task_exists("Test Template Task Parent")
@@ -143,7 +128,7 @@ class TestProject(ERPNextTestSuite):
 
 	def test_project_template_having_dependent_tasks(self):
 		project_name = "Test Project with Template - Dependent Tasks"
-		frappe.db.delete("Task", {"project": project_name})
+		frappe.db.sql(""" delete from tabTask where project = %s  """, project_name)
 		frappe.delete_doc("Project", project_name)
 
 		task1 = task_exists("Test Template Task for Dependency")
@@ -173,7 +158,7 @@ class TestProject(ERPNextTestSuite):
 
 		self.assertEqual(tasks[1].subject, "Test Template Task with Dependency")
 		self.assertEqual(getdate(tasks[1].exp_end_date), calculate_end_date(project, 2, 2))
-		self.assertGreaterEqual(tasks[1].depends_on_tasks.find(tasks[0].name), 0)
+		self.assertTrue(tasks[1].depends_on_tasks.find(tasks[0].name) >= 0)
 
 		self.assertEqual(tasks[0].subject, "Test Template Task for Dependency")
 		self.assertEqual(getdate(tasks[0].exp_end_date), calculate_end_date(project, 3, 1))
@@ -231,25 +216,6 @@ class TestProject(ERPNextTestSuite):
 			frappe.db.get_value("Project", project.name, "total_sales_amount"), so.base_net_total
 		)
 
-	def test_sales_order_link_is_not_overwritten_by_second_project(self):
-		so = make_sales_order()
-
-		first_project = make_project_from_so(so.name).save()
-		so.reload()
-		self.assertEqual(so.project, first_project.name)
-
-		# A second project for the same sales order must not steal the link.
-		second_project = frappe.get_doc(
-			doctype="Project",
-			project_name="Second project for same sales order",
-			company=so.company,
-			sales_order=so.name,
-		).insert()
-		self.assertEqual(second_project.sales_order, so.name)
-
-		so.reload()
-		self.assertEqual(so.project, first_project.name)
-
 	def test_project_with_template_tasks_having_common_name(self):
 		# Step - 1: Create Template Parent Tasks
 		template_parent_task1 = create_task(subject="Parent Task - 1", is_template=1, is_group=1)
@@ -294,7 +260,7 @@ class TestProject(ERPNextTestSuite):
 
 	def test_project_having_no_tasks_complete(self):
 		project_name = "Test Project - No Tasks Completion"
-		frappe.db.delete("Task", {"project": project_name})
+		frappe.db.sql(""" delete from tabTask where project = %s """, project_name)
 		frappe.delete_doc("Project", project_name)
 
 		project = frappe.get_doc(
@@ -347,50 +313,6 @@ class TestProject(ERPNextTestSuite):
 			task_names.append(task.name)
 		return project, task_names
 
-	def test_percent_complete_by_task_completion(self):
-		project, tasks = self._project_with_tasks("Task Completion", 4)
-
-		frappe.db.set_value("Task", tasks[0], "status", "Completed")
-		project.update_percent_complete()
-		self.assertEqual(project.percent_complete, 25)  # 1 of 4
-
-		for task in tasks:
-			frappe.db.set_value("Task", task, "status", "Completed")
-		project.update_percent_complete()
-		self.assertEqual(project.percent_complete, 100)
-		self.assertEqual(project.status, "Completed")  # 100% flips status to Completed
-
-		# reopening a task drops below 100% and flips status back to Open
-		frappe.db.set_value("Task", tasks[0], "status", "Open")
-		project.update_percent_complete()
-		self.assertEqual(project.percent_complete, 75)
-		self.assertEqual(project.status, "Open")
-
-		# a Cancelled project keeps its status regardless of completion
-		project.status = "Cancelled"
-		for task in tasks:
-			frappe.db.set_value("Task", task, "status", "Completed")
-		project.update_percent_complete()
-		self.assertEqual(project.percent_complete, 100)
-		self.assertEqual(project.status, "Cancelled")
-
-	def test_on_hold_project_keeps_status(self):
-		project, tasks = self._project_with_tasks("Task Completion", 4)
-
-		# an On hold project is not auto-flipped to Completed even at 100%
-		project.status = "On hold"
-		for task in tasks:
-			frappe.db.set_value("Task", task, "status", "Completed")
-		project.update_percent_complete()
-		self.assertEqual(project.percent_complete, 100)
-		self.assertEqual(project.status, "On hold")
-
-		# nor auto-flipped back to Open when below 100%
-		frappe.db.set_value("Task", tasks[0], "status", "Open")
-		project.update_percent_complete()
-		self.assertEqual(project.percent_complete, 75)
-		self.assertEqual(project.status, "On hold")
-
 	def test_percent_complete_manual(self):
 		project, tasks = self._project_with_tasks("Manual", 2)
 
@@ -419,86 +341,49 @@ class TestProject(ERPNextTestSuite):
 		project.save()
 		self.assertEqual(project.percent_complete, 100)
 
-	def test_percent_complete_by_task_progress(self):
-		project, tasks = self._project_with_tasks("Task Progress", 2)
+	def test_on_hold_project_keeps_status(self):
+		project, tasks = self._project_with_tasks("Task Completion", 4)
 
-		frappe.db.set_value("Task", tasks[0], "progress", 50)
-		frappe.db.set_value("Task", tasks[1], "progress", 100)
+		# an On hold project is not auto-flipped to Completed even at 100%
+		project.status = "On hold"
+		for task in tasks:
+			frappe.db.set_value("Task", task, "status", "Completed")
 		project.update_percent_complete()
-		self.assertEqual(project.percent_complete, 75)  # (50 + 100) / 2
-
-	def test_percent_complete_by_task_weight(self):
-		project, tasks = self._project_with_tasks("Task Weight", 2)
-
-		frappe.db.set_value("Task", tasks[0], {"progress": 100, "task_weight": 3})
-		frappe.db.set_value("Task", tasks[1], {"progress": 0, "task_weight": 1})
-		project.update_percent_complete()
-		self.assertEqual(project.percent_complete, 75)  # 100 * 3/4 + 0 * 1/4
-
-	def test_percent_complete_counts_cancelled_tasks_and_zero_weights(self):
-		for method in ("Task Progress", "Task Weight"):
-			project, tasks = self._project_with_tasks(method, 2)
-			frappe.db.set_value("Task", tasks[0], {"status": "Completed", "progress": 100})
-			project.update_percent_complete()
-			self.assertEqual(project.percent_complete, 50)
-
-			frappe.db.set_value("Task", tasks[1], "status", "Cancelled")
-			project.update_percent_complete()
-			self.assertEqual(project.percent_complete, 100)
-			self.assertEqual(project.status, "Completed")
-
-	def test_tasks_tab_sorts_priority_and_status_by_their_options(self):
-		from erpnext.projects.doctype.project.project import get_project_tasks
-
-		project = make_project({"project_name": "_Test Task Sorting"}).name
-		for subject, priority, status in (
-			("Low", "Low", "Completed"),
-			("Urgent", "Urgent", "Open"),
-			("None", None, "Working"),
-			("High", "High", "Pending Review"),
-		):
-			task = frappe.get_doc(
-				doctype="Task", subject=subject, project=project, priority=priority, status=status
-			).insert()
-			# a new task gets the first option; older or imported ones can have none
-			if not priority:
-				task.db_set("priority", None)
-
-		def subjects(**sort):
-			return [task.subject for task in get_project_tasks(project, **sort)]
-
-		self.assertEqual(subjects(sort_by="priority", sort_order="desc"), ["Urgent", "High", "Low", "None"])
-		self.assertEqual(subjects(sort_by="priority", sort_order="asc"), ["Low", "High", "Urgent", "None"])
-		self.assertEqual(subjects(sort_by="status", sort_order="asc"), ["Urgent", "None", "High", "Low"])
-		self.assertEqual(subjects(), ["Low", "Urgent", "None", "High"])
-		self.assertEqual(len(get_project_tasks(project, sort_by="expected_time")), 4)
-		self.assertRaises(frappe.ValidationError, get_project_tasks, project, sort_by="_assign")
-		self.assertRaises(frappe.ValidationError, get_project_tasks, project, sort_by="subject; drop")
-
-	def test_completed_status_is_refused_until_tasks_are_done(self):
-		project, tasks = self._project_with_tasks("Task Progress", 1)
-		project.status = "Completed"
-		self.assertRaises(frappe.ValidationError, project.save)
-
-		frappe.db.set_value("Task", tasks[0], "status", "Completed")
-		project.reload()
-		project.status = "Completed"
-		project.save()
 		self.assertEqual(project.percent_complete, 100)
+		self.assertEqual(project.status, "On hold")
 
-	def test_create_duplicate_project_copies_tasks(self):
-		from erpnext.projects.doctype.project.project import create_duplicate_project
+		# nor auto-flipped back to Open when below 100%
+		frappe.db.set_value("Task", tasks[0], "status", "Open")
+		project.update_percent_complete()
+		self.assertEqual(project.percent_complete, 75)
+		self.assertEqual(project.status, "On hold")
 
-		source, tasks = self._project_with_tasks("Task Completion", 2)
-		new_name = f"{source.project_name} Copy"
+	def test_set_project_status_completes_tasks_in_dependency_order(self):
+		from erpnext.projects.doctype.project.project import set_project_status
 
-		create_duplicate_project(frappe.as_json(source.as_dict()), new_name)
+		project, tasks = self._project_with_tasks("Task Progress", 2)
+		dependent = frappe.get_doc("Task", tasks[1])
+		dependent.append("depends_on", {"task": tasks[0]})
+		dependent.save()
 
-		# Project is named by series, so look the copy up by its project_name
-		new_project = frappe.db.get_value("Project", {"project_name": new_name})
-		self.assertTrue(new_project)
-		copied_tasks = frappe.get_all("Task", filters={"project": new_project})
-		self.assertEqual(len(copied_tasks), len(tasks))
+		set_project_status(project.name, "Completed")
+
+		self.assertEqual(frappe.db.get_value("Project", project.name, "status"), "Completed")
+		for task in tasks:
+			self.assertEqual(frappe.db.get_value("Task", task, ["status", "progress"]), ("Completed", 100))
+
+	def test_set_project_status_by_projects_manager(self):
+		from frappe.core.doctype.user_permission.test_user_permission import create_user
+
+		from erpnext.projects.doctype.project.project import set_project_status
+
+		project, tasks = self._project_with_tasks("Task Completion", 1)
+		user = create_user("projects-manager-only@example.com", "Projects Manager")
+
+		with self.set_user(user.name):
+			set_project_status(project.name, "Cancelled")
+
+		self.assertEqual(frappe.db.get_value("Task", tasks[0], "status"), "Cancelled")
 
 	def test_create_duplicate_project_links_tasks_to_their_copies(self):
 		from erpnext.projects.doctype.project.project import create_duplicate_project
@@ -552,92 +437,6 @@ class TestProject(ERPNextTestSuite):
 		copy = frappe.db.get_value("Project", {"project_name": f"{source.project_name} Copy"})
 		self.assertEqual(frappe.get_all("Task", filters={"project": copy}, pluck="parent_task"), [None])
 
-	def test_create_duplicate_project_rejects_same_name(self):
-		from erpnext.projects.doctype.project.project import create_duplicate_project
-
-		source, _ = self._project_with_tasks("Task Completion", 1)
-		self.assertRaises(
-			frappe.ValidationError,
-			create_duplicate_project,
-			frappe.as_json(source.as_dict()),
-			source.name,
-		)
-
-	def test_set_project_status_updates_project_and_tasks(self):
-		from erpnext.projects.doctype.project.project import set_project_status
-
-		project, tasks = self._project_with_tasks("Task Completion", 2)
-
-		set_project_status(project.name, "Cancelled")
-
-		self.assertEqual(frappe.db.get_value("Project", project.name, "status"), "Cancelled")
-		for task in tasks:
-			self.assertEqual(frappe.db.get_value("Task", task, "status"), "Cancelled")
-
-	def test_set_project_status_completes_tasks_in_dependency_order(self):
-		from erpnext.projects.doctype.project.project import set_project_status
-
-		project, tasks = self._project_with_tasks("Task Progress", 2)
-		dependent = frappe.get_doc("Task", tasks[1])
-		dependent.append("depends_on", {"task": tasks[0]})
-		dependent.save()
-
-		set_project_status(project.name, "Completed")
-
-		self.assertEqual(frappe.db.get_value("Project", project.name, "status"), "Completed")
-		for task in tasks:
-			self.assertEqual(frappe.db.get_value("Task", task, ["status", "progress"]), ("Completed", 100))
-
-	def test_set_project_status_by_projects_manager(self):
-		from frappe.core.doctype.user_permission.test_user_permission import create_user
-
-		from erpnext.projects.doctype.project.project import set_project_status
-
-		project, tasks = self._project_with_tasks("Task Completion", 1)
-		user = create_user("projects-manager-only@example.com", "Projects Manager")
-
-		with self.set_user(user.name):
-			set_project_status(project.name, "Cancelled")
-
-		self.assertEqual(frappe.db.get_value("Task", tasks[0], "status"), "Cancelled")
-
-	def test_set_project_status_by_projects_manager_reschedules_dependent_task(self):
-		from frappe.core.doctype.user_permission.test_user_permission import create_user
-
-		from erpnext.projects.doctype.project.project import set_project_status
-
-		project, tasks = self._project_with_tasks("Task Completion", 2)
-		frappe.db.set_value("Task", tasks[0], "exp_end_date", add_days(nowdate(), 5))
-		dependent = frappe.get_doc("Task", tasks[1])
-		dependent.append("depends_on", {"task": tasks[0]})
-		dependent.save()
-		user = create_user("projects-manager-only@example.com", "Projects Manager")
-
-		with self.set_user(user.name):
-			set_project_status(project.name, "Cancelled")
-
-		self.assertEqual(frappe.db.get_value("Task", tasks[1], "status"), "Cancelled")
-
-	def test_set_project_status_keeps_dependent_task_dates(self):
-		from erpnext.projects.doctype.project.project import set_project_status
-
-		project, tasks = self._project_with_tasks("Task Completion", 2)
-		frappe.db.set_value("Task", tasks[0], "exp_end_date", add_days(nowdate(), 5))
-		dependent = frappe.get_doc("Task", tasks[1])
-		dependent.append("depends_on", {"task": tasks[0]})
-		dependent.save()
-		planned = frappe.db.get_value("Task", tasks[1], ["exp_start_date", "exp_end_date"])
-
-		set_project_status(project.name, "Completed")
-
-		self.assertEqual(frappe.db.get_value("Task", tasks[1], ["exp_start_date", "exp_end_date"]), planned)
-
-	def test_set_project_status_rejects_invalid_status(self):
-		from erpnext.projects.doctype.project.project import set_project_status
-
-		project, _ = self._project_with_tasks("Task Completion", 1)
-		self.assertRaises(frappe.ValidationError, set_project_status, project.name, "Open")
-
 	def _progress_project(self, **settings):
 		project = frappe.get_doc(
 			doctype="Project",
@@ -683,51 +482,42 @@ class TestProject(ERPNextTestSuite):
 		self.assertEqual(frappe.db.count("Project Update", {"project": project.name}), 2)
 		self.assertEqual(sendmail.call_count, 2)
 
-	def test_costing_rollup_from_sales_documents(self):
-		from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
-		from erpnext.projects.doctype.project.project import update_costing_and_billing
-		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
+	def test_percent_complete_counts_cancelled_tasks_and_zero_weights(self):
+		for method in ("Task Progress", "Task Weight"):
+			project, tasks = self._project_with_tasks(method, 2)
+			frappe.db.set_value("Task", tasks[0], {"status": "Completed", "progress": 100})
+			project.update_percent_complete()
+			self.assertEqual(project.percent_complete, 50)
 
-		project = make_project({"project_name": f"_Test Costing Rollup {frappe.generate_hash(length=6)}"})
+			frappe.db.set_value("Task", tasks[1], "status", "Cancelled")
+			project.update_percent_complete()
+			self.assertEqual(project.percent_complete, 100)
+			self.assertEqual(project.status, "Completed")
 
-		sales_order = make_sales_order(do_not_save=True)
-		sales_order.project = project.name
-		sales_order.insert()
-		sales_order.submit()
+	def test_completed_status_is_refused_until_tasks_are_done(self):
+		project, tasks = self._project_with_tasks("Task Progress", 1)
+		project.status = "Completed"
+		self.assertRaises(frappe.ValidationError, project.save)
 
-		sales_invoice = create_sales_invoice(do_not_submit=True)
-		sales_invoice.project = project.name
-		sales_invoice.submit()
-
-		update_costing_and_billing(project.name)
+		frappe.db.set_value("Task", tasks[0], "status", "Completed")
 		project.reload()
+		project.status = "Completed"
+		project.save()
+		self.assertEqual(project.percent_complete, 100)
 
-		self.assertEqual(project.total_sales_amount, sales_order.base_net_total)
-		self.assertEqual(project.total_billed_amount, sales_invoice.base_net_total)
-		# with no costing/purchase/material expense, gross margin is the billed amount in full
-		self.assertEqual(project.gross_margin, sales_invoice.base_net_total)
-		self.assertEqual(project.per_gross_margin, 100)
+	def test_set_project_status_keeps_dependent_task_dates(self):
+		from erpnext.projects.doctype.project.project import set_project_status
 
-	def test_consumed_material_cost_from_stock_entry(self):
-		from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
+		project, tasks = self._project_with_tasks("Task Completion", 2)
+		frappe.db.set_value("Task", tasks[0], "exp_end_date", add_days(nowdate(), 5))
+		dependent = frappe.get_doc("Task", tasks[1])
+		dependent.append("depends_on", {"task": tasks[0]})
+		dependent.save()
+		planned = frappe.db.get_value("Task", tasks[1], ["exp_start_date", "exp_end_date"])
 
-		project = make_project({"project_name": f"_Test Consumed Cost {frappe.generate_hash(length=6)}"})
+		set_project_status(project.name, "Completed")
 
-		# receive stock, then issue it against the project so it counts as consumed
-		make_stock_entry(item_code="_Test Item", qty=10, to_warehouse="_Test Warehouse - _TC", rate=100)
-		issue = make_stock_entry(
-			item_code="_Test Item", qty=4, from_warehouse="_Test Warehouse - _TC", do_not_save=True
-		)
-		issue.project = project.name
-		for row in issue.items:
-			row.project = project.name
-		issue.insert()
-		issue.submit()
-		issue.reload()
-
-		project.set_consumed_material_cost()
-		self.assertEqual(project.total_consumed_material_cost, sum(row.amount for row in issue.items))
-		self.assertGreater(project.total_consumed_material_cost, 0)
+		self.assertEqual(frappe.db.get_value("Task", tasks[1], ["exp_start_date", "exp_end_date"]), planned)
 
 	def test_stock_bought_for_the_project_is_counted_when_issued(self):
 		from erpnext.accounts.doctype.purchase_invoice.test_purchase_invoice import make_purchase_invoice

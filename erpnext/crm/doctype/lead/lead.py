@@ -3,16 +3,21 @@
 
 import frappe
 from frappe import _
-from frappe.contacts.address_and_contact import load_address_and_contact
-from frappe.model.document import Document
+from frappe.contacts.address_and_contact import (
+	delete_contact_and_address,
+	load_address_and_contact,
+)
+from frappe.contacts.doctype.address.address import get_default_address
+from frappe.contacts.doctype.contact.contact import get_default_contact
+from frappe.email.inbox import link_communication_to_document
+from frappe.model.mapper import get_mapped_doc
 from frappe.utils import comma_and, get_link_to_form, validate_email_address
-from frappe.utils.data import DateTimeLikeObject
 
 from erpnext.accounts.party import set_taxes
 from erpnext.controllers.selling_controller import SellingController
 from erpnext.crm.doctype.utils import get_phone_number_key, get_phone_number_like_pattern
 from erpnext.crm.utils import CRMNote, copy_comments, link_communications, link_open_events
-from erpnext.selling.doctype.customer.mapper import parse_full_name
+from erpnext.selling.doctype.customer.customer import parse_full_name
 
 
 class Lead(SellingController, CRMNote):
@@ -89,22 +94,12 @@ class Lead(SellingController, CRMNote):
 		self.set_onload("linked_prospects", self.get_linked_prospects())
 
 	def validate(self):
-		if self.lead_owner == "Guest":
-			self.lead_owner = None
 		self.set_full_name()
 		self.set_lead_name()
 		self.set_title()
 		self.set_status()
 		self.check_email_id_is_unique()
 		self.validate_email_id()
-
-	def set_status(self, update: bool = False, status: str | None = None, update_modified: bool = True):
-		if self.status == "Do Not Contact":
-			return
-
-		super().set_status(update=update, status=status, update_modified=update_modified)
-		if update:
-			self.update_prospect()
 
 	def before_insert(self):
 		self.contact_doc = None
@@ -132,30 +127,8 @@ class Lead(SellingController, CRMNote):
 
 	def on_trash(self):
 		frappe.db.set_value("Issue", {"lead": self.name}, "lead", None)
-		self.delete_contact_and_address()
+		delete_contact_and_address(self.doctype, self.name)
 		self.remove_link_from_prospect()
-
-	def delete_contact_and_address(self):
-		"""Unlink the lead's contacts and addresses, deleting those that belong to it alone.
-
-		Done without permission checks: they go with the lead, which the user may delete."""
-		for parenttype in ("Contact", "Address"):
-			links = frappe.get_all(
-				"Dynamic Link",
-				filters={"parenttype": parenttype, "link_doctype": "Lead", "link_name": self.name},
-				pluck="parent",
-			)
-			for name in links:
-				self.unlink_or_delete(frappe.get_doc(parenttype, name))
-
-	def unlink_or_delete(self, doc: Document):
-		doc.flags.ignore_permissions = True
-		if len(doc.links) == 1:
-			doc.delete(ignore_permissions=True)
-			return
-
-		doc.links = [link for link in doc.links if (link.link_doctype, link.link_name) != ("Lead", self.name)]
-		doc.save()
 
 	def set_full_name(self):
 		if self.first_name:
@@ -231,9 +204,17 @@ class Lead(SellingController, CRMNote):
 
 		for linked_prospect in linked_prospects:
 			prospect = frappe.get_doc("Prospect", linked_prospect.parent)
-			prospect.set("leads", [row for row in prospect.leads if row.lead != self.name])
-			prospect.flags.ignore_mandatory = True
-			prospect.save(ignore_permissions=True)
+			if len(prospect.get("leads")) == 1:
+				prospect.delete(ignore_permissions=True)
+			else:
+				to_remove = None
+				for lead in prospect.get("leads"):
+					if lead.lead == self.name:
+						to_remove = lead
+
+				if to_remove:
+					prospect.remove(to_remove)
+					prospect.save(ignore_permissions=True)
 
 	def get_linked_prospects(self):
 		return frappe.get_all(
@@ -250,7 +231,7 @@ class Lead(SellingController, CRMNote):
 
 	def has_quotation(self):
 		return frappe.db.get_value(
-			"Quotation", {"party_name": self.name, "docstatus": 1, "is_active": 1, "status": ["!=", "Lost"]}
+			"Quotation", {"party_name": self.name, "docstatus": 1, "status": ["!=", "Lost"]}
 		)
 
 	def has_lost_quotation(self):
@@ -262,11 +243,9 @@ class Lead(SellingController, CRMNote):
 
 		data = frappe._dict(data)
 		if data.create_contact:
-			self.contact_doc = self.create_contact()
-			self.link_to_contact()
+			self.create_contact()
 
 		if data.create_prospect:
-			frappe.has_permission("Prospect", "create", throw=True)
 			self.create_prospect(data.prospect_name)
 
 	def create_contact(self):
@@ -333,21 +312,137 @@ class Lead(SellingController, CRMNote):
 		except frappe.DuplicateEntryError:
 			frappe.throw(_("Prospect {0} already exists").format(company_name or self.company_name))
 
-	def get_notification_email(self):
-		"""Hook to return the target email address for notifications."""
-		if self.lead_owner:
-			return frappe.db.get_value("User", self.lead_owner, "email")
 
-		return None
+@frappe.whitelist()
+def make_customer(source_name, target_doc=None):
+	return _make_customer(source_name, target_doc)
+
+
+def _make_customer(source_name, target_doc=None, ignore_permissions=False):
+	def set_missing_values(source, target):
+		if source.company_name:
+			target.customer_type = "Company"
+			target.customer_name = source.company_name
+		else:
+			target.customer_type = "Individual"
+			target.customer_name = source.lead_name
+
+		if not target.customer_group:
+			target.customer_group = frappe.db.get_default("Customer Group")
+
+		address = get_default_address("Lead", source.name)
+		contact = get_default_contact("Lead", source.name)
+		if address:
+			target.customer_primary_address = address
+		if contact:
+			target.customer_primary_contact = contact
+
+	doclist = get_mapped_doc(
+		"Lead",
+		source_name,
+		{
+			"Lead": {
+				"doctype": "Customer",
+				"field_map": {
+					"name": "lead_name",
+					"company_name": "customer_name",
+					"contact_no": "phone_1",
+					"fax": "fax_1",
+				},
+				"field_no_map": ["disabled"],
+			}
+		},
+		target_doc,
+		set_missing_values,
+		ignore_permissions=ignore_permissions,
+	)
+
+	return doclist
 
 
 @frappe.whitelist()
-def get_lead_details(
-	lead: str,
-	posting_date: DateTimeLikeObject | None = None,
-	company: str | None = None,
-	doctype: str | None = None,
-):
+def make_opportunity(source_name, target_doc=None):
+	def set_missing_values(source, target):
+		_set_missing_values(source, target)
+
+	target_doc = get_mapped_doc(
+		"Lead",
+		source_name,
+		{
+			"Lead": {
+				"doctype": "Opportunity",
+				"field_map": {
+					"doctype": "opportunity_from",
+					"name": "party_name",
+					"lead_name": "contact_display",
+					"company_name": "customer_name",
+					"email_id": "contact_email",
+					"mobile_no": "contact_mobile",
+					"lead_owner": "opportunity_owner",
+					"notes": "notes",
+				},
+			}
+		},
+		target_doc,
+		set_missing_values,
+	)
+
+	return target_doc
+
+
+@frappe.whitelist()
+def make_quotation(source_name, target_doc=None):
+	def set_missing_values(source, target):
+		_set_missing_values(source, target)
+
+	target_doc = get_mapped_doc(
+		"Lead",
+		source_name,
+		{"Lead": {"doctype": "Quotation", "field_map": {"name": "party_name"}}},
+		target_doc,
+		set_missing_values,
+	)
+
+	target_doc.quotation_to = "Lead"
+	target_doc.run_method("set_missing_values")
+	target_doc.run_method("set_other_charges")
+	target_doc.run_method("calculate_taxes_and_totals")
+
+	return target_doc
+
+
+def _set_missing_values(source, target):
+	address = frappe.get_all(
+		"Dynamic Link",
+		{
+			"link_doctype": source.doctype,
+			"link_name": source.name,
+			"parenttype": "Address",
+		},
+		["parent"],
+		limit=1,
+	)
+
+	contact = frappe.get_all(
+		"Dynamic Link",
+		{
+			"link_doctype": source.doctype,
+			"link_name": source.name,
+			"parenttype": "Contact",
+		},
+		["parent"],
+		limit=1,
+	)
+
+	if address:
+		target.customer_address = address[0].parent
+
+	if contact:
+		target.contact_person = contact[0].parent
+
+
+@frappe.whitelist()
+def get_lead_details(lead, posting_date=None, company=None, doctype=None):
 	if not lead:
 		return {}
 
@@ -384,6 +479,42 @@ def get_lead_details(
 		out["taxes_and_charges"] = taxes_and_charges
 
 	return out
+
+
+@frappe.whitelist()
+def make_lead_from_communication(communication: str, ignore_communication_links: bool = False):
+	"""raise a issue from email"""
+
+	# Communication grants read to `All` only for the owner and carries a has_permission hook, so doc=
+	# is what decides access.
+	frappe.has_permission("Communication", doc=communication, throw=True)
+
+	# both paths end in a Lead: the insert path checks `create`, but the path reusing an existing Lead
+	# required nothing at all.
+	frappe.has_permission("Lead", ptype="create", throw=True)
+
+	doc = frappe.get_doc("Communication", communication)
+	lead_name = None
+	if doc.sender:
+		lead_name = frappe.db.get_value("Lead", {"email_id": doc.sender})
+	if not lead_name and doc.phone_no:
+		lead_name = frappe.db.get_value("Lead", {"mobile_no": doc.phone_no})
+	if not lead_name:
+		lead = frappe.get_doc(
+			{
+				"doctype": "Lead",
+				"lead_name": doc.sender_full_name,
+				"email_id": doc.sender,
+				"mobile_no": doc.phone_no,
+			}
+		)
+		lead.flags.ignore_mandatory = True
+		lead.insert()
+
+		lead_name = lead.name
+
+	link_communication_to_document(doc, "Lead", lead_name, ignore_communication_links)
+	return lead_name
 
 
 def get_leads_with_phone_number(number: str | None) -> list[str]:
