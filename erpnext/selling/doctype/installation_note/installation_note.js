@@ -59,7 +59,7 @@ erpnext.selling.InstallationNote = class InstallationNote extends frappe.ui.form
 				__("From Delivery Note"),
 				function () {
 					erpnext.utils.map_current_doc({
-						method: "erpnext.stock.doctype.delivery_note.mapper.make_installation_note",
+						method: "erpnext.stock.doctype.delivery_note.delivery_note.make_installation_note",
 						source_doctype: "Delivery Note",
 						target: me.frm,
 						date_field: "posting_date",
@@ -81,4 +81,4 @@ erpnext.selling.InstallationNote = class InstallationNote extends frappe.ui.form
 	}
 };
 
-frappe.ui.form.set_controller("Installation Note", erpnext.selling.InstallationNote);
+extend_cscript(cur_frm.cscript, new erpnext.selling.InstallationNote({ frm: cur_frm }));

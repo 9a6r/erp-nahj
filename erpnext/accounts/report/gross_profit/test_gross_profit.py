@@ -2,11 +2,11 @@ import frappe
 from frappe import qb
 from frappe.utils import add_days, flt, get_first_day, get_last_day, nowdate
 
-from erpnext.accounts.doctype.sales_invoice.mapper import make_delivery_note, make_sales_return
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_delivery_note, make_sales_return
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
 from erpnext.accounts.report.gross_profit.gross_profit import GrossProfitGenerator, execute
 from erpnext.selling.doctype.product_bundle.test_product_bundle import make_product_bundle
-from erpnext.stock.doctype.delivery_note.mapper import make_sales_invoice
+from erpnext.stock.doctype.delivery_note.delivery_note import make_sales_invoice
 from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
 from erpnext.stock.doctype.item.test_item import create_item
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
@@ -299,7 +299,7 @@ class TestGrossProfit(ERPNextTestSuite):
 			do_not_submit=False,
 		)
 
-		from erpnext.selling.doctype.sales_order.mapper import (
+		from erpnext.selling.doctype.sales_order.sales_order import (
 			make_delivery_note,
 			make_sales_invoice,
 		)
@@ -467,7 +467,7 @@ class TestGrossProfit(ERPNextTestSuite):
 			do_not_submit=False,
 		)
 
-		from erpnext.selling.doctype.sales_order.mapper import (
+		from erpnext.selling.doctype.sales_order.sales_order import (
 			make_delivery_note,
 			make_sales_invoice,
 		)
@@ -643,7 +643,7 @@ class TestGrossProfit(ERPNextTestSuite):
 		self.assertEqual(total.get("gross_profit_%"), -50.0)
 
 	def test_sales_person_wise_gross_profit(self):
-		sales_person = frappe.get_doc("Sales Person", "_Test Sales Person")
+		sales_person = make_sales_person("_Test Sales Person")
 
 		posting_date = get_first_day(nowdate())
 		qty = 10
@@ -705,7 +705,7 @@ class TestGrossProfit(ERPNextTestSuite):
 		self.assertEqual(data[-1][6], 200)
 
 	def test_drop_ship(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_sales_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 
 		so = self.create_drop_ship_order()
 		si = make_sales_invoice(so.name).submit()
@@ -720,7 +720,7 @@ class TestGrossProfit(ERPNextTestSuite):
 		self.assertEqual(data[1]["gross_profit_%"], 20)
 
 	def test_drop_ship_not_yet_billed_by_supplier(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_sales_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 
 		so = self.create_drop_ship_order(buying_rate=70, bill_purchase_order=False)
 		si = make_sales_invoice(so.name)
@@ -730,7 +730,7 @@ class TestGrossProfit(ERPNextTestSuite):
 		self.assertEqual(self.get_invoice_buying_amount(si.name), 700)
 
 	def test_drop_ship_partial_billing_and_return(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_sales_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 
 		so = self.create_drop_ship_order()
 		first_invoice = make_sales_invoice(so.name)
@@ -766,8 +766,8 @@ class TestGrossProfit(ERPNextTestSuite):
 		self.assertEqual(first_invoice_row.gross_profit, 40)
 
 	def test_drop_ship_return_matches_sales_invoice_item(self):
-		from erpnext.buying.doctype.purchase_order.mapper import make_purchase_invoice
-		from erpnext.selling.doctype.sales_order.mapper import make_purchase_order, make_sales_invoice
+		from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_purchase_order, make_sales_invoice
 		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 		from erpnext.stock.doctype.item.test_item import make_item
 
@@ -1065,8 +1065,8 @@ class TestGrossProfit(ERPNextTestSuite):
 		self.assertEqual(invoice_row.buying_amount, 999999.9)
 
 	def create_drop_ship_order(self, qty=10, selling_rate=100, buying_rate=80, bill_purchase_order=True):
-		from erpnext.buying.doctype.purchase_order.mapper import make_purchase_invoice
-		from erpnext.selling.doctype.sales_order.mapper import make_purchase_order
+		from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_purchase_order
 		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 		from erpnext.stock.doctype.item.test_item import make_item
 
@@ -1295,7 +1295,7 @@ class TestGrossProfit(ERPNextTestSuite):
 		self.assertEqual(self.get_invoice_buying_amount(sinv.name), 390)
 
 	def test_sales_order_delivered_in_parts_uses_qty_weighted_rate(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_delivery_note, make_sales_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note, make_sales_invoice
 		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 
 		item = create_item("_Test Gross Profit Partly Delivered Item").name
@@ -1318,9 +1318,9 @@ class TestGrossProfit(ERPNextTestSuite):
 		self.assertEqual(self.get_invoice_buying_amount(sinv.name), flt(delivered_value, 2))
 
 	def test_sales_order_with_fully_returned_delivery_uses_valuation_rate(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_delivery_note, make_sales_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note, make_sales_invoice
 		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
-		from erpnext.stock.doctype.delivery_note.mapper import make_sales_return
+		from erpnext.stock.doctype.delivery_note.delivery_note import make_sales_return
 
 		item = create_item("_Test Gross Profit Returned Delivery Item").name
 		make_stock_entry(company=self.company, item_code=item, target=self.warehouse, qty=2, basic_rate=100)
@@ -1441,3 +1441,19 @@ class TestGrossProfit(ERPNextTestSuite):
 		)
 		_, data = execute(frappe._dict(filters, group_by="Invoice"))
 		return data[-1].buying_amount
+
+
+def make_sales_person(sales_person_name="_Test Sales Person"):
+	if not frappe.db.exists("Sales Person", {"sales_person_name": sales_person_name}):
+		sales_person_doc = frappe.get_doc(
+			{
+				"doctype": "Sales Person",
+				"is_group": 0,
+				"parent_sales_person": "Sales Team",
+				"sales_person_name": sales_person_name,
+			}
+		).insert(ignore_permissions=True)
+	else:
+		sales_person_doc = frappe.get_doc("Sales Person", {"sales_person_name": sales_person_name})
+
+	return sales_person_doc

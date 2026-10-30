@@ -78,7 +78,7 @@ class ModeofPayment(Document):
 
 			if pos_profiles:
 				message = _(
-					"POS Profile {0} contains Mode of Payment {1}. Please remove them to disable this mode."
+					"POS Profile {} contains Mode of Payment {}. Please remove them to disable this mode."
 				).format(frappe.bold(", ".join(pos_profiles)), frappe.bold(str(self.name)))
 				frappe.throw(message, title=_("Not Allowed"))
 

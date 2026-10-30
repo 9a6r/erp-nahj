@@ -19,10 +19,12 @@ import uuid
 
 from .connection import probe, ConnectionFailure
 
-IMAGE_SHA256 = 'dc3c5731b34b63865c4e5320f1045f16c46b19dcc7bfaf1522ddc8d71a7553af'
-# Config digest from the manifest in the above checksum-pinned release archive.
-IMAGE_ID = 'sha256:46a6fb4e82c0f5f82f7b1d647ca2a4107f369e44d934093d92dbb1f140ee7c39'
+RELEASE = json.loads(Path(__file__).with_name('server_release.json').read_text())
+IMAGE_SHA256 = RELEASE['sha256']
+IMAGE_ID = RELEASE['image_id']
 BENCH = '/home/frappe/frappe-bench'
+MARIADB_IMAGE = 'docker.io/library/mariadb@sha256:c4124d1afa875e47f2892edf26b482fa54f796e2f342d3717a04ca091a22a9bd'
+REDIS_IMAGE = 'docker.io/library/redis@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f'
 
 
 class ServerError(Exception):
@@ -61,6 +63,8 @@ def validate(options):
         raise ServerError('Invalid local HTTP port.') from None
     if not 1024 <= port <= 65535:
         raise ServerError('Local HTTP port must be between 1024 and 65535.')
+    if port == 8000:
+        raise ServerError('Port 8000 is reserved for the application backend. Choose another local HTTP port.')
     result = {'mode': mode, 'site': site, 'port': port,
               'language': 'en' if options.get('language') == 'en' else 'ar'}
     if mode == 'external':
@@ -92,7 +96,8 @@ def compose_spec(profile, root):
     project = profile['project']
     common = {
         'image': profile['image'], 'working_dir': BENCH, 'restart': 'unless-stopped',
-        'volumes': ['sites:' + BENCH + '/sites', 'logs:' + BENCH + '/logs'],
+        'volumes': ['sites:' + BENCH + '/sites', 'logs:' + BENCH + '/logs',
+                    str(root / 'runtime.py') + ':/run/nahj/runtime.py:ro'],
     }
     if profile['mode'] == 'external':
         common['volumes'].append(str(root / 'database-ca.pem') + ':/run/nahj/database-ca.pem:ro')
@@ -100,7 +105,7 @@ def compose_spec(profile, root):
 
     def service(name, command):
         return {**common, 'labels': {'io.nahj.project': project, 'io.nahj.service': name},
-                'entrypoint': ['/home/frappe/entrypoint.sh'], 'command': command}
+                'entrypoint': [BENCH + '/env/bin/python', '/run/nahj/runtime.py'], 'command': command}
 
     services = {
         'backend': service('backend', ['env/bin/gunicorn', '--chdir=sites', '--bind', '0.0.0.0:8000',
@@ -109,8 +114,8 @@ def compose_spec(profile, root):
         'websocket': service('websocket', ['node', 'apps/frappe/socketio.js']),
         'scheduler': service('scheduler', ['bench', 'schedule']),
         'worker': service('worker', ['bench', 'worker', '--queue', 'short,default,long']),
-        'redis-cache': {'image': 'docker.io/library/redis:7-alpine', 'restart': 'unless-stopped'},
-        'redis-queue': {'image': 'docker.io/library/redis:7-alpine', 'restart': 'unless-stopped',
+        'redis-cache': {'image': REDIS_IMAGE, 'restart': 'unless-stopped'},
+        'redis-queue': {'image': REDIS_IMAGE, 'restart': 'unless-stopped',
                         'command': ['redis-server', '--appendonly', 'yes'], 'volumes': ['queue:/data']},
     }
     services['frontend'] = service('frontend', ['nginx-entrypoint.sh'])
@@ -126,7 +131,7 @@ def compose_spec(profile, root):
     volumes = {key: {} for key in ('sites', 'logs', 'queue')}
     if profile['mode'] == 'local':
         services['db'] = {
-            'image': 'docker.io/library/mariadb:11.8', 'restart': 'unless-stopped',
+            'image': MARIADB_IMAGE, 'restart': 'unless-stopped',
             'command': ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci'],
             'environment': {'MARIADB_ROOT_PASSWORD_FILE': '/run/nahj/db-password'},
             'volumes': ['database:/var/lib/mysql', str(root / 'db-password') + ':/run/nahj/db-password:ro'],
@@ -185,6 +190,8 @@ class Server:
         # Compose echoes failed commands, which otherwise hides the actual error.
         private_write(self.root / 'provision.py', Path(__file__).with_name('provision.py').read_text())
         (self.root / 'provision.py').chmod(0o644)
+        private_write(self.root / 'runtime.py', Path(__file__).with_name('runtime.py').read_text())
+        (self.root / 'runtime.py').chmod(0o644)
         private_write(self.root / 'compose.json', json.dumps(compose_spec(profile, self.root), indent=2))
 
     def backend(self):
@@ -201,7 +208,7 @@ class Server:
         with archive.open('rb') as stream:
             actual = hashlib.file_digest(stream, 'sha256').hexdigest()
         if actual != IMAGE_SHA256:
-            raise ServerError('Server image checksum does not match release 0.3.0. Nothing was imported.')
+            raise ServerError('Server image checksum does not match this release. Nothing was imported.')
         # The verified archive and image config have fixed digests. Avoid inflating
         # every layer merely to locate manifest.json, or importing an existing image.
         # Inspect by immutable ID so a changed local tag cannot select another image.
@@ -215,7 +222,7 @@ class Server:
             inspected = self.run(['podman', 'image', 'inspect', IMAGE_ID])
         info = json.loads(inspected)[0]
         if info['Id'].removeprefix('sha256:') != IMAGE_ID.removeprefix('sha256:'):
-            raise ServerError('Imported image identity does not match release 0.3.0.')
+            raise ServerError('Imported image identity does not match this release.')
         if info.get('Architecture') != 'amd64':
             raise ServerError('This server release requires an amd64 machine.')
         return info['Id']
@@ -275,6 +282,7 @@ class Server:
 
     def _start(self):
         p = self.profile()
+        self.require_supported_profile(p)
         if not p.get('initialized'):
             raise ServerError('Site initialization did not complete. Inspect the setup error; existing data has been preserved.')
         self.progress('Starting services…')
@@ -295,10 +303,16 @@ class Server:
         with self.locked():
             return self._start()
 
+    @staticmethod
+    def require_supported_profile(profile):
+        if profile['image'] != IMAGE_ID:
+            raise ServerError('This site uses another server image. Automatic upgrades or downgrades are not supported. Back up and arrange a tested migration; existing data was retained.')
+
     def resume(self, admin_password='', db_password=''):
         """Resume app installation without dropping a database or changing passwords."""
         with self.locked():
             p = self.profile()
+            self.require_supported_profile(p)
             if p.get('initialized'):
                 return self._start()
             active = self.run(['podman', 'ps', '--filter', 'label=io.nahj.project=' + p['project'],
@@ -347,6 +361,11 @@ class Server:
                 self.run(['podman', 'cp', container + ':' + remote + '/.', str(stage)])
                 self.run(['podman', 'cp', container + ':' + BENCH + '/sites/common_site_config.json',
                           str(stage / 'common_site_config.json')])
+                # Record the exact runtime and topology needed to plan a restore.
+                # Database/root passwords remain in the private Frappe site backup;
+                # the local MariaDB root password is not needed on a new server.
+                private_write(stage / 'profile.json', json.dumps(p, indent=2))
+                shutil.copyfile(self.root / 'compose.json', stage / 'compose.json')
                 if p['mode'] == 'external':
                     shutil.copyfile(self.root / 'database-ca.pem', stage / 'database-ca.pem')
                     shutil.copyfile(self.root / 'database-client.cnf', stage / 'database-client.cnf')
@@ -366,7 +385,10 @@ class Server:
                     file.chmod(0o600)
                     with file.open('rb') as stream:
                         checksums[file.name] = hashlib.file_digest(stream, 'sha256').hexdigest()
-                private_write(stage / 'manifest.json', json.dumps({'site': p['site'], 'sha256': checksums}, indent=2))
+                private_write(stage / 'manifest.json', json.dumps({
+                    'format': 1, 'site': p['site'], 'image': p['image'],
+                    'erpnext_version': RELEASE['erpnext_version'] if p['image'] == IMAGE_ID else None,
+                    'frappe_version': RELEASE['frappe_version'] if p['image'] == IMAGE_ID else None, 'sha256': checksums}, indent=2))
                 final = target / token
                 stage.rename(final)
                 self.progress('Backup exported: ' + str(final))

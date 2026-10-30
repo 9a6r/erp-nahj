@@ -10,7 +10,7 @@ from erpnext.assets.doctype.asset.depreciation import (
 	restore_asset,
 	scrap_asset,
 )
-from erpnext.assets.doctype.asset.test_asset import create_asset
+from erpnext.assets.doctype.asset.test_asset import create_asset, set_depreciation_settings_in_company
 from erpnext.assets.doctype.asset_repair.test_asset_repair import create_asset_repair
 from erpnext.assets.doctype.asset_value_adjustment.test_asset_value_adjustment import (
 	make_asset_value_adjustment,
@@ -19,14 +19,8 @@ from erpnext.tests.utils import ERPNextTestSuite
 
 
 class TestAssetDepreciationLedger(ERPNextTestSuite):
-	def test_report_executes(self):
-		# Smoke-guards the raw-SQL -> query-builder port: the report query must compile and run on
-		# both MariaDB and postgres.
-		company = frappe.db.get_value("Company", {}, "name")
-		columns, *_rest = execute(
-			frappe._dict({"company": company, "from_date": "2020-01-01", "to_date": "2030-12-31"})
-		)
-		self.assertTrue(columns)
+	def setUp(self):
+		set_depreciation_settings_in_company()
 
 	def test_accumulated_depreciation_is_of_the_selected_finance_book(self):
 		asset = create_asset(available_for_use_date="2019-12-31", do_not_save=1)

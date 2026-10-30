@@ -59,16 +59,24 @@ def execute_script_report(
 
 def if_lending_app_installed(function):
 	"""Decorator to check if lending app is installed"""
-	return unittest.skipUnless(is_lending_app_installed(), "Lending app is not installed")(function)
+
+	def wrapper(*args, **kwargs):
+		if "lending" in frappe.get_installed_apps():
+			return function(*args, **kwargs)
+		return
+
+	return wrapper
 
 
 def if_lending_app_not_installed(function):
 	"""Decorator to check if lending app is not installed"""
-	return unittest.skipIf(is_lending_app_installed(), "Lending app is installed")(function)
 
+	def wrapper(*args, **kwargs):
+		if "lending" not in frappe.get_installed_apps():
+			return function(*args, **kwargs)
+		return
 
-def is_lending_app_installed():
-	return "lending" in frappe.get_installed_apps()
+	return wrapper
 
 
 class BootStrapTestData:
@@ -148,7 +156,6 @@ class BootStrapTestData:
 		self.make_holiday_list()
 		self.make_company()
 		self.make_test_account()
-		self.make_company_depreciation_settings()
 		self.make_supplier_group()
 		self.make_payment_term()
 		self.make_payment_terms_template()
@@ -161,10 +168,8 @@ class BootStrapTestData:
 		self.make_customer_group()
 		self.make_customer()
 		self.make_user()
-		self.make_pos_fixtures()
 		self.make_cost_center()
 		self.make_warehouse()
-		self.make_transfer_warehouses()
 		self.make_uom()
 		self.make_item_tax_template()
 		self.make_item_group()
@@ -173,12 +178,10 @@ class BootStrapTestData:
 		self.make_asset_category()
 		self.update_stock_settings()
 		self.make_item()
-		self.make_putaway_rule_masters()
 		self.make_product_bundle()
 		self.make_location()
 		self.make_price_list()
 		self.make_item_price()
-		self.make_currency_exchange()
 		self.make_loyalty_program()
 		self.make_shareholder()
 		self.make_sales_taxes_template()
@@ -186,7 +189,6 @@ class BootStrapTestData:
 		self.make_workstation()
 		self.make_operation()
 		self.make_bom()
-		self.make_subcontracting_fixtures()
 		self.make_quality_inspection_param()
 		self.make_quality_inspection_template()
 		self.make_employees()
@@ -203,7 +205,6 @@ class BootStrapTestData:
 		self.make_contact()
 		self.update_support_settings()
 		self.update_selling_settings()
-		self.make_stock_ledger_fixtures()
 
 		frappe.db.commit()  # nosemgrep
 
@@ -252,71 +253,6 @@ class BootStrapTestData:
 		stock_settings.set_qty_in_transactions_based_on_serial_no_input = 1
 		stock_settings.enable_serial_and_batch_no_for_item = 1
 		stock_settings.save()
-
-	def make_stock_ledger_fixtures(self):
-		self.make_unrealized_profit_loss_account()
-		self.make_reposting_items()
-		self.make_item_valuation_warehouses()
-
-	def make_item_valuation_warehouses(self):
-		names = [f"IV - Test Warehouse {suffix}" for suffix in ("J", "K")]
-		accounts = [
-			{
-				"doctype": "Account",
-				"account_name": name,
-				"parent_account": "Stock Assets - _TC",
-				"account_type": "Stock",
-				"company": "_Test Company",
-			}
-			for name in names
-		]
-		self.make_records(["account_name", "company"], accounts)
-		warehouses = [
-			{
-				"doctype": "Warehouse",
-				"warehouse_name": name,
-				"parent_warehouse": "_Test Warehouse Group - _TC",
-				"account": f"{name} - _TC",
-				"company": "_Test Company",
-			}
-			for name in names
-		]
-		self.make_records(["warehouse_name", "company"], warehouses)
-
-	def make_reposting_items(self):
-		properties = {
-			"_Test Item for Reposting": {},
-			"_Test Finished Item for Reposting": {},
-			"_Test Subcontracted Item for Reposting": {"is_sub_contracted_item": 1},
-			"_Test Bundled Item for Reposting": {"is_stock_item": 0},
-		}
-		records = [
-			{
-				"doctype": "Item",
-				"item_code": item_code,
-				"item_name": item_code,
-				"description": item_code,
-				"item_group": "Products",
-				"valuation_method": "FIFO",
-				**extra,
-			}
-			for item_code, extra in properties.items()
-		]
-		self.make_records(["item_code"], records)
-
-	def make_unrealized_profit_loss_account(self):
-		company = "_Test Company with perpetual inventory"
-		account = {
-			"doctype": "Account",
-			"account_name": "Unrealized Profit and Loss",
-			"parent_account": "Direct Income - TCP1",
-			"account_type": "Income Account",
-			"company": company,
-		}
-		self.make_records(["account_name", "company"], [account])
-		frappe.db.set_value(
-			"Company", company, "unrealized_profit_loss_account", "Unrealized Profit and Loss - TCP1"
-		)
 
 	def make_records(self, key, records):
 		doctype = records[0].get("doctype")
@@ -611,27 +547,6 @@ class BootStrapTestData:
 				"new_password": "password",
 				"roles": [{"doctype": "Has Role", "role": "Technician"}],
 			},
-		]
-		self.make_records(["email"], records)
-
-	def make_pos_fixtures(self):
-		roles = (
-			"System Manager",
-			"Accounts User",
-			"Accounts Manager",
-			"Sales Manager",
-			"Stock User",
-			"Item Manager",
-		)
-		records = [
-			{
-				"doctype": "User",
-				"email": "test-pos@example.com",
-				"enabled": 1,
-				"first_name": "_Test POS",
-				"new_password": "Eastern_43A1W",
-				"roles": [{"doctype": "Has Role", "parentfield": "roles", "role": role} for role in roles],
-			}
 		]
 		self.make_records(["email"], records)
 
@@ -1097,74 +1012,6 @@ class BootStrapTestData:
 			},
 		]
 		self.make_records(["location_name"], records)
-
-	def make_transfer_warehouses(self):
-		company = "_Test Company with perpetual inventory"
-		names = [f"_Test Transfer {role}" for role in ("From", "Transit", "To", "Rejected")]
-		accounts = [
-			{
-				"doctype": "Account",
-				"account_name": name,
-				"parent_account": "Stock Assets - TCP1",
-				"account_type": "Stock",
-				"company": company,
-			}
-			for name in names
-		]
-		self.make_records(["account_name", "company"], accounts)
-		warehouses = [
-			{
-				"doctype": "Warehouse",
-				"warehouse_name": name,
-				"parent_warehouse": "All Warehouses - TCP1",
-				"account": f"{name} - TCP1",
-				"company": company,
-			}
-			for name in names
-		]
-		self.make_records(["warehouse_name", "company"], warehouses)
-
-	def make_putaway_rule_masters(self):
-		self.make_records(["uom_name"], [{"doctype": "UOM", "uom_name": "Bag"}])
-		self.make_records(
-			["item_code"],
-			[
-				{
-					"doctype": "Item",
-					"item_code": "_Rice",
-					"item_name": "_Rice",
-					"description": "_Rice",
-					"item_group": "Products",
-					"is_stock_item": 1,
-					"has_batch_no": 1,
-					"create_new_batch": 1,
-					"stock_uom": "Kg",
-				}
-			],
-		)
-		names = ["Rack 1", "Rack 2"]
-		accounts = [
-			{
-				"doctype": "Account",
-				"account_name": name,
-				"parent_account": "Stock Assets - _TC",
-				"account_type": "Stock",
-				"company": "_Test Company",
-			}
-			for name in names
-		]
-		self.make_records(["account_name", "company"], accounts)
-		warehouses = [
-			{
-				"doctype": "Warehouse",
-				"warehouse_name": name,
-				"parent_warehouse": "_Test Warehouse Group - _TC",
-				"account": f"{name} - _TC",
-				"company": "_Test Company",
-			}
-			for name in names
-		]
-		self.make_records(["warehouse_name", "company"], warehouses)
 
 	def make_warehouse(self):
 		records = [
@@ -2070,12 +1917,7 @@ class BootStrapTestData:
 		self.make_records(["item_code", "item_name"], records)
 
 	def make_product_bundle(self):
-		from erpnext.selling.doctype.product_bundle.product_bundle import get_active_product_bundle
-
-		if get_active_product_bundle("_Test Product Bundle Item"):
-			return
-
-		frappe.get_doc(
+		records = [
 			{
 				"doctype": "Product Bundle",
 				"new_item_code": "_Test Product Bundle Item",
@@ -2094,7 +1936,8 @@ class BootStrapTestData:
 					},
 				],
 			}
-		).insert().submit()
+		]
+		self.make_records(["new_item_code"], records)
 
 	def make_test_account(self):
 		records = [
@@ -2142,8 +1985,6 @@ class BootStrapTestData:
 			# Advance Account
 			["Advance Received", "Current Liabilities", 0, "Receivable", None],
 			["Advance Paid", "Current Assets", 0, "Payable", None],
-			["Advance Received USD", "Current Liabilities", 0, "Receivable", "USD"],
-			["Advance Paid USD", "Current Assets", 0, "Payable", "USD"],
 			# Loyalty Account
 			["Loyalty", "Direct Expenses", 0, "Expense Account", None],
 		]
@@ -2173,18 +2014,6 @@ class BootStrapTestData:
 					self.test_accounts.append(
 						frappe.get_doc("Account", {"account_name": account_name, "company": company})
 					)
-
-	def make_company_depreciation_settings(self):
-		frappe.db.set_value(
-			"Company",
-			"_Test Company",
-			{
-				"accumulated_depreciation_account": "_Test Accumulated Depreciations - _TC",
-				"depreciation_expense_account": "_Test Depreciations - _TC",
-				"disposal_account": "_Test Gain/Loss on Asset Disposal - _TC",
-				"depreciation_cost_center": "Main - _TC",
-			},
-		)
 
 	def make_customer(self):
 		records = [
@@ -2723,38 +2552,6 @@ class BootStrapTestData:
 		]
 		self.make_records(["item_code", "price_list", "price_list_rate"], records)
 
-	def make_currency_exchange(self):
-		"""Seed current-dated USD<->INR rates so foreign-currency documents
-		transacted on ``today()`` resolve an exchange rate deterministically.
-
-		Without this, ``get_exchange_rate`` finds no in-window Currency Exchange
-		record and falls back to an external API that is unreachable in CI,
-		returning ``0`` and breaking tests that create USD documents. The rates
-		mirror the latest values in the Currency Exchange ``test_records`` so
-		cost calculations stay unchanged regardless of which record is picked.
-		"""
-		records = [
-			{
-				"doctype": "Currency Exchange",
-				"date": today(),
-				"from_currency": "USD",
-				"to_currency": "INR",
-				"exchange_rate": 62.9,
-				"for_buying": 1,
-				"for_selling": 1,
-			},
-			{
-				"doctype": "Currency Exchange",
-				"date": today(),
-				"from_currency": "INR",
-				"to_currency": "USD",
-				"exchange_rate": 0.0167,
-				"for_buying": 1,
-				"for_selling": 1,
-			},
-		]
-		self.make_records(["from_currency", "to_currency", "date", "for_buying", "for_selling"], records)
-
 	def make_operation(self):
 		records = [
 			{"doctype": "Operation", "name": "_Test Operation 1", "workstation": "_Test Workstation 1"}
@@ -2767,7 +2564,7 @@ class BootStrapTestData:
 				"doctype": "Workstation",
 				"name": "_Test Workstation 1",
 				"workstation_name": "_Test Workstation 1",
-				"warehouse": "_Test Warehouse - _TC",
+				"warehouse": "_Test warehouse - _TC",
 				"hour_rate_labour": 25,
 				"hour_rate_electricity": 25,
 				"hour_rate_consumable": 25,
@@ -2782,154 +2579,6 @@ class BootStrapTestData:
 		# TODO: replace JSON source with hardcoded data
 		records = load_test_records_for("BOM")["BOM"]
 		self.make_records(["item", "company"], records)
-
-	def make_subcontracting_fixtures(self):
-		self.make_subcontracting_items()
-		self.make_subcontracting_item_boms()
-		self.make_subcontracting_boms()
-		self.make_customer_warehouse()
-
-	def make_subcontracting_items(self):
-		def serial(series):
-			return {"has_serial_no": 1, "serial_no_series": series}
-
-		def batch(series=None):
-			return {"has_batch_no": 1, "create_new_batch": 1, "batch_number_series": series}
-
-		subcontracted = {"is_stock_item": 1, "is_sub_contracted_item": 1}
-		raw_material = {"is_stock_item": 1, "valuation_rate": 100}
-		customer_provided = {"is_stock_item": 1, "is_purchase_item": 0, "is_customer_provided_item": 1}
-		self_raw_material = {"is_stock_item": 1, "valuation_rate": 10}
-		service = {"is_stock_item": 0}
-
-		items = {
-			"Subcontracted Item SA1": subcontracted,
-			"Subcontracted Item SA2": subcontracted,
-			"Subcontracted Item SA3": subcontracted,
-			"Subcontracted Item SA4": {**subcontracted, **batch("SBAT.####")},
-			"Subcontracted Item SA5": subcontracted,
-			"Subcontracted Item SA6": subcontracted,
-			"Subcontracted Item SA7": subcontracted,
-			"Subcontracted Item SA8": subcontracted,
-			"Subcontracted Item SA9": {**subcontracted, "stock_uom": "Litre"},
-			"Subcontracted Item SA10": {**subcontracted, **batch("SBAT.####")},
-			"Subcontracted SRM Item 1": raw_material,
-			"Subcontracted SRM Item 2": {**raw_material, **serial("SRI.####")},
-			"Subcontracted SRM Item 3": {**raw_material, **batch("BAT.####")},
-			"Subcontracted SRM Item 4": {**raw_material, **serial("SRII.####")},
-			"Subcontracted SRM Item 5": {**raw_material, **serial("SRIID.####")},
-			"Subcontracted SRM Item 8": raw_material,
-			"Subcontracted SRM Item 9": {**raw_material, "stock_uom": "Litre"},
-			"Subcontracted SRM Item 10": raw_material,
-			**{f"Subcontracted Service Item {i}": service for i in range(1, 12)},
-			"Basic FG Item": subcontracted,
-			"FG Item with Serial": {**subcontracted, **serial("FGS.####")},
-			"FG Item with Batch": {**subcontracted, **batch()},
-			"FG Item with Serial and Batch": {**subcontracted, **serial("FGS.####"), **batch()},
-			"Basic RM": customer_provided,
-			"Basic RM 2": customer_provided,
-			"RM with Serial": {**customer_provided, **serial("RMS.####")},
-			"RM with Batch": {**customer_provided, **batch("RMB.####")},
-			"RM with Serial and Batch": {**customer_provided, **serial("RMS.####"), **batch("RMB.####")},
-			"Self RM": self_raw_material,
-			"Self RM 2": self_raw_material,
-			**{f"Service Item {i}": service for i in range(1, 5)},
-		}
-		records = [
-			{
-				"doctype": "Item",
-				"item_code": item_code,
-				"item_name": item_code,
-				"description": item_code,
-				"item_group": "Products",
-				**properties,
-			}
-			for item_code, properties in items.items()
-		]
-		self.make_records(["item_code"], records)
-
-	def make_subcontracting_item_boms(self):
-		inward_raw_materials = [
-			"Basic RM",
-			"RM with Serial",
-			"RM with Batch",
-			"RM with Serial and Batch",
-			"Self RM",
-		]
-		boms = {
-			"Subcontracted Item SA1": [
-				"Subcontracted SRM Item 1",
-				"Subcontracted SRM Item 2",
-				"Subcontracted SRM Item 3",
-			],
-			"Subcontracted Item SA2": ["Subcontracted SRM Item 2"],
-			"Subcontracted Item SA3": ["Subcontracted SRM Item 2"],
-			"Subcontracted Item SA4": [
-				"Subcontracted SRM Item 1",
-				"Subcontracted SRM Item 2",
-				"Subcontracted SRM Item 3",
-			],
-			"Subcontracted Item SA5": ["Subcontracted SRM Item 5"],
-			"Subcontracted Item SA6": ["Subcontracted SRM Item 3"],
-			"Subcontracted Item SA7": ["Subcontracted SRM Item 1"],
-			"Subcontracted Item SA8": ["Subcontracted SRM Item 8"],
-			"Subcontracted Item SA10": ["Subcontracted SRM Item 10"],
-			"Basic FG Item": inward_raw_materials,
-			"FG Item with Serial": inward_raw_materials,
-			"FG Item with Batch": inward_raw_materials,
-			"FG Item with Serial and Batch": inward_raw_materials,
-		}
-		records = [
-			{
-				"doctype": "BOM",
-				"item": item_code,
-				"company": "_Test Company",
-				"currency": "INR",
-				"quantity": 1,
-				"is_default": 1,
-				"docstatus": 1,
-				"items": [
-					{
-						"item_code": raw_material,
-						"qty": 1,
-						"rate": frappe.db.get_value("Item", raw_material, "valuation_rate") or 100,
-					}
-					for raw_material in raw_materials
-				],
-			}
-			for item_code, raw_materials in boms.items()
-		]
-		self.make_records(["item", "company"], records)
-
-	def make_subcontracting_boms(self):
-		service_items = {
-			"Basic FG Item": "Service Item 1",
-			"FG Item with Serial": "Service Item 2",
-			"FG Item with Batch": "Service Item 3",
-			"FG Item with Serial and Batch": "Service Item 4",
-		}
-		records = [
-			{
-				"doctype": "Subcontracting BOM",
-				"finished_good": finished_good,
-				"service_item": service_item,
-				"is_active": 1,
-			}
-			for finished_good, service_item in service_items.items()
-		]
-		self.make_records(["finished_good"], records)
-
-	def make_customer_warehouse(self):
-		records = [
-			{
-				"doctype": "Warehouse",
-				"warehouse_name": "_Test Customer Warehouse",
-				"company": "_Test Company",
-				"parent_warehouse": "_Test Warehouse Group - _TC",
-				"customer": "_Test Customer",
-			}
-		]
-		self.make_records(["warehouse_name", "company"], records)
 
 	def make_quality_inspection_param(self):
 		records = [{"doctype": "Quality Inspection Parameter", "parameter": "_Test Param"}]
@@ -3119,68 +2768,68 @@ class BootStrapTestData:
 				}
 			).insert(ignore_permissions=True)
 
-		if not frappe.db.exists("DocType", "Store"):
-			frappe.get_doc(
-				{
-					"doctype": "DocType",
-					"name": "Store",
-					"module": "Stock",
-					"custom": 1,
-					"naming_rule": "By fieldname",
-					"autoname": "field:store_name",
-					"fields": [{"label": "Store Name", "fieldname": "store_name", "fieldtype": "Data"}],
-					"permissions": [
-						{
-							"role": "System Manager",
-							"permlevel": 0,
-							"read": 1,
-							"write": 1,
-							"create": 1,
-							"delete": 1,
-						}
-					],
-				}
-			).insert(ignore_permissions=True)
+			if not frappe.db.exists("DocType", "Store"):
+				frappe.get_doc(
+					{
+						"doctype": "DocType",
+						"name": "Store",
+						"module": "Stock",
+						"custom": 1,
+						"naming_rule": "By fieldname",
+						"autoname": "field:store_name",
+						"fields": [{"label": "Store Name", "fieldname": "store_name", "fieldtype": "Data"}],
+						"permissions": [
+							{
+								"role": "System Manager",
+								"permlevel": 0,
+								"read": 1,
+								"write": 1,
+								"create": 1,
+								"delete": 1,
+							}
+						],
+					}
+				).insert(ignore_permissions=True)
 
-		if not frappe.db.exists("DocType", "Order Assignment"):
-			frappe.get_doc(
-				{
-					"doctype": "DocType",
-					"name": "Order Assignment",
-					"module": "Buying",
-					"custom": 1,
-					"autoname": "field:po",
-					"fields": [
-						{
-							"label": "PO",
-							"fieldname": "po",
-							"fieldtype": "Link",
-							"options": "Purchase Order",
-						},
-						{
-							"label": "Supplier",
-							"fieldname": "supplier",
-							"fieldtype": "Data",
-							"fetch_from": "po.supplier",
-						},
-					],
-					"permissions": [
-						{
-							"create": 1,
-							"delete": 1,
-							"email": 1,
-							"export": 1,
-							"print": 1,
-							"read": 1,
-							"report": 1,
-							"role": "System Manager",
-							"share": 1,
-							"write": 1,
-						},
-						{"read": 1, "role": "Supplier"},
-					],
-				}
-			).insert(ignore_if_duplicate=True)
+			if not frappe.db.exists("DocType", "Order Assignment"):
+				frappe.get_doc(
+					{
+						"doctype": "DocType",
+						"name": "Order Assignment",
+						"module": "Buying",
+						"custom": 1,
+						"autoname": "field:po",
+						"fields": [
+							{
+								"label": "PO",
+								"fieldname": "po",
+								"fieldtype": "Link",
+								"options": "Purchase Order",
+							},
+							{
+								"label": "Supplier",
+								"fieldname": "supplier",
+								"fieldtype": "Data",
+								"fetch_from": "po.supplier",
+							},
+						],
+						"permissions": [
+							{
+								"create": 1,
+								"delete": 1,
+								"email": 1,
+								"export": 1,
+								"print": 1,
+								"read": 1,
+								"report": 1,
+								"role": "System Manager",
+								"share": 1,
+								"write": 1,
+							},
+							{"read": 1, "role": "Supplier"},
+						],
+					}
+				).insert(ignore_if_duplicate=True)
 
 	def make_address(self):
 		records = [
@@ -3421,16 +3070,3 @@ def change_settings(doctype, settings_dict=None, /, **settings) -> None:
 	for key, value in previous_settings.items():
 		setattr(settings, key, value)
 	settings.save(ignore_permissions=True)
-
-
-def make_email_template(subject: str, response: str) -> str:
-	"""Insert a test Email Template and return its name."""
-	template = frappe.get_doc(
-		{
-			"doctype": "Email Template",
-			"name": "_Test Email Template",
-			"subject": subject,
-			"response": response,
-		}
-	).insert()
-	return template.name

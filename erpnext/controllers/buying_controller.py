@@ -15,23 +15,16 @@ import erpnext
 from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import get_dimensions
 from erpnext.accounts.doctype.budget.budget import validate_expense_against_budget
 from erpnext.accounts.party import _get_party_details
-from erpnext.accounts.services.taxes import _get_taxes_and_charges
-from erpnext.buying.doctype.buying_settings.buying_settings import (
-	bills_rejected_quantity,
-	is_rejected_material_valued,
-)
 from erpnext.buying.utils import update_last_purchase_rate, validate_duplicate_items, validate_for_items
+from erpnext.controllers.accounts_controller import _get_taxes_and_charges
 from erpnext.controllers.sales_and_purchase_return import get_rate_for_return
 from erpnext.controllers.subcontracting_controller import SubcontractingController
 from erpnext.setup.utils import get_exchange_rate
-from erpnext.stock.doctype.item.item import validate_item_uoms
-from erpnext.stock.doctype.serial_no.serial_no import get_serial_nos
 from erpnext.stock.get_item_details import (
 	NOT_APPLICABLE_TAX,
 	get_conversion_factor,
 	get_item_defaults,
 )
-from erpnext.stock.serial_batch_identity import SerialBatchIdentity
 from erpnext.stock.utils import _get_incoming_rate, is_serial_no_wise_valuation_disabled
 from erpnext.utilities.transaction_base import get_whole_number_uoms
 
@@ -45,10 +38,6 @@ class BuyingController(SubcontractingController):
 		self.flags.ignore_permlevel_for_fields = ["buying_price_list", "price_list_currency"]
 
 	def validate(self):
-		from erpnext.stock.doctype.landed_cost_voucher.landed_cost_voucher import (
-			set_landed_cost_voucher_amount,
-		)
-
 		self.set_rate_for_standalone_debit_note()
 
 		super().validate()
@@ -56,7 +45,6 @@ class BuyingController(SubcontractingController):
 			self.supplier_name = frappe.db.get_value("Supplier", self.supplier, "supplier_name")
 
 		self.validate_items()
-		validate_item_uoms(self.get("items"))
 		self.set_qty_as_per_stock_uom()
 		self.validate_stock_or_nonstock_items()
 		self.validate_warehouse()
@@ -76,11 +64,15 @@ class BuyingController(SubcontractingController):
 			self.validate_rejected_warehouse()
 			self.validate_accepted_rejected_qty()
 			validate_for_items(self)
-			set_landed_cost_voucher_amount(self)
+
+			# sub-contracting
+			self.validate_for_subcontracting()
+			if self.get("is_old_subcontracting_flow"):
+				self.create_raw_materials_supplied_or_received()
+			self.set_landed_cost_voucher_amount()
 
 		if self.doctype in ("Purchase Receipt", "Purchase Invoice"):
 			self.update_valuation_rate()
-			self.sync_accepted_packages()
 			self.set_serial_and_batch_bundle()
 
 	def onload(self):
@@ -135,7 +127,7 @@ class BuyingController(SubcontractingController):
 			msg += f"<li>{po} ({date})</li>"
 		msg += "</ul>"
 
-		frappe.throw(msg)
+		frappe.throw(_(msg))
 
 	def create_package_for_transfer(self) -> None:
 		"""Create serial and batch package for Sourece Warehouse in case of inter transfer."""
@@ -163,8 +155,13 @@ class BuyingController(SubcontractingController):
 			for item in self.get("items"):
 				reference = item.get(field) or item.get("delivery_note_packed_item")
 				if reference and not item.serial_and_batch_bundle and bundle_ids.get(reference):
-					item.serial_and_batch_bundle = self.make_accepted_package(item, bundle_ids.get(reference))
-
+					item.serial_and_batch_bundle = self.make_package_for_transfer(
+						bundle_ids.get(reference),
+						item.from_warehouse,
+						type_of_transaction="Outward",
+						do_not_submit=True,
+						qty=item.qty,
+					)
 				elif (
 					not self.is_new()
 					and item.serial_and_batch_bundle
@@ -187,52 +184,6 @@ class BuyingController(SubcontractingController):
 				):
 					frappe.set_value("Serial and Batch Entry", sabe[0], "qty", item.qty)
 
-				if item.get(field) and bundle_ids.get(item.get(field)):
-					self.set_rejected_package(item, bundle_ids.get(item.get(field)))
-
-	def make_accepted_package(self, row, package) -> str:
-		"""Package of the material the row accepts.
-
-		A row that rejects nothing keeps the package of the in-transit warehouse it came out of. A
-		row that rejects material needs a package of the accepted warehouse instead, since that is
-		the entry it belongs to; the material leaving the in-transit warehouse gets a package of its
-		own when the receipt is submitted.
-		"""
-		if not (self.is_internal_receipt() and flt(row.rejected_qty)):
-			return self.make_package_for_transfer(
-				package,
-				row.from_warehouse,
-				type_of_transaction="Outward",
-				do_not_submit=True,
-				qty=flt(row.stock_qty),
-			)
-
-		if not flt(row.stock_qty):
-			return ""
-
-		return self.make_package_for_transfer(
-			package,
-			row.warehouse,
-			type_of_transaction="Inward",
-			do_not_submit=True,
-			qty=flt(row.stock_qty),
-			exclude_serial_nos=self.get_rejected_serial_nos(row),
-		)
-
-	def get_delivered_package(self, row) -> str | None:
-		"""Package of the material the delivery note put in the in-transit warehouse."""
-		field = "delivery_note_item" if self.doctype == "Purchase Receipt" else "sales_invoice_item"
-		doctype = "Delivery Note Item" if self.doctype == "Purchase Receipt" else "Sales Invoice Item"
-		if row.get("delivery_note_packed_item"):
-			return frappe.db.get_value(
-				"Packed Item", row.delivery_note_packed_item, "serial_and_batch_bundle"
-			)
-
-		if not row.get(field):
-			return None
-
-		return frappe.db.get_value(doctype, row.get(field), "serial_and_batch_bundle")
-
 	def get_component_incoming_rates(self) -> dict:
 		packed_items = [
 			d.delivery_note_packed_item for d in self.get("items") if d.get("delivery_note_packed_item")
@@ -250,7 +201,6 @@ class BuyingController(SubcontractingController):
 		)
 
 	def get_component_packages(self) -> dict:
-		"""Packages of the bundle components the delivery note put in the in-transit warehouse."""
 		packed_items = [
 			d.delivery_note_packed_item for d in self.get("items") if d.get("delivery_note_packed_item")
 		]
@@ -264,99 +214,6 @@ class BuyingController(SubcontractingController):
 				fields=["name", "serial_and_batch_bundle"],
 				as_list=True,
 			)
-		)
-
-	def set_rejected_package(self, row, package) -> None:
-		"""Package of the material the row rejects.
-
-		A receipt of an internal transfer builds no package for it on its own, so rejected material
-		of a tracked item would have nothing to say where it came from.
-		"""
-		if not (self.is_internal_receipt() and flt(row.rejected_qty)) or self.is_return:
-			return
-
-		if row.get("rejected_serial_and_batch_bundle") or not row.rejected_warehouse:
-			return
-
-		rejected_qty = flt(flt(row.rejected_qty) * flt(row.conversion_factor), row.precision("stock_qty"))
-
-		row.rejected_serial_and_batch_bundle = self.make_package_for_transfer(
-			package,
-			row.rejected_warehouse,
-			type_of_transaction="Inward",
-			do_not_submit=True,
-			qty=rejected_qty,
-			exclude_serial_nos=self.get_accepted_serial_nos(row),
-		)
-
-		frappe.db.set_value("Serial and Batch Bundle", row.rejected_serial_and_batch_bundle, "is_rejected", 1)
-
-	def get_accepted_serial_nos(self, row) -> list:
-		if not row.get("serial_and_batch_bundle"):
-			return []
-
-		return frappe.get_all(
-			"Serial and Batch Entry",
-			filters={"parent": row.serial_and_batch_bundle, "serial_no": ("is", "set")},
-			pluck="serial_no",
-		)
-
-	def sync_accepted_packages(self) -> None:
-		"""Keep the package of a row in the shape its own entry needs.
-
-		A row that rejects material carries the package of its accepted warehouse; a row that
-		rejects nothing carries the package of the in-transit warehouse it came out of. Editing the
-		split moves the package from one to the other.
-		"""
-		if not self.is_internal_receipt() or self.is_return:
-			return
-
-		for row in self.get("items"):
-			package = row.get("serial_and_batch_bundle")
-			if not package:
-				continue
-
-			details = frappe.db.get_value(
-				"Serial and Batch Bundle",
-				package,
-				["warehouse", "type_of_transaction", "docstatus"],
-				as_dict=True,
-			)
-			if not details or details.docstatus != 0:
-				continue
-
-			if flt(row.rejected_qty):
-				wanted = (row.warehouse, "Inward")
-			else:
-				wanted = (row.from_warehouse, "Outward")
-
-			if (details.warehouse, details.type_of_transaction) == wanted:
-				continue
-
-			row.serial_and_batch_bundle = self.make_accepted_package(
-				row, self.get_delivered_package(row) or package
-			)
-			frappe.delete_doc("Serial and Batch Bundle", package, force=True, ignore_permissions=True)
-
-	def get_internal_transfer_qty(self, row) -> float:
-		if flt(row.qty) or not self.is_internal_receipt():
-			return flt(row.qty)
-
-		return flt(row.rejected_qty)
-
-	def get_rejected_serial_nos(self, row) -> list:
-		if not flt(row.get("rejected_qty")):
-			return []
-
-		if row.get("rejected_serial_and_batch_bundle"):
-			return frappe.get_all(
-				"Serial and Batch Entry",
-				filters={"parent": row.rejected_serial_and_batch_bundle, "serial_no": ("is", "set")},
-				pluck="serial_no",
-			)
-
-		return SerialBatchIdentity("Serial No").resolve(
-			row.item_code, get_serial_nos(row.get("rejected_serial_no")), ignore_permissions=True
 		)
 
 	def set_rate_for_standalone_debit_note(self):
@@ -477,7 +334,7 @@ class BuyingController(SubcontractingController):
 		if self.is_return and len(not_cancelled_asset):
 			frappe.throw(
 				_(
-					"{0} has submitted assets linked to it. You need to cancel the assets to create purchase return."
+					"{} has submitted assets linked to it. You need to cancel the assets to create purchase return."
 				).format(self.return_against),
 				title=_("Not Allowed"),
 			)
@@ -560,8 +417,8 @@ class BuyingController(SubcontractingController):
 				frappe.throw(
 					_("Row #{idx}: {from_warehouse_field} and {to_warehouse_field} cannot be same.").format(
 						idx=item.idx,
-						from_warehouse_field=item.meta.get_translated_label("from_warehouse"),
-						to_warehouse_field=item.meta.get_translated_label("warehouse"),
+						from_warehouse_field=_(item.meta.get_label("from_warehouse")),
+						to_warehouse_field=_(item.meta.get_label("warehouse")),
 					)
 				)
 
@@ -691,13 +548,13 @@ class BuyingController(SubcontractingController):
 		(
 			tax_accounts,
 			total_valuation_amount,
-			total_actual_tax_amount,
-			total_actual_tax_on_stock_items,
+			all_item_charges,
+			stock_item_charges,
 		) = self.get_tax_details()
 
-		# Pre-compute each item's share of the "Actual" valuation charges (keyed by row object).
+		# Pre-compute each item's share of the "Actual" valuation charges (keyed by row idx).
 		actual_charge_per_item = self.distribute_actual_tax_amount(
-			stock_and_asset_items, total_actual_tax_amount, total_actual_tax_on_stock_items
+			stock_and_asset_items, all_item_charges, stock_item_charges
 		)
 
 		last_item_idx = max((d.idx for d in self.get("items")), default=1)
@@ -742,44 +599,48 @@ class BuyingController(SubcontractingController):
 					net_rate = item.rejected_qty * item.net_rate
 
 				qty_in_stock_uom = (
-					self.get_valued_stock_qty(item)
+					get_stock_qty(item, item.qty)
 					or get_stock_qty(item, item.rejected_qty)
 					or flt(item.qty) * flt(item.conversion_factor)
 				)
 
-				item.valuation_rate = (
-					net_rate
-					+ item.item_tax_amount
-					+ flt(item.landed_cost_voucher_amount)
-					+ flt(item.get("amount_difference_with_purchase_invoice"))
-				) / qty_in_stock_uom
+				if self.get("is_old_subcontracting_flow"):
+					item.rm_supp_cost = self.get_supplied_items_cost(item.name, reset_outgoing_rate)
+					item.valuation_rate = (
+						net_rate
+						+ item.item_tax_amount
+						+ item.rm_supp_cost
+						+ flt(item.landed_cost_voucher_amount)
+					) / qty_in_stock_uom
+				else:
+					item.valuation_rate = (
+						net_rate
+						+ item.item_tax_amount
+						+ flt(item.landed_cost_voucher_amount)
+						+ flt(item.get("amount_difference_with_purchase_invoice"))
+					) / qty_in_stock_uom
 			else:
 				item.valuation_rate = 0.0
 
 		update_regional_item_valuation_rate(self)
 
 	def get_rejected_valuation_rate(self, row) -> float:
-		if not is_rejected_material_valued(self.doctype, row.name):
+		if not frappe.db.get_single_value("Buying Settings", "set_valuation_rate_for_rejected_materials"):
 			return 0.0
 
-		if self.is_internal_transfer() or bills_rejected_quantity(self) or not flt(row.qty):
+		if self.is_internal_transfer() or not flt(row.qty):
 			return flt(row.valuation_rate)
 
 		return flt(row.base_net_rate) / (flt(row.conversion_factor) or 1.0)
 
-	def get_valued_stock_qty(self, row):
-		"""Stock qty the net amount of the row was billed for, which is what its valuation spreads
-		over. Each part is rounded as the stock ledger posts it."""
-		if not flt(row.get("rejected_qty")) or not bills_rejected_quantity(self):
-			return get_stock_qty(row, row.qty)
-
-		return get_stock_qty(row, row.qty) + get_stock_qty(row, row.rejected_qty)
-
 	def get_tax_details(self):
 		tax_accounts = []
 		total_valuation_amount = 0.0
-		total_actual_tax_amount = 0.0
-		total_actual_tax_on_stock_items = 0.0
+		# Per-row "Actual" valuation charge amounts, kept separate (not pooled) so each can be
+		# distributed individually - this keeps the per-item item_tax_amount in lockstep with the
+		# per-tax-row amount capitalized in the GL (see get_capitalized_valuation_tax).
+		all_item_charges = []
+		stock_item_charges = []
 
 		for d in self.get("taxes"):
 			if d.category not in ["Valuation", "Valuation and Total"]:
@@ -793,12 +654,12 @@ class BuyingController(SubcontractingController):
 				total_valuation_amount += amount
 				tax_accounts.append(d.account_head)
 			elif d.charge_type == "Actual" and d.get("allocate_full_amount_to_stock_items"):
-				# Allocate the full amount to stock/asset items only (e.g. Freight)
-				total_actual_tax_on_stock_items += amount
+				# Capitalize the full amount onto stock/asset items only (e.g. Freight)
+				stock_item_charges.append(amount)
 			else:
-				total_actual_tax_amount += amount
+				all_item_charges.append(amount)
 
-		return tax_accounts, total_valuation_amount, total_actual_tax_amount, total_actual_tax_on_stock_items
+		return tax_accounts, total_valuation_amount, all_item_charges, stock_item_charges
 
 	def get_item_tax_amount(self, item, tax_accounts):
 		item_tax_amount = 0.0
@@ -819,20 +680,26 @@ class BuyingController(SubcontractingController):
 
 		return item_tax_amount
 
-	def distribute_actual_tax_amount(self, stock_and_asset_items, total_on_all_items, total_on_stock_items):
+	def distribute_actual_tax_amount(self, stock_and_asset_items, all_item_charges, stock_item_charges):
 		"""Distribute "Actual" valuation charges to each item, keyed by row idx.
 
-		`total_on_all_items` is spread across every item by net amount; a non-stock item's
-		share is computed but never capitalized (e.g. a genuine tax). `total_on_stock_items`
-		(flagged `allocate_full_amount_to_stock_items`) is spread across stock/asset items only,
-		so the whole charge is capitalized (e.g. Freight).
+		Each charge is spread individually (not pooled together) so the resulting per-item
+		item_tax_amount decomposes exactly into the per-tax-row amount capitalized in the GL
+		(see get_capitalized_valuation_tax) - pooling first and spreading the aggregate can drift
+		by rounding for multiple charges over unevenly valued items. A charge in `all_item_charges`
+		is spread across every item by net amount; a non-stock item's share is computed but never
+		capitalized (e.g. a genuine tax). A charge in `stock_item_charges` (flagged
+		`allocate_full_amount_to_stock_items`) is spread across stock/asset items only, so the whole
+		charge is capitalized (e.g. Freight).
 		"""
 		all_items = [d for d in self.get("items") if d.item_code]
 		stock_items = [d for d in all_items if d.item_code in stock_and_asset_items]
 
 		charge_per_item = {}
-		self._spread_charge_over_items(charge_per_item, total_on_all_items, all_items)
-		self._spread_charge_over_items(charge_per_item, total_on_stock_items, stock_items)
+		for charge in all_item_charges:
+			self._spread_charge_over_items(charge_per_item, charge, all_items)
+		for charge in stock_item_charges:
+			self._spread_charge_over_items(charge_per_item, charge, stock_items)
 		return charge_per_item
 
 	def _spread_charge_over_items(self, charge_per_item, total_charge, items):
@@ -900,11 +767,7 @@ class BuyingController(SubcontractingController):
 			return
 
 		if cint(self.get("is_return")):
-			# Material of a transfer goes back at the rate it came in with. Anything else is
-			# valued from the original item cost by its valuation method.
-			if self.is_internal_transfer():
-				self.set_sales_incoming_rate_for_internal_transfer()
-
+			# Get outgoing rate based on original item cost based on valuation method
 			return
 
 		if not self.is_internal_transfer():
@@ -945,14 +808,9 @@ class BuyingController(SubcontractingController):
 		}
 
 		ref_doctype = ref_doctype_map.get(self.doctype)
-		returned_field = frappe.scrub(self.doctype) + "_item"
 		component_rates = self.get_component_incoming_rates()
 		for d in self.get("items"):
-			if self.get("is_return") and d.get(returned_field):
-				d.sales_incoming_rate = flt(
-					frappe.db.get_value(self.doctype + " Item", d.get(returned_field), "sales_incoming_rate")
-				)
-			elif d.get("delivery_note_packed_item") in component_rates:
+			if d.get("delivery_note_packed_item") in component_rates:
 				d.sales_incoming_rate = flt(
 					component_rates[d.delivery_note_packed_item] * (d.conversion_factor or 1)
 				)
@@ -986,6 +844,36 @@ class BuyingController(SubcontractingController):
 					* (d.conversion_factor or 1)
 				)
 
+	def validate_for_subcontracting(self):
+		if self.is_subcontracted and self.get("is_old_subcontracting_flow"):
+			if self.doctype in ["Purchase Receipt", "Purchase Invoice"] and not self.supplier_warehouse:
+				frappe.throw(
+					_("{field_label} is mandatory for sub-contracted {doctype}.").format(
+						field_label=_(self.meta.get_label("supplier_warehouse")), doctype=_(self.doctype)
+					)
+				)
+
+			for item in self.get("items"):
+				if item in self.sub_contracted_items and not item.bom:
+					frappe.throw(
+						_("Please select BOM in BOM field for Item {item_code}.").format(
+							item_code=frappe.bold(item.item_code)
+						)
+					)
+			if self.doctype != "Purchase Order":
+				return
+			for row in self.get("supplied_items"):
+				if not row.reserve_warehouse:
+					frappe.throw(
+						_(
+							"Reserved Warehouse is mandatory for the Item {item_code} in Raw Materials supplied."
+						).format(item_code=frappe.bold(row.rm_item_code))
+					)
+		else:
+			for item in self.get("items"):
+				if item.get("bom"):
+					item.bom = None
+
 	def set_qty_as_per_stock_uom(self):
 		allow_to_edit_stock_qty = frappe.get_single_value(
 			"Stock Settings", "allow_to_edit_stock_uom_qty_for_purchase"
@@ -1000,7 +888,7 @@ class BuyingController(SubcontractingController):
 					frappe.throw(
 						_("Row #{idx}: {field_label} is mandatory.").format(
 							idx=d.idx,
-							field_label=d.meta.get_translated_label("conversion_factor"),
+							field_label=_(d.meta.get_label("conversion_factor")),
 						)
 					)
 				d.stock_qty = flt(d.qty) * flt(d.conversion_factor)
@@ -1047,99 +935,30 @@ class BuyingController(SubcontractingController):
 				frappe.throw(
 					_("Row #{idx}: {field_label} can not be negative for item {item_code}.").format(
 						idx=item_row["idx"],
-						field_label=frappe.get_meta(item_row.doctype).get_translated_label(fieldname),
+						field_label=frappe.get_meta(item_row.doctype).get_label(fieldname),
 						item_code=frappe.bold(item_row["item_code"]),
 					)
 				)
 
+	def get_internal_transfer_qty(self, row) -> float:
+		if flt(row.qty) or not self.is_internal_receipt():
+			return flt(row.qty)
+
+		return flt(row.rejected_qty)
+
 	def is_internal_receipt(self) -> bool:
-		return self.is_internal_transfer() and self.is_stock_receipt()
+		return self.doctype == "Purchase Receipt" and self.is_internal_transfer()
 
 	def get_source_warehouse_qty(self, row, accepted_qty):
 		if not (self.is_internal_receipt() and flt(row.rejected_qty)):
 			return accepted_qty
 
-		if row.get("serial_and_batch_bundle") and not row.get("rejected_serial_and_batch_bundle"):
+		if row.get("serial_and_batch_bundle") or row.get("rejected_serial_and_batch_bundle"):
 			return accepted_qty
 
 		rejected_qty = flt(flt(row.rejected_qty) * flt(row.conversion_factor), row.precision("stock_qty"))
 
 		return flt(accepted_qty + rejected_qty, row.precision("stock_qty"))
-
-	def get_accepted_warehouse_package(self, row, type_of_transaction, via_landed_cost_voucher):
-		"""Package for the entry into the accepted warehouse, which is the package of the row itself
-		when the row rejects material."""
-		if flt(row.rejected_qty) and self.is_internal_receipt() and not self.is_return:
-			return row.serial_and_batch_bundle
-
-		if self.is_internal_transfer() and not self.is_return and self.docstatus != 2:
-			return self.get_package_for_target_warehouse(
-				row,
-				type_of_transaction=type_of_transaction,
-				via_landed_cost_voucher=via_landed_cost_voucher,
-			)
-
-		return row.serial_and_batch_bundle
-
-	def get_submitted_package(self, row, warehouse):
-		return frappe.db.get_value(
-			"Stock Ledger Entry",
-			{"voucher_detail_no": row.name, "warehouse": warehouse, "is_cancelled": 0},
-			"serial_and_batch_bundle",
-		)
-
-	def get_source_warehouse_reversal_package(self, row, package):
-		if not (self.is_internal_transfer() and self.is_return):
-			return package
-
-		if existing_package := self.get_package_of_source_warehouse(row):
-			return existing_package
-
-		if not row.get("rejected_serial_and_batch_bundle"):
-			return self.get_package_for_target_warehouse(row, row.from_warehouse, "Inward")
-
-		return self.get_returned_source_package(row)
-
-	def get_source_warehouse_package(self, row, package):
-		if not (row.get("rejected_serial_and_batch_bundle") and self.is_internal_receipt()):
-			return package
-
-		if existing_package := self.get_package_of_source_warehouse(row):
-			return existing_package
-
-		if not package:
-			return self.make_package_for_transfer(
-				row.rejected_serial_and_batch_bundle, row.from_warehouse, type_of_transaction="Outward"
-			)
-
-		return self.make_package_for_transfer(
-			package,
-			row.from_warehouse,
-			type_of_transaction="Outward",
-			include_bundle=row.rejected_serial_and_batch_bundle,
-		)
-
-	def get_package_of_source_warehouse(self, row) -> str | None:
-		return frappe.db.get_value(
-			"Serial and Batch Bundle",
-			{
-				"voucher_type": self.doctype,
-				"voucher_no": self.name,
-				"voucher_detail_no": row.name,
-				"warehouse": row.from_warehouse,
-				"docstatus": 1,
-				"is_cancelled": 0,
-			},
-			"name",
-		)
-
-	def get_returned_source_package(self, row):
-		return self.make_package_for_transfer(
-			row.serial_and_batch_bundle,
-			row.from_warehouse,
-			type_of_transaction="Inward",
-			include_bundle=row.rejected_serial_and_batch_bundle,
-		)
 
 	def update_stock_ledger(self, allow_negative_stock=False, via_landed_cost_voucher=False):
 		self.update_ordered_and_reserved_qty()
@@ -1151,110 +970,113 @@ class BuyingController(SubcontractingController):
 			if d.item_code not in stock_items:
 				continue
 
-			source_reversal_sle = None
+			if d.warehouse:
+				pr_qty = get_stock_qty(d, d.qty)
+				source_qty = self.get_source_warehouse_qty(d, pr_qty)
 
-			pr_qty = get_stock_qty(d, d.qty)
-			source_qty = self.get_source_warehouse_qty(d, pr_qty)
+				if pr_qty or source_qty:
+					if d.from_warehouse and (
+						(not cint(self.is_return) and self.docstatus == 1)
+						or (cint(self.is_return) and self.docstatus == 2)
+					):
+						serial_and_batch_bundle = d.get("serial_and_batch_bundle")
+						if self.is_internal_transfer() and self.is_return and self.docstatus == 2:
+							serial_and_batch_bundle = frappe.db.get_value(
+								"Stock Ledger Entry",
+								{"voucher_detail_no": d.name, "warehouse": d.from_warehouse},
+								"serial_and_batch_bundle",
+							)
 
-			if source_qty and (d.warehouse or not pr_qty):
-				if d.from_warehouse and (
-					(not cint(self.is_return) and self.docstatus == 1)
-					or (cint(self.is_return) and self.docstatus == 2)
-				):
-					serial_and_batch_bundle = d.get("serial_and_batch_bundle")
-					if self.is_internal_transfer() and self.is_return and self.docstatus == 2:
-						serial_and_batch_bundle = frappe.db.get_value(
-							"Stock Ledger Entry",
-							{"voucher_detail_no": d.name, "warehouse": d.from_warehouse},
-							"serial_and_batch_bundle",
+						from_warehouse_sle = self.get_sl_entries(
+							d,
+							{
+								"actual_qty": -1 * source_qty,
+								"warehouse": d.from_warehouse,
+								"outgoing_rate": d.rate,
+								"recalculate_rate": 1,
+								"dependant_sle_voucher_detail_no": d.name,
+								"serial_and_batch_bundle": serial_and_batch_bundle,
+							},
 						)
 
-					from_warehouse_sle = self.get_sl_entries(
+						sl_entries.append(from_warehouse_sle)
+
+					type_of_transaction = "Inward"
+					if self.docstatus == 2:
+						type_of_transaction = "Outward"
+
+					sle = self.get_sl_entries(
 						d,
 						{
-							"actual_qty": -1 * source_qty,
-							"warehouse": d.from_warehouse,
-							"outgoing_rate": d.rate,
-							"recalculate_rate": 1,
-							"dependant_sle_voucher_detail_no": d.name,
-							"serial_and_batch_bundle": self.get_source_warehouse_package(
-								d, serial_and_batch_bundle
+							"actual_qty": flt(pr_qty),
+							"serial_and_batch_bundle": (
+								d.serial_and_batch_bundle
+								if not self.is_internal_transfer()
+								or self.is_return
+								or (self.is_internal_transfer() and self.docstatus == 2)
+								else self.get_package_for_target_warehouse(
+									d,
+									type_of_transaction=type_of_transaction,
+									via_landed_cost_voucher=via_landed_cost_voucher,
+								)
 							),
 						},
 					)
 
-					sl_entries.append(from_warehouse_sle)
+					if self.is_return:
+						outgoing_rate = 0.0
+						if not is_serial_no_wise_valuation_disabled(d.item_code):
+							outgoing_rate = get_rate_for_return(
+								self.doctype, self.name, d.item_code, self.return_against, item_row=d
+							)
 
-				type_of_transaction = "Inward"
-				if self.docstatus == 2:
-					type_of_transaction = "Outward"
+						sle.update(
+							{
+								"outgoing_rate": outgoing_rate,
+								"recalculate_rate": 1,
+								"serial_and_batch_bundle": d.serial_and_batch_bundle,
+							}
+						)
+						if d.from_warehouse:
+							sle.dependant_sle_voucher_detail_no = d.name
+					else:
+						sle.update(
+							{
+								"incoming_rate": d.valuation_rate,
+								"recalculate_rate": 1
+								if (self.is_subcontracted and (d.bom or d.get("fg_item"))) or d.from_warehouse
+								else 0,
+							}
+						)
+					sl_entries.append(sle)
 
-				sle = self.get_sl_entries(
-					d,
-					{
-						"actual_qty": flt(pr_qty),
-						"serial_and_batch_bundle": self.get_accepted_warehouse_package(
-							d, type_of_transaction, via_landed_cost_voucher
-						),
-					},
-				)
+					if d.from_warehouse and (
+						(not cint(self.is_return) and self.docstatus == 2)
+						or (cint(self.is_return) and self.docstatus == 1)
+					):
+						serial_and_batch_bundle = None
+						if self.is_internal_transfer() and self.docstatus == 2:
+							serial_and_batch_bundle = frappe.db.get_value(
+								"Stock Ledger Entry",
+								{"voucher_detail_no": d.name, "warehouse": d.warehouse},
+								"serial_and_batch_bundle",
+							)
 
-				if self.is_return:
-					outgoing_rate = 0.0
-					if not is_serial_no_wise_valuation_disabled(d.item_code):
-						outgoing_rate = get_rate_for_return(
-							self.doctype, self.name, d.item_code, self.return_against, item_row=d
+						from_warehouse_sle = self.get_sl_entries(
+							d,
+							{
+								"actual_qty": -1 * source_qty,
+								"warehouse": d.from_warehouse,
+								"recalculate_rate": 1,
+								"serial_and_batch_bundle": (
+									self.get_package_for_target_warehouse(d, d.from_warehouse, "Inward")
+									if self.is_internal_transfer() and self.is_return
+									else serial_and_batch_bundle
+								),
+							},
 						)
 
-					sle.update(
-						{
-							"outgoing_rate": outgoing_rate,
-							"recalculate_rate": 1,
-							"serial_and_batch_bundle": d.serial_and_batch_bundle,
-						}
-					)
-					if d.from_warehouse:
-						sle.dependant_sle_voucher_detail_no = d.name
-				else:
-					sle.update(
-						{
-							"incoming_rate": d.valuation_rate,
-							"recalculate_rate": 1
-							if (self.is_subcontracted and (d.bom or d.get("fg_item"))) or d.from_warehouse
-							else 0,
-						}
-					)
-				sl_entries.append(sle)
-
-				if d.from_warehouse and (
-					(not cint(self.is_return) and self.docstatus == 2)
-					or (cint(self.is_return) and self.docstatus == 1)
-				):
-					serial_and_batch_bundle = None
-					if self.is_internal_transfer() and self.docstatus == 2:
-						reversed_warehouse = (
-							d.from_warehouse if d.get("rejected_serial_and_batch_bundle") else d.warehouse
-						)
-						serial_and_batch_bundle = self.get_submitted_package(d, reversed_warehouse)
-
-					from_warehouse_sle = self.get_sl_entries(
-						d,
-						{
-							"actual_qty": -1 * source_qty,
-							"warehouse": d.from_warehouse,
-							"recalculate_rate": 1,
-							"serial_and_batch_bundle": self.get_source_warehouse_reversal_package(
-								d, serial_and_batch_bundle
-							),
-						},
-					)
-
-					if self.is_internal_transfer() and self.is_return:
-						from_warehouse_sle.incoming_rate = get_rate_for_return(
-							self.doctype, self.name, d.item_code, self.return_against, item_row=d
-						)
-
-					source_reversal_sle = from_warehouse_sle
+						sl_entries.append(from_warehouse_sle)
 
 			if flt(d.rejected_qty) != 0:
 				valuation_rate_for_rejected_item = self.get_rejected_valuation_rate(d)
@@ -1272,8 +1094,8 @@ class BuyingController(SubcontractingController):
 					)
 				)
 
-			if source_reversal_sle:
-				sl_entries.append(source_reversal_sle)
+		if self.get("is_old_subcontracting_flow"):
+			self.make_sl_entries_for_supplier_warehouse(sl_entries)
 
 		self.make_sl_entries(
 			sl_entries,
@@ -1310,6 +1132,7 @@ class BuyingController(SubcontractingController):
 	def check_purchase_order_on_hold_or_close(self, ref_fieldname, exclude_if_field=None):
 		if self.get("is_return"):
 			return
+
 		self.check_for_on_hold_or_closed_status(
 			"Purchase Order", ref_fieldname, exclude_if_field=exclude_if_field
 		)
@@ -1337,6 +1160,8 @@ class BuyingController(SubcontractingController):
 					)
 
 				po_obj.update_ordered_qty(po_item_rows)
+				if self.get("is_old_subcontracting_flow"):
+					po_obj.update_reserved_qty_for_subcontract()
 
 	def on_submit(self):
 		if self.get("is_return"):
@@ -1519,14 +1344,15 @@ class BuyingController(SubcontractingController):
 					asset = frappe.get_doc("Asset", asset.name)
 					if delete_asset and is_auto_create_enabled:
 						# need to delete movements to delete assets otherwise throws link exists error
-						movements = frappe.get_all(
-							"Asset Movement Item",
-							filters={"asset": asset.name},
-							pluck="parent",
-							limit_page_length=0,  # delete every movement of the asset (no default 20 cap)
+						movements = frappe.db.sql(
+							"""SELECT asm.name
+							FROM `tabAsset Movement` asm, `tabAsset Movement Item` asm_item
+							WHERE asm_item.parent=asm.name and asm_item.asset=%s""",
+							asset.name,
+							as_dict=1,
 						)
 						for movement in movements:
-							frappe.delete_doc("Asset Movement", movement, force=1)
+							frappe.delete_doc("Asset Movement", movement.name, force=1)
 						frappe.delete_doc("Asset", asset.name, force=1)
 						continue
 
@@ -1580,14 +1406,14 @@ class BuyingController(SubcontractingController):
 					frappe.throw(
 						_("Row #{idx}: {schedule_date} cannot be before {transaction_date}.").format(
 							idx=d.idx,
-							schedule_date=self.meta.get_translated_label("schedule_date"),
-							transaction_date=self.meta.get_translated_label("transaction_date"),
+							schedule_date=_(self.meta.get_label("schedule_date")),
+							transaction_date=_(self.meta.get_label("transaction_date")),
 						)
 					)
 		else:
 			frappe.throw(
 				_("Please enter the {schedule_date}.").format(
-					schedule_date=self.meta.get_translated_label("schedule_date")
+					schedule_date=_(self.meta.get_label("schedule_date"))
 				)
 			)
 
@@ -1596,7 +1422,10 @@ class BuyingController(SubcontractingController):
 		if self.doctype == "Material Request":
 			return
 
-		validate_item_type(self, "is_purchase_item", "purchase")
+		if self.get("is_old_subcontracting_flow"):
+			validate_item_type(self, "is_sub_contracted_item", "subcontracted")
+		else:
+			validate_item_type(self, "is_purchase_item", "purchase")
 
 
 def get_asset_item_details(asset_items):
@@ -1619,12 +1448,17 @@ def validate_item_type(doc, fieldname, message):
 	if not items:
 		return
 
-	invalid_items = frappe.get_all(
-		"Item",
-		filters={"name": ["in", items], fieldname: 0},
-		pluck="item_code",
-		limit_page_length=0,  # validate every item in the document (no default 20 cap)
-	)
+	item_list = ", ".join(["%s" % frappe.db.escape(d) for d in items])
+
+	invalid_items = [
+		d[0]
+		for d in frappe.db.sql(
+			f"""
+		select item_code from tabItem where name in ({item_list}) and {fieldname}=0
+		""",
+			as_list=True,
+		)
+	]
 
 	if invalid_items:
 		items = ", ".join([d for d in invalid_items])
@@ -1652,23 +1486,21 @@ def update_regional_item_valuation_rate(doc):
 	pass
 
 
-def get_linked_asset_qty(detail_field, details):
+def get_linked_asset_qty(detail_field, details, exclude_asset=None):
 	asset = frappe.qb.DocType("Asset")
-	return dict(
-		(
-			frappe.qb.from_(asset)
-			.select(asset[detail_field], Sum(asset.asset_quantity))
-			.where((asset[detail_field].isin(details)) & (asset.docstatus < 2))
-			.groupby(asset[detail_field])
-		).run()
+	query = (
+		frappe.qb.from_(asset)
+		.select(asset[detail_field], Sum(asset.asset_quantity))
+		.where((asset[detail_field].isin(details)) & (asset.docstatus < 2))
+		.groupby(asset[detail_field])
 	)
+	if exclude_asset:
+		query = query.where(asset.name != exclude_asset)
+	return dict(query.run())
 
 
 @frappe.request_cache
 def get_purchase_expense_account(item_code, company):
-	from erpnext.setup.doctype.brand.brand import get_brand_defaults
-	from erpnext.setup.doctype.item_group.item_group import get_item_group_defaults
-
 	defaults = get_item_defaults(item_code, company)
 
 	details = frappe._dict(
@@ -1679,17 +1511,22 @@ def get_purchase_expense_account(item_code, company):
 	)
 
 	if not details.purchase_expense_account:
-		details = get_item_group_defaults(item_code, company)
+		details = frappe.db.get_value(
+			"Item Default",
+			{"parent": defaults.item_group, "company": company},
+			["purchase_expense_account", "purchase_expense_contra_account"],
+			as_dict=1,
+		) or frappe._dict({})
 
 	if not details.purchase_expense_account:
-		details = get_brand_defaults(item_code, company)
+		details = frappe.db.get_value(
+			"Item Default",
+			{"parent": defaults.brand, "company": company},
+			["purchase_expense_account", "purchase_expense_contra_account"],
+			as_dict=1,
+		)
 
-	return frappe._dict(
-		{
-			field: details.get(field)
-			for field in ("purchase_expense_account", "purchase_expense_contra_account")
-		}
-	)
+	return details or frappe._dict({})
 
 
 def get_stock_qty(row, qty) -> float:

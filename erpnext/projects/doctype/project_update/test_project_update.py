@@ -1,6 +1,6 @@
 # Copyright (c) 2018, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
-
+import unittest
 from unittest.mock import patch
 
 import frappe
@@ -43,6 +43,7 @@ class TestProjectUpdate(ERPNextTestSuite):
 				"time": "10:00:00",
 			}
 		).insert()
+		self.addCleanup(frappe.delete_doc, "Project Update", pu.name, force=1)
 
 		# The converted update query (no longer referencing progress/progress_details) must find
 		# yesterday's Project Update, keyed on project.name, on both engines.
@@ -63,8 +64,16 @@ class TestProjectUpdate(ERPNextTestSuite):
 
 		# The full reminder flow runs without error (Project / Project Update / Holiday / Project
 		# User lookups all execute). sendmail is mocked so no SMTP account is required.
-		with patch("frappe.sendmail"), self.assertWarns(PendingDeprecationWarning):
+		with patch("frappe.sendmail"):
 			daily_reminder()
+
+	def test_replies_are_collected_once(self):
+		project_update = make_project_update()
+		receive_reply(project_update, "admin@example.com", "Done with design")
+
+		collect_project_status()
+		collect_project_status()
+		self.assertEqual(len(frappe.get_doc("Project Update", project_update).users), 1)
 
 	def test_reply_with_a_link_is_collected_once(self):
 		project_update = make_project_update()

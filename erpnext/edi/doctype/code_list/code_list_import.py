@@ -1,4 +1,3 @@
-import json
 from html import unescape
 from urllib.parse import urlsplit
 
@@ -168,8 +167,7 @@ def process_genericode_import(
 ):
 	from erpnext.edi.doctype.common_code.common_code import import_genericode
 
-	# Same reasoning as above: common_code.save() enforces this per document, but only after the
-	# file has been read and its XML parsed and queried.
+	# common_code.save() enforces this per document, but only after the file is read and parsed.
 	frappe.has_permission("Common Code", "create", throw=True)
 	frappe.has_permission("Code List", doc=code_list_name, throw=True)
 

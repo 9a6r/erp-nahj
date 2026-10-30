@@ -18,6 +18,10 @@ from erpnext.stock.doctype.warehouse.test_warehouse import create_warehouse
 from erpnext.stock.utils import PendingRepostingError
 from erpnext.tests.utils import ERPNextTestSuite
 
+# On ERPNextTestSuite, the doctype test records and all
+# link-field test record depdendencies are recursively loaded
+# Use these module variables to add/remove to/from that list
+
 COMPANY = "_Test Company"
 WAREHOUSE = "_Test Warehouse - _TC"
 
@@ -191,12 +195,6 @@ class TestStockClosingEntry(ERPNextTestSuite):
 		self.assertEqual(total.stock_value_difference, -100)
 
 	def test_closing_entry_reads_previous_closing_balance(self):
-		"""A closing entry created after another one must read the previous balance.
-
-		Regression for the query that filtered `Stock Closing Balance` by a
-		non-existent `closing_stock_balance` column, raising an OperationalError
-		for every closing entry created after the first one.
-		"""
 		item = make_item(properties={"is_stock_item": 1}).name
 		first_date = add_days(today(), -10)
 
@@ -526,6 +524,37 @@ class TestStockClosingEntryDates(ERPNextTestSuite):
 		)
 		self.assertFalse(repost.get_closing_stock_balance())
 
+	def test_future_to_date_is_rejected(self):
+		self.assertRaises(frappe.ValidationError, self.make_closing(add_days(today(), 30)).insert)
+
+	def test_stock_balance_ageing_does_not_count_closed_stock_twice(self):
+		from erpnext.stock.report.stock_balance.stock_balance import execute as stock_balance
+
+		item = make_item(properties={"is_stock_item": 1, "valuation_method": "FIFO"}).name
+		for qty, days in ((10, -60), (10, -50), (10, -40)):
+			make_stock_entry(
+				item_code=item, target=WAREHOUSE, qty=qty, rate=100, posting_date=add_days(today(), days)
+			)
+		make_stock_entry(item_code=item, source=WAREHOUSE, qty=12, posting_date=add_days(today(), -20))
+		self.make_generated_closing(add_days(today(), -10))
+
+		filters = frappe._dict(
+			company=COMPANY,
+			from_date=add_days(today(), -5),
+			to_date=today(),
+			item_code=[item],
+			show_stock_ageing_data=1,
+		)
+		row = stock_balance(filters)[1][0]
+
+		self.assertEqual(sum(slot[0] for slot in row["fifo_queue"]), 18)
+		self.assertEqual(row["average_age"], 44.44)
+
+	def test_company_is_mandatory(self):
+		closing = self.make_closing(add_days(today(), -1))
+		closing.company = None
+		self.assertRaises(frappe.MandatoryError, closing.insert)
+
 	def test_closing_balance_waits_for_pending_reposts(self):
 		repost = frappe.get_doc(
 			{
@@ -699,34 +728,3 @@ class TestStockClosingEntryDates(ERPNextTestSuite):
 		)
 
 		self.assertEqual(backdated.docstatus, 1)
-
-	def test_future_to_date_is_rejected(self):
-		self.assertRaises(frappe.ValidationError, self.make_closing(add_days(today(), 30)).insert)
-
-	def test_stock_balance_ageing_does_not_count_closed_stock_twice(self):
-		from erpnext.stock.report.stock_balance.stock_balance import execute as stock_balance
-
-		item = make_item(properties={"is_stock_item": 1, "valuation_method": "FIFO"}).name
-		for qty, days in ((10, -60), (10, -50), (10, -40)):
-			make_stock_entry(
-				item_code=item, target=WAREHOUSE, qty=qty, rate=100, posting_date=add_days(today(), days)
-			)
-		make_stock_entry(item_code=item, source=WAREHOUSE, qty=12, posting_date=add_days(today(), -20))
-		self.make_generated_closing(add_days(today(), -10))
-
-		filters = frappe._dict(
-			company=COMPANY,
-			from_date=add_days(today(), -5),
-			to_date=today(),
-			item_code=[item],
-			show_stock_ageing_data=1,
-		)
-		row = stock_balance(filters)[1][0]
-
-		self.assertEqual(sum(slot[0] for slot in row["fifo_queue"]), 18)
-		self.assertEqual(row["average_age"], 44.44)
-
-	def test_company_is_mandatory(self):
-		closing = self.make_closing(add_days(today(), -1))
-		closing.company = None
-		self.assertRaises(frappe.MandatoryError, closing.insert)

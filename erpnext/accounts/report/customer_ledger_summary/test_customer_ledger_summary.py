@@ -1,4 +1,5 @@
 import frappe
+from frappe import qb
 from frappe.utils import add_days, today
 
 from erpnext.accounts.doctype.cost_center.test_cost_center import create_cost_center

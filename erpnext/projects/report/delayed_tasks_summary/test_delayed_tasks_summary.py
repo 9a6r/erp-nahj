@@ -1,3 +1,5 @@
+import unittest
+
 import frappe
 from frappe.core.doctype.user_permission.test_user_permission import create_user
 from frappe.permissions import add_user_permission

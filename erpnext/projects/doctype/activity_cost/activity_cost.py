@@ -56,13 +56,9 @@ class ActivityCost(Document):
 					DuplicationError,
 				)
 		else:
-			if frappe.db.exists(
-				"Activity Cost",
-				{
-					"employee": ["is", "not set"],
-					"activity_type": self.activity_type,
-					"name": ["!=", self.name],
-				},
+			if frappe.db.sql(
+				"""select name from `tabActivity Cost` where ifnull(employee, '')='' and activity_type= %s and name != %s""",
+				(self.activity_type, self.name),
 			):
 				frappe.throw(
 					_("Default Activity Cost exists for Activity Type - {0}").format(self.activity_type),

@@ -82,7 +82,7 @@ def get_data(filters):
 			so.territory,
 			so.company,
 		)
-		.where(so.name.isin(permitted_orders) & (so_item.closed == 0))
+		.where(so.name.isin(permitted_orders))
 		.orderby(so.name, so_item.idx)
 		.run(as_dict=1)
 	)
@@ -199,7 +199,7 @@ def get_permitted_sales_orders(filters):
 	elif filters.get("to_date"):
 		so_filters["transaction_date"] = ["<=", filters.to_date]
 
-	# honours user permissions and company restriction, which the raw query below bypasses
+	# honours user permissions, which the raw query below bypasses
 	return frappe.qb.get_query(
 		table="Sales Order",
 		fields=["name"],

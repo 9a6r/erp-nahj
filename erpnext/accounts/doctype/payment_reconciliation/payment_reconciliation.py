@@ -17,14 +17,13 @@ from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import g
 from erpnext.accounts.doctype.process_payment_reconciliation.process_payment_reconciliation import (
 	is_any_doc_running,
 )
-from erpnext.accounts.services.advances import get_advance_payment_entries_for_regional
-from erpnext.accounts.services.exchange_gain_loss import get_exchange_gain_loss_account
 from erpnext.accounts.utils import (
 	QueryPaymentLedger,
 	create_gain_loss_journal,
 	get_outstanding_invoices,
 	reconcile_against_document,
 )
+from erpnext.controllers.accounts_controller import get_advance_payment_entries_for_regional
 
 
 class PaymentReconciliation(Document):
@@ -107,7 +106,7 @@ class PaymentReconciliation(Document):
 				"invoice_name": None,
 			}
 		)
-		self.init_from_dict(doc_dict)
+		super(Document, self).__init__(doc_dict)
 
 	def save(self):
 		return
@@ -370,7 +369,7 @@ class PaymentReconciliation(Document):
 			row.update(payment)
 			row.is_advance = payment.book_advance_payments_in_separate_party_account
 
-	def get_invoice_entries(self):
+	def get_invoice_entries(self, vouchers=None):
 		# Fetch JVs, Sales and Purchase Invoices for 'invoices' to reconcile against
 
 		self.build_qb_filter_conditions(get_invoices=True)
@@ -389,7 +388,8 @@ class PaymentReconciliation(Document):
 			min_outstanding=self.minimum_invoice_amount if self.minimum_invoice_amount else None,
 			max_outstanding=self.maximum_invoice_amount if self.maximum_invoice_amount else None,
 			accounting_dimensions=self.accounting_dimension_filter_conditions,
-			limit=self.invoice_limit,
+			vouchers=vouchers,
+			limit=self.invoice_limit if not vouchers else None,
 			voucher_no=self.invoice_name,
 		)
 
@@ -402,7 +402,7 @@ class PaymentReconciliation(Document):
 		# Happens when non-standalone cr/dr notes are linked with another invoice through journal entry
 		non_reconciled_invoices = [x for x in non_reconciled_invoices if x.voucher_no not in cr_dr_notes]
 
-		if self.invoice_limit:
+		if self.invoice_limit and not vouchers:
 			non_reconciled_invoices = non_reconciled_invoices[: self.invoice_limit]
 
 		non_reconciled_invoices = sorted(
@@ -461,9 +461,11 @@ class PaymentReconciliation(Document):
 		return difference_amount
 
 	@frappe.whitelist()
-	def calculate_difference_on_allocation_change(
-		self, payment_entry: list, invoice: list, allocated_amount: float
-	):
+	def is_auto_process_enabled(self):
+		return frappe.get_single_value("Accounts Settings", "auto_reconcile_payments")
+
+	@frappe.whitelist()
+	def calculate_difference_on_allocation_change(self, payment_entry, invoice, allocated_amount):
 		invoice_exchange_map = self.get_invoice_exchange_map(invoice, payment_entry)
 		invoice[0]["exchange_rate"] = invoice_exchange_map.get(invoice[0].get("invoice_number"))
 		if payment_entry[0].get("reference_type") in ["Sales Invoice", "Purchase Invoice"]:
@@ -475,19 +477,15 @@ class PaymentReconciliation(Document):
 		return new_difference_amount
 
 	@frappe.whitelist()
-	def allocate_entries(self, args: dict):
+	def allocate_entries(self, args):
 		self.validate_entries()
 
 		exc_gain_loss_posting_date = frappe.db.get_single_value(
 			"Accounts Settings", "exchange_gain_loss_posting_date", cache=True
 		)
 		invoice_exchange_map = self.get_invoice_exchange_map(args.get("invoices"), args.get("payments"))
-		account_currency = frappe.get_cached_value(
-			"Account", self.receivable_payable_account, "account_currency"
-		)
-		allocated_amount_precision = get_field_precision(
-			frappe.get_meta("Payment Reconciliation Allocation").get_field("allocated_amount"),
-			currency=account_currency,
+		default_exchange_gain_loss_account = frappe.get_cached_value(
+			"Company", self.company, "exchange_gain_loss_account"
 		)
 
 		entries = []
@@ -496,17 +494,11 @@ class PaymentReconciliation(Document):
 			for inv in args.get("invoices"):
 				if pay.get("amount") >= inv.get("outstanding_amount"):
 					res = self.get_allocated_entry(pay, inv, inv["outstanding_amount"])
-					pay["amount"] = flt(
-						flt(pay.get("amount")) - flt(inv.get("outstanding_amount")),
-						allocated_amount_precision,
-					)
+					pay["amount"] = flt(pay.get("amount")) - flt(inv.get("outstanding_amount"))
 					inv["outstanding_amount"] = 0
 				else:
 					res = self.get_allocated_entry(pay, inv, pay["amount"])
-					inv["outstanding_amount"] = flt(
-						flt(inv.get("outstanding_amount")) - flt(pay.get("amount")),
-						allocated_amount_precision,
-					)
+					inv["outstanding_amount"] = flt(inv.get("outstanding_amount")) - flt(pay.get("amount"))
 					pay["amount"] = 0
 
 				inv["exchange_rate"] = invoice_exchange_map.get(inv.get("invoice_number"))
@@ -514,10 +506,7 @@ class PaymentReconciliation(Document):
 					pay["exchange_rate"] = invoice_exchange_map.get(pay.get("reference_name"))
 
 				res.difference_amount = self.get_difference_amount(pay, inv, res["allocated_amount"])
-				is_gain = (
-					res.difference_amount > 0 if self.party_type == "Customer" else res.difference_amount < 0
-				)
-				res.difference_account = get_exchange_gain_loss_account(self.company, is_gain)
+				res.difference_account = default_exchange_gain_loss_account
 				res.exchange_rate = inv.get("exchange_rate")
 				res.update({"gain_loss_posting_date": pay.get("posting_date")})
 				if not pay.get("is_advance"):
@@ -656,7 +645,7 @@ class PaymentReconciliation(Document):
 	def check_mandatory_to_fetch(self):
 		for fieldname in ["company", "party_type", "party", "receivable_payable_account"]:
 			if not self.get(fieldname):
-				frappe.throw(_("Please select {0} first").format(self.meta.get_translated_label(fieldname)))
+				frappe.throw(_("Please select {0} first").format(_(self.meta.get_label(fieldname))))
 
 	def validate_entries(self):
 		if not self.get("invoices"):
@@ -774,13 +763,19 @@ class PaymentReconciliation(Document):
 						).format(row.idx, row.allocated_amount, row.amount)
 					)
 
-				invoice_outstanding = unreconciled_invoices.get(row.invoice_type, {}).get(row.invoice_number)
+				invoice_outstanding = unreconciled_invoices.get(row.invoice_type, {}).get(
+					row.invoice_number, 0
+				)
 				if flt(row.allocated_amount) - invoice_outstanding > 0.009:
 					frappe.throw(
 						_(
 							"Row {0}: Allocated amount {1} must be less than or equal to invoice outstanding amount {2}"
 						).format(row.idx, row.allocated_amount, invoice_outstanding)
 					)
+
+				unreconciled_invoices.setdefault(row.invoice_type, {})[row.invoice_number] = (
+					invoice_outstanding - flt(row.allocated_amount)
+				)
 
 		if not invoices_to_reconcile:
 			frappe.throw(_("No records found in Allocation table"))
@@ -948,8 +943,8 @@ def reconcile_dr_cr_note(dr_cr_notes, company, active_dimensions=None):
 				inv.voucher_type,
 				inv.voucher_no,
 				None,
-				inv.against_voucher_type,
-				inv.against_voucher,
+				jv.doctype,
+				jv.name,
 				None,
 				inv.cost_center,
 				dimensions_dict,
@@ -976,8 +971,3 @@ def get_queries_for_dimension_filters(company: str | None = None):
 		dimensions_with_filters.append({"fieldname": d.fieldname, "filters": filters})
 
 	return dimensions_with_filters
-
-
-@frappe.whitelist()
-def is_auto_process_enabled():
-	return frappe.get_single_value("Accounts Settings", "auto_reconcile_payments")

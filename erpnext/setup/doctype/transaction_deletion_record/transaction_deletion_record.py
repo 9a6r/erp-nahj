@@ -75,7 +75,7 @@ def get_protected_doctypes():
 
 
 @frappe.whitelist()
-def get_company_link_fields(doctype_name: str):
+def get_company_link_fields(doctype_name):
 	"""Get all Company Link field names for a DocType (whitelisted for frontend autocomplete)
 
 	Args:
@@ -439,9 +439,7 @@ class TransactionDeletionRecord(Document):
 		return {"count": len(self.doctypes_to_delete)}
 
 	@frappe.whitelist()
-	def populate_doctype_details(
-		self, doctype_name: str, company: str | None = None, company_field: str | None = None
-	):
+	def populate_doctype_details(self, doctype_name, company=None, company_field=None):
 		"""Get child DocTypes and document count for specified DocType
 
 		Args:
@@ -653,7 +651,7 @@ class TransactionDeletionRecord(Document):
 	def validate_doc_status(self):
 		if self.status != "Running":
 			frappe.throw(
-				_("{0} is not running. Cannot trigger events for this document").format(
+				_("{0} is not running. Cannot trigger events for this Document").format(
 					get_link_to_form("Transaction Deletion Record", self.name)
 				)
 			)
@@ -687,9 +685,11 @@ class TransactionDeletionRecord(Document):
 				self.enqueue_task(task="Delete Leads and Addresses")
 				return
 
-			warehouses = frappe.get_all("Warehouse", filters={"company": self.company}, pluck="name")
-			if warehouses:
-				frappe.db.delete("Bin", {"warehouse": ["in", warehouses]})
+			frappe.db.sql(
+				"""delete from `tabBin` where warehouse in
+					(select name from tabWarehouse where company=%s)""",
+				self.company,
+			)
 			self.db_set("delete_bin_data_status", "Completed")
 		self.enqueue_task(task="Delete Leads and Addresses")
 
@@ -1058,7 +1058,7 @@ def get_doctypes_to_be_ignored():
 
 
 @frappe.whitelist()
-def export_to_delete_template(name: str):
+def export_to_delete_template(name):
 	"""Export To Delete list as CSV via URL access"""
 	frappe.only_for("System Manager")
 	doc = frappe.get_doc("Transaction Deletion Record", name)
@@ -1067,7 +1067,7 @@ def export_to_delete_template(name: str):
 
 
 @frappe.whitelist()
-def process_import_template(transaction_deletion_record_name: str, file_url: str):
+def process_import_template(transaction_deletion_record_name, file_url):
 	"""Import CSV template and populate To Delete list"""
 	import os
 

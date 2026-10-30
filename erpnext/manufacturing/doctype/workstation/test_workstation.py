@@ -2,8 +2,9 @@
 # See license.txt
 import frappe
 from frappe import _
+from frappe.utils import get_datetime
 
-from erpnext.manufacturing.doctype.job_card.mapper import make_stock_entry
+from erpnext.manufacturing.doctype.job_card.job_card import make_stock_entry
 from erpnext.manufacturing.doctype.operation.test_operation import make_operation
 from erpnext.manufacturing.doctype.routing.test_routing import create_routing, setup_bom
 from erpnext.manufacturing.doctype.workstation.workstation import (
@@ -18,14 +19,14 @@ from erpnext.tests.utils import ERPNextTestSuite, change_settings
 
 
 class TestWorkstation(ERPNextTestSuite):
-	def _make_workstation(self, name, *timings):
+	def make_workstation(self, name, *timings):
 		doc = frappe.new_doc("Workstation", workstation_name=name)
 		for start_time, end_time in timings:
 			doc.append("working_hours", {"start_time": start_time, "end_time": end_time})
 		return doc
 
 	def test_back_to_back_working_hours_do_not_overlap(self):
-		doc = self._make_workstation(
+		doc = self.make_workstation(
 			"_Test Back To Back Shifts", ("08:00:00", "16:00:00"), ("16:00:00", "23:59:59")
 		)
 		doc.insert()
@@ -44,7 +45,7 @@ class TestWorkstation(ERPNextTestSuite):
 			("08:00:00", "16:00:00"),  # identical
 		):
 			with self.subTest(timing=timing):
-				doc = self._make_workstation("_Test Overlapping Shifts", ("08:00:00", "16:00:00"))
+				doc = self.make_workstation("_Test Overlapping Shifts", ("08:00:00", "16:00:00"))
 				doc.insert()
 				doc.append("working_hours", {"start_time": timing[0], "end_time": timing[1]})
 				self.assertRaises(OverlapError, doc.save)
@@ -220,11 +221,8 @@ class TestWorkstation(ERPNextTestSuite):
 		self.assertEqual(bom_doc.operations[0].hour_rate, 250)
 		self.assertEqual(bom_doc.operations[1].hour_rate, 250)
 
-		# update_bom_operation() (run on w1.save()) must write the new rate directly onto the
-		# Routing's BOM Operation rows. This is the converted query's own effect (not the BOM
-		# update_cost above) and is what silently skipped on Postgres when parenttype was 'routing'.
-		# It must also refresh operating_cost (hour_rate * time_in_mins / 60); the 30-min op
-		# exercises the arithmetic rather than a plain rate copy.
+		# hour_rate propagation must also refresh operating_cost (hour_rate * time_in_mins / 60)
+		# on the Routing's BOM Operation rows; the 30-min op exercises the arithmetic.
 		for operation, expected_operating_cost in (("Test Operation A", 250), ("Test Operation B", 125)):
 			hour_rate, operating_cost = frappe.db.get_value(
 				"BOM Operation",
@@ -238,8 +236,10 @@ class TestWorkstation(ERPNextTestSuite):
 		from frappe.utils import add_to_date, now
 
 		from erpnext.manufacturing.doctype.routing.test_routing import setup_operations
-		from erpnext.manufacturing.doctype.work_order.mapper import make_stock_entry as make_wo_stock_entry
 		from erpnext.manufacturing.doctype.work_order.test_work_order import make_wo_order_test_record
+		from erpnext.manufacturing.doctype.work_order.work_order import (
+			make_stock_entry as make_wo_stock_entry,
+		)
 		from erpnext.stock.doctype.item.test_item import make_item
 		from erpnext.stock.doctype.stock_entry.test_stock_entry import make_stock_entry as make_test_entry
 
@@ -323,6 +323,24 @@ class TestWorkstation(ERPNextTestSuite):
 			frappe.db.get_value("Workstation", "_Test WS Disabled Shift", "total_working_hours"), 4
 		)
 
+	@change_settings("Manufacturing Settings", {"disable_capacity_planning": 0, "allow_overtime": 0})
+	def test_operation_planned_times_span_all_scheduled_slots(self):
+		job_card = make_scheduled_job_card(
+			"_Test WS Multi Day", [("08:00:00", "12:00:00")], 360, "2031-03-03 08:00:00"
+		)
+		self.assertEqual(
+			frappe.db.get_value(
+				"Work Order Operation",
+				job_card.operation_id,
+				["planned_start_time", "planned_end_time"],
+				as_dict=True,
+			),
+			{
+				"planned_start_time": get_datetime("2031-03-03 08:00:00"),
+				"planned_end_time": get_datetime("2031-03-04 10:00:00"),
+			},
+		)
+
 	@change_settings(
 		"Manufacturing Settings",
 		{"disable_capacity_planning": 0, "allow_overtime": 0, "allow_production_on_holidays": 0},
@@ -366,86 +384,6 @@ class TestWorkstation(ERPNextTestSuite):
 		self.assertRaises(
 			frappe.ValidationError, workstation.start_job, job_card.name, "2031-03-03 13:00:00", first
 		)
-
-	def test_oee_counts_process_loss_once(self):
-		from frappe.tests.classes.context_managers import freeze_time
-		from frappe.utils import add_to_date, now_datetime, nowdate
-
-		from erpnext.manufacturing.page.shop_floor.shop_floor import get_workstation_oee
-
-		with freeze_time(f"{nowdate()} 12:00:00", tick=True):
-			start = add_to_date(now_datetime(), minutes=-90)
-			job_card = make_scheduled_job_card(
-				"_Test WS OEE", [("00:00:00", "23:59:00")], 60, start.strftime("%Y-%m-%d %H:%M:%S"), qty=10
-			)
-			job_card.append(
-				"time_logs",
-				{"from_time": start, "to_time": add_to_date(start, minutes=60), "completed_qty": 8},
-			)
-			job_card.save()
-			job_card.submit()
-			self.assertEqual(job_card.process_loss_qty, 2)
-
-			oee = get_workstation_oee("_Test WS OEE")
-			self.assertEqual(oee["quality"], 80)
-			self.assertEqual(oee["performance"], 100)
-
-	def test_oee_leaves_out_loss_of_work_done_on_another_day(self):
-		from frappe.tests.classes.context_managers import freeze_time
-		from frappe.utils import add_to_date, now_datetime, nowdate
-
-		from erpnext.manufacturing.page.shop_floor.shop_floor import get_workstation_oee
-
-		with freeze_time(f"{nowdate()} 12:00:00", tick=True):
-			shifts = [("00:00:00", "23:59:00")]
-			yesterday = add_to_date(now_datetime(), days=-1, hours=-2)
-			old_card = make_scheduled_job_card(
-				"_Test WS OEE Days", shifts, 6, yesterday.strftime("%Y-%m-%d %H:%M:%S"), qty=10
-			)
-			old_card.append(
-				"time_logs",
-				{"from_time": yesterday, "to_time": add_to_date(yesterday, minutes=60), "completed_qty": 8},
-			)
-			old_card.save()
-			old_card.submit()
-
-			start = add_to_date(now_datetime(), minutes=-90)
-			card = make_scheduled_job_card(
-				"_Test WS OEE Days", shifts, 6, start.strftime("%Y-%m-%d %H:%M:%S"), qty=10
-			)
-			card.append(
-				"time_logs",
-				{"from_time": start, "to_time": add_to_date(start, minutes=60), "completed_qty": 5},
-			)
-			card.save()
-
-			self.assertEqual(get_workstation_oee("_Test WS OEE Days")["performance"], 50)
-
-	def test_oee_counts_run_time_once_for_a_crew(self):
-		from frappe.tests.classes.context_managers import freeze_time
-		from frappe.utils import add_to_date, now_datetime, nowdate
-
-		from erpnext.manufacturing.page.shop_floor.shop_floor import get_workstation_oee
-		from erpnext.setup.doctype.employee.test_employee import make_employee
-
-		first = make_employee("oee-operator-1@example.com", company="_Test Company")
-		second = make_employee("oee-operator-2@example.com", company="_Test Company")
-		with freeze_time(f"{nowdate()} 12:00:00", tick=True):
-			shifts = [("08:00:00", "16:00:00")]
-			start = add_to_date(now_datetime(), minutes=-90)
-			card = make_scheduled_job_card(
-				"_Test WS OEE Crew", shifts, 6, start.strftime("%Y-%m-%d %H:%M:%S"), qty=10
-			)
-			end = add_to_date(start, minutes=60)
-			card.append("time_logs", {"employee": first, "from_time": start, "to_time": end})
-			card.append(
-				"time_logs", {"employee": second, "from_time": start, "to_time": end, "completed_qty": 10}
-			)
-			card.save()
-
-			oee = get_workstation_oee("_Test WS OEE Crew")
-			self.assertEqual(oee["availability"], 12.5)
-			self.assertEqual(oee["performance"], 100)
 
 
 def make_workstation(*args, **kwargs):

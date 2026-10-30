@@ -11,7 +11,6 @@ from frappe.utils import flt, today
 from frappe.utils.nestedset import get_descendants_of
 
 import erpnext
-from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_warehouses_condition
 from erpnext.stock.doctype.warehouse.warehouse import get_child_warehouses
 
 
@@ -266,8 +265,6 @@ def get_stock_details_map(variant_list, warehouses):
 		get_user_permissions().get("Warehouse", []), "Item"
 	):
 		bin_filters.append({"warehouse": ["in", permitted_warehouses]})
-	if condition := get_allowed_warehouses_condition(frappe.qb.DocType("Bin").warehouse):
-		bin_filters.append(condition)
 
 	stock_details = frappe.db.get_all(
 		"Bin",

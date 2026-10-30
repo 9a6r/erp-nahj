@@ -45,7 +45,7 @@ code_only_modules = {
 	"Maintenance": ["Quality Management"],
 }
 
-develop_version = "17.x.x-develop"
+develop_version = "15.x.x-develop"
 
 app_include_js = "erpnext.bundle.js"
 app_include_css = "erpnext.bundle.css"
@@ -63,27 +63,10 @@ web_include_icons = [
 
 doctype_js = {
 	"Address": "public/js/address.js",
-	"Customer": [
-		"public/js/party_overview.js",
-		"public/js/customer_overview.js",
-		"public/js/party_items.js",
-	],
-	"Supplier": [
-		"public/js/party_overview.js",
-		"public/js/supplier_overview.js",
-		"public/js/party_items.js",
-	],
-	"Sales Order": "public/js/sales_order_proforma.js",
 	"Communication": "public/js/communication.js",
 	"Event": "public/js/event.js",
 	"Newsletter": "public/js/newsletter.js",
 	"Contact": "public/js/contact.js",
-	"Project": [
-		"public/js/project_overview.js",
-		"public/js/project_overview_progress.js",
-		"public/js/project_overview_attention.js",
-		"public/js/project_overview_breakdown.js",
-	],
 }
 doctype_list_js = {
 	"Code List": [
@@ -112,10 +95,7 @@ after_app_install = "erpnext.setup.install.after_app_install"
 after_app_uninstall = "erpnext.setup.install.after_app_uninstall"
 
 # patches that must stop the migration when they fail, even with `bench migrate --skip-failing`
-never_skip_patches = [
-	"erpnext.patches.v16_0.update_serial_batch_entries",
-	"erpnext.patches.v16_0.move_sub_assembly_rate_setting_to_bom_item",
-]
+never_skip_patches = ["erpnext.patches.v16_0.update_serial_batch_entries"]
 
 boot_session = "erpnext.startup.boot.boot_session"
 notification_config = "erpnext.startup.notifications.get_notification_config"
@@ -353,24 +333,13 @@ sounds = [
 has_upload_permission = {"Employee": "erpnext.setup.doctype.employee.employee.has_upload_permission"}
 
 permission_query_conditions = {
-	"Asset Activity": "erpnext.assets.doctype.asset_activity.asset_activity.get_permission_query_conditions",
-	"Contract": "erpnext.crm.doctype.contract.contract.get_permission_query_conditions",
-	"Item": "erpnext.stock.doctype.company_restriction.company_restriction.get_permission_query_conditions",
-	"Customer": "erpnext.stock.doctype.company_restriction.company_restriction.get_permission_query_conditions",
-	"Supplier": "erpnext.stock.doctype.company_restriction.company_restriction.get_permission_query_conditions",
-	"Voice Call Settings": "erpnext.telephony.doctype.voice_call_settings.voice_call_settings.get_permission_query_conditions",
 	"Call Log": "erpnext.telephony.doctype.call_log.call_log.get_permission_query_conditions",
-	"*": "erpnext.stock.doctype.company_restriction.company_restriction.get_inherited_permission_query_conditions",
+	"Voice Call Settings": "erpnext.telephony.doctype.voice_call_settings.voice_call_settings.get_permission_query_conditions",
 }
 
 has_permission = {
-	"Contract": "erpnext.crm.doctype.contract.contract.has_permission",
-	"Item": "erpnext.stock.doctype.company_restriction.company_restriction.has_permission",
-	"Customer": "erpnext.stock.doctype.company_restriction.company_restriction.has_permission",
-	"Supplier": "erpnext.stock.doctype.company_restriction.company_restriction.has_permission",
-	"Voice Call Settings": "erpnext.telephony.doctype.voice_call_settings.voice_call_settings.has_permission",
 	"Call Log": "erpnext.telephony.doctype.call_log.call_log.has_permission",
-	"*": "erpnext.stock.doctype.company_restriction.company_restriction.has_inherited_permission",
+	"Voice Call Settings": "erpnext.telephony.doctype.voice_call_settings.voice_call_settings.has_permission",
 }
 
 has_website_permission = {
@@ -416,14 +385,18 @@ doc_events = {
 		"validate": [
 			"erpnext.support.doctype.service_level_agreement.service_level_agreement.apply",
 			"erpnext.setup.doctype.transaction_deletion_record.transaction_deletion_record.check_for_running_deletion_job",
-			"erpnext.stock.doctype.company_restriction.company_restriction.validate_transaction_company",
 		],
 	},
 	tuple(period_closing_doctypes): {
 		"validate": "erpnext.accounts.doctype.accounting_period.accounting_period.validate_accounting_period_on_doc_save",
 	},
-	("Item", "Customer", "Supplier"): {
-		"validate": "erpnext.stock.doctype.company_restriction.company_restriction.validate_allowed_companies",
+	"Item": {
+		"on_update": "erpnext.stock.doctype.item.item_search.reindex_item",
+		"after_rename": "erpnext.stock.doctype.item.item_search.reindex_renamed_item",
+	},
+	"Stock Entry": {
+		"on_submit": "erpnext.stock.doctype.material_request.material_request.update_completed_and_requested_qty",
+		"on_cancel": "erpnext.stock.doctype.material_request.material_request.update_completed_and_requested_qty",
 	},
 	"User": {
 		"after_insert": "frappe.contacts.doctype.contact.contact.update_contact",
@@ -496,19 +469,11 @@ naming_series_variables = {
 	for variable in naming_series_variables_list
 }
 
+# On cancel event Payment Entry will be exempted and all linked submittable doctype will get cancelled.
+# to maintain data integrity we exempted payment entry. it will un-link when sales invoice get cancelled.
+# if payment entry not in auto cancel exempted doctypes it will cancel payment entry.
 auto_cancel_exempted_doctypes = [
-	# On cancel event Payment Entry will be exempted and all linked submittable doctype will get cancelled.
-	# to maintain data integrity we exempted payment entry. it will un-link when sales invoice get cancelled.
-	# if payment entry not in auto cancel exempted doctypes it will cancel payment entry.
 	"Payment Entry",
-	# Reverse ledger entries are created instead to ensure ledger immutability.
-	"GL Entry",
-	"Stock Ledger Entry",
-	"Payment Ledger Entry",
-	"Advance Payment Ledger Entry",
-	# May be linked to Period Closing Voucher, but cancelled with custom logic in PCV.
-	# This is better to avoid stale docs when cancelling PCV from backend.
-	"Account Closing Balance",
 ]
 
 scheduler_events = {
@@ -665,7 +630,6 @@ accounting_dimension_doctypes = [
 	"Account Closing Balance",
 	"Supplier Quotation",
 	"Supplier Quotation Item",
-	"Request for Quotation Item",
 	"Payment Reconciliation",
 	"Payment Reconciliation Allocation",
 	"Payment Request",
@@ -751,7 +715,6 @@ global_search_doctypes = {
 }
 
 ignore_links_on_delete = [
-	"Asset Activity",
 	"Tax Withholding Entry",
 ]
 
@@ -770,18 +733,12 @@ default_log_clearing_doctypes = {
 
 export_python_type_annotations = True
 
-# Send non-GET requests for ERPNext's endpoints as native `application/json`
-# bodies instead of form-encoded, per-key JSON-stringified values.
-use_json_request_body = True
-
 fields_for_group_similar_items = ["qty", "amount"]
 
 # Translation
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 ignore_translatable_strings_from = ["frappe"]
-require_type_annotated_api_methods = True
-
 repost_allowed_doctypes = [
 	"Sales Invoice",
 	"Purchase Invoice",

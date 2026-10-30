@@ -5,18 +5,20 @@ import frappe
 from frappe.model.mapper import map_docs
 from frappe.utils import add_days, nowdate
 
-from erpnext.buying.doctype.purchase_order.mapper import make_purchase_receipt
+from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
 from erpnext.buying.doctype.purchase_order.test_purchase_order import create_purchase_order
 from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.tests.utils import ERPNextTestSuite
 
-PURCHASE_RECEIPT_FROM_ORDER = "erpnext.buying.doctype.purchase_order.mapper.make_purchase_receipt"
-PURCHASE_INVOICE_FROM_ORDER = "erpnext.buying.doctype.purchase_order.mapper.make_purchase_invoice"
-PURCHASE_INVOICE_FROM_RECEIPT = "erpnext.stock.doctype.purchase_receipt.mapper.make_purchase_invoice"
-SALES_ORDER_FROM_QUOTATION = "erpnext.selling.doctype.quotation.mapper.make_sales_order"
-DELIVERY_NOTE_FROM_ORDER = "erpnext.selling.doctype.sales_order.mapper.make_delivery_note"
-SALES_INVOICE_FROM_ORDER = "erpnext.selling.doctype.sales_order.mapper.make_sales_invoice"
-SALES_INVOICE_FROM_DELIVERY_NOTE = "erpnext.stock.doctype.delivery_note.mapper.make_sales_invoice"
+PURCHASE_RECEIPT_FROM_ORDER = "erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_receipt"
+PURCHASE_INVOICE_FROM_ORDER = "erpnext.buying.doctype.purchase_order.purchase_order.make_purchase_invoice"
+PURCHASE_INVOICE_FROM_RECEIPT = (
+	"erpnext.stock.doctype.purchase_receipt.purchase_receipt.make_purchase_invoice"
+)
+SALES_ORDER_FROM_QUOTATION = "erpnext.selling.doctype.quotation.quotation.make_sales_order"
+DELIVERY_NOTE_FROM_ORDER = "erpnext.selling.doctype.sales_order.sales_order.make_delivery_note"
+SALES_INVOICE_FROM_ORDER = "erpnext.selling.doctype.sales_order.sales_order.make_sales_invoice"
+SALES_INVOICE_FROM_DELIVERY_NOTE = "erpnext.stock.doctype.delivery_note.delivery_note.make_sales_invoice"
 
 
 class TestMappedDiscounts(ERPNextTestSuite):
@@ -27,18 +29,18 @@ class TestMappedDiscounts(ERPNextTestSuite):
 		self.enterContext(self.change_settings("Stock Settings", auto_insert_price_list_rate_if_missing=0))
 
 	def test_inclusive_taxes_and_full_discounts(self):
-		for inclusive in (False, True):
-			rate = 110 if inclusive else 100
-			regular = self.make_order(item="_Test Item 2", rate=rate, inclusive=inclusive)
-			for apply_discount_on in ("Net Total", "Grand Total"):
-				for percentage in (10, 100):
+		for apply_discount_on in ("Net Total", "Grand Total"):
+			for percentage in (10, 100):
+				for inclusive in (False, True):
 					with self.subTest(basis=apply_discount_on, percentage=percentage, inclusive=inclusive):
+						rate = 110 if inclusive else 100
 						discounted = self.make_order(
 							rate=rate,
 							percentage=percentage,
 							inclusive=inclusive,
 							apply_discount_on=apply_discount_on,
 						)
+						regular = self.make_order(item="_Test Item 2", rate=rate, inclusive=inclusive)
 						for sources in ((discounted, regular), (regular, discounted)):
 							receipt = self.combine(*sources).save()
 							self.assertEqual(
@@ -117,8 +119,6 @@ class TestMappedDiscounts(ERPNextTestSuite):
 							first.grand_total + second.grand_total + third.grand_total,
 							discounted.grand_total + regular.grand_total,
 						)
-						third.cancel()
-						self.assertEqual(make_purchase_receipt(discounted.name).discount_amount, 50)
 
 	def test_three_fixed_sources_keep_their_own_discounts(self):
 		third_item = make_item("_Test Third Mapped Discount Item").name
@@ -169,12 +169,12 @@ class TestMappedDiscounts(ERPNextTestSuite):
 		regular = self.make_order(item="_Test Item 2", qty=5)
 		receipt = make_purchase_receipt(discounted.name)
 		receipt.items[0].qty = 5
-		receipt = make_purchase_receipt(regular.name, receipt.as_dict()).save()
+		receipt = make_purchase_receipt(regular.name, frappe.as_json(receipt)).save()
 		self.assertEqual(receipt.items[0].net_amount, 450)
 		self.assertEqual(receipt.grand_total, 950)
 
 	def test_combined_receipt_discount_is_preserved_on_invoice(self):
-		from erpnext.stock.doctype.purchase_receipt.mapper import make_purchase_invoice
+		from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_invoice
 
 		discounted = self.make_order(percentage=10, rate=110, inclusive=True)
 		regular = self.make_order(item="_Test Item 2", rate=110, inclusive=True)
@@ -185,8 +185,8 @@ class TestMappedDiscounts(ERPNextTestSuite):
 		self.assertEqual(invoice.items[0].net_amount, 90)
 
 	def test_fixed_sales_discount_is_consumed_once_and_returned(self):
-		from erpnext.accounts.doctype.sales_invoice.mapper import make_sales_return
-		from erpnext.selling.doctype.sales_order.mapper import make_sales_invoice
+		from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
+		from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 		from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 
 		with self.change_settings(
@@ -250,7 +250,7 @@ class TestMappedDiscounts(ERPNextTestSuite):
 						self.assert_percentage_discounts(invoice, "purchase_order", expected_net_amounts)
 
 	def test_percentage_discounts_of_sales_documents(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_delivery_note
+		from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note
 
 		self.enterContext(self.change_settings("Stock Settings", allow_negative_stock=1))
 		self.enterContext(
@@ -307,7 +307,7 @@ class TestMappedDiscounts(ERPNextTestSuite):
 				self.assertEqual(item.mapped_additional_discount_amount, 0)
 
 	def test_purchase_order_from_sales_order_skips_the_sales_discount(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_purchase_order
+		from erpnext.selling.doctype.sales_order.sales_order import make_purchase_order
 
 		sales_order = self.make_combined_sales_order()
 		self.assertEqual(sales_order.items[0].mapped_additional_discount_amount, 10)
@@ -354,26 +354,26 @@ class TestMappedDiscounts(ERPNextTestSuite):
 		self.assertEqual(ledger["Debtors - _TC"], (190, 0))
 
 	def test_cash_discount_is_kept_when_an_undiscounted_order_is_added(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_sales_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 
 		first = self.make_sales_order()
 		second = self.make_sales_order(item="_Test Item 2")
 		invoice = self.make_invoice_with_cash_discount(first)
 
-		invoice = make_sales_invoice(second.name, invoice.as_dict())
+		invoice = make_sales_invoice(second.name, frappe.as_json(invoice))
 		self.assertEqual(invoice.is_cash_or_non_trade_discount, 1)
 		self.assertEqual(invoice.apply_discount_on, "Grand Total")
 		self.assertEqual(invoice.discount_amount, 5)
 		self.assertEqual(invoice.grand_total, 195)
 
 	def test_cash_discount_cannot_be_combined_with_carried_discounts(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_sales_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 
 		regular = self.make_sales_order()
 		discounted = self.make_sales_order(item="_Test Item 2", percentage=10)
 		invoice = self.make_invoice_with_cash_discount(regular)
 		with self.assertRaisesRegex(frappe.ValidationError, "cannot be combined"):
-			make_sales_invoice(discounted.name, invoice.as_dict())
+			make_sales_invoice(discounted.name, frappe.as_json(invoice))
 
 		combined = self.combine(regular, discounted, mapper=SALES_INVOICE_FROM_ORDER, doctype="Sales Invoice")
 		combined.is_cash_or_non_trade_discount = 1
@@ -394,35 +394,6 @@ class TestMappedDiscounts(ERPNextTestSuite):
 		self.assertFalse(row.mapped_additional_discount_amount)
 		self.assertEqual(invoice.discount_amount, 0)
 
-	def test_billed_rejected_quantity_uses_its_carried_discount(self):
-		from erpnext.buying.doctype.purchase_order.mapper import make_purchase_invoice
-
-		self.enterContext(
-			self.change_settings(
-				"Buying Settings",
-				bill_for_rejected_quantity_in_purchase_invoice=1,
-				set_valuation_rate_for_rejected_materials=1,
-			)
-		)
-		fixed = self.make_order(qty=10, fixed=100)
-		regular = self.make_order(item="_Test Item 2")
-		invoice = self.combine(fixed, regular, mapper=PURCHASE_INVOICE_FROM_ORDER, doctype="Purchase Invoice")
-		invoice.update_stock = 1
-		row = invoice.getone("items", {"purchase_order": fixed.name})
-		row.update(
-			{
-				"received_qty": 5,
-				"qty": 3,
-				"rejected_qty": 2,
-				"rejected_warehouse": "_Test Rejected Warehouse - _TC",
-			}
-		)
-		invoice.save().submit()
-		self.assertEqual(row.distributed_discount_amount, 50)
-
-		remaining = make_purchase_invoice(fixed.name).save()
-		self.assertEqual(remaining.discount_amount, 50)
-
 	def test_removing_the_last_discounted_row_clears_the_header(self):
 		discounted = self.make_sales_order(percentage=10)
 		regular = self.make_sales_order(item="_Test Item 2")
@@ -435,13 +406,14 @@ class TestMappedDiscounts(ERPNextTestSuite):
 		self.assertEqual(invoice.grand_total, 100)
 
 	def test_update_items_removing_the_last_discounted_row_clears_the_header(self):
-		from erpnext.accounts.services.child_item_update import update_child_qty_rate
+		from erpnext.controllers.accounts_controller import update_child_qty_rate
 
-		for replace in (False, True):
-			with self.subTest(replace=replace):
-				sales_order = self.make_combined_sales_order()
-				regular = sales_order.items[1]
-				rows = [
+		sales_order = self.make_combined_sales_order()
+		regular = sales_order.items[1]
+		update_child_qty_rate(
+			"Sales Order",
+			frappe.as_json(
+				[
 					{
 						"docname": regular.name,
 						"item_code": regular.item_code,
@@ -449,23 +421,46 @@ class TestMappedDiscounts(ERPNextTestSuite):
 						"rate": regular.rate,
 					}
 				]
-				if replace:
-					rows.append(
-						{
-							"item_code": "_Test Item",
-							"qty": 1,
-							"rate": 100,
-							"delivery_date": sales_order.delivery_date,
-						}
-					)
-				update_child_qty_rate("Sales Order", frappe.as_json(rows), sales_order.name)
+			),
+			sales_order.name,
+		)
 
-				sales_order.reload()
-				self.assertEqual(sales_order.discount_amount, 0)
-				self.assertEqual(sales_order.grand_total, 200 if replace else 100)
+		sales_order.reload()
+		self.assertEqual(sales_order.discount_amount, 0)
+		self.assertEqual(sales_order.grand_total, 100)
+
+	def test_update_items_replacing_the_last_discounted_row_clears_the_header(self):
+		from erpnext.controllers.accounts_controller import update_child_qty_rate
+
+		sales_order = self.make_combined_sales_order()
+		regular = sales_order.items[1]
+		update_child_qty_rate(
+			"Sales Order",
+			frappe.as_json(
+				[
+					{
+						"docname": regular.name,
+						"item_code": regular.item_code,
+						"qty": regular.qty,
+						"rate": 100,
+					},
+					{
+						"item_code": "_Test Item",
+						"qty": 1,
+						"rate": 100,
+						"delivery_date": sales_order.delivery_date,
+					},
+				]
+			),
+			sales_order.name,
+		)
+
+		sales_order.reload()
+		self.assertEqual(sales_order.discount_amount, 0)
+		self.assertEqual(sales_order.grand_total, 200)
 
 	def test_invoice_of_the_undiscounted_row_takes_no_discount(self):
-		from erpnext.selling.doctype.sales_order.mapper import make_sales_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 
 		sales_order = self.make_combined_sales_order()
 		discounted = make_sales_invoice(sales_order.name)
@@ -487,7 +482,7 @@ class TestMappedDiscounts(ERPNextTestSuite):
 		self.assertEqual(receipt.grand_total, regular.grand_total)
 
 	def test_update_items_uom_change_keeps_the_carried_discount(self):
-		from erpnext.accounts.services.child_item_update import update_child_qty_rate
+		from erpnext.controllers.accounts_controller import update_child_qty_rate
 
 		item = make_item(
 			"_Test Mapped Discount Box Item", {"uoms": [{"uom": "Box", "conversion_factor": 10}]}
@@ -613,7 +608,7 @@ class TestMappedDiscounts(ERPNextTestSuite):
 		return sales_order.insert().submit()
 
 	def make_invoice_with_cash_discount(self, order):
-		from erpnext.selling.doctype.sales_order.mapper import make_sales_invoice
+		from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 
 		invoice = make_sales_invoice(order.name)
 		invoice.apply_discount_on = "Grand Total"
@@ -630,4 +625,8 @@ class TestMappedDiscounts(ERPNextTestSuite):
 		return order.save().submit()
 
 	def combine(self, *sources, mapper=PURCHASE_RECEIPT_FROM_ORDER, doctype="Purchase Receipt"):
-		return map_docs(mapper, [source.name for source in sources], frappe.new_doc(doctype).as_dict())
+		return map_docs(
+			mapper,
+			frappe.as_json([source.name for source in sources]),
+			frappe.as_json(frappe.new_doc(doctype)),
+		)

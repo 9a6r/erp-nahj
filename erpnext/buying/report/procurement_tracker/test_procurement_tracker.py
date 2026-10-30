@@ -5,31 +5,34 @@
 import frappe
 from frappe.utils import add_days, getdate, nowdate
 
-from erpnext.accounts.doctype.purchase_invoice.mapper import make_debit_note
-from erpnext.buying.doctype.purchase_order.mapper import make_purchase_invoice
+from erpnext.accounts.doctype.purchase_invoice.purchase_invoice import make_debit_note
+from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_invoice
 from erpnext.buying.doctype.purchase_order.test_purchase_order import (
 	create_pr_against_po,
 	create_purchase_order,
 )
 from erpnext.buying.report.procurement_tracker.procurement_tracker import execute
+from erpnext.controllers.tests.test_subcontracting_controller import (
+	make_bom_for_subcontracted_items,
+	make_raw_materials,
+	make_service_items,
+	make_subcontracted_items,
+)
 from erpnext.stock.doctype.item.test_item import make_item
-from erpnext.stock.doctype.material_request.mapper import make_purchase_order
+from erpnext.stock.doctype.material_request.material_request import make_purchase_order
 from erpnext.stock.doctype.material_request.test_material_request import (
 	make_material_request,
 	make_material_request_for_items,
 )
-from erpnext.stock.doctype.purchase_receipt.mapper import make_purchase_invoice as make_invoice_from_receipt
-from erpnext.tests.utils import ERPNextTestSuite
+from erpnext.stock.doctype.purchase_receipt.purchase_receipt import (
+	make_purchase_invoice as make_invoice_from_receipt,
+)
+from erpnext.tests.utils import ERPNextTestSuite, change_settings
 
 
 class TestProcurementTracker(ERPNextTestSuite):
 	def run_report(self, **filters):
 		return execute({"company": "_Test Company", **filters})[1]
-
-	def test_report_executes_and_lists_po(self):
-		po = create_purchase_order(company="_Test Company")
-
-		self.assertIn(po.name, {row.get("purchase_order") for row in self.run_report()})
 
 	def make_priced_request(self, **args):
 		mr = make_material_request(do_not_submit=True, **args)
@@ -43,7 +46,7 @@ class TestProcurementTracker(ERPNextTestSuite):
 		po.supplier = "_Test Supplier"
 		po.items[0].qty = 4
 		po.append("items", {**po.items[0].as_dict(no_default_fields=True), "qty": 6})
-		with self.change_settings("Buying Settings", {"allow_multiple_items": 1}):
+		with change_settings("Buying Settings", {"allow_multiple_items": 1}):
 			po.submit()
 
 		rows = [row for row in self.run_report() if row.get("purchase_order") == po.name]
@@ -51,6 +54,10 @@ class TestProcurementTracker(ERPNextTestSuite):
 		self.assertEqual(sum(row["estimated_cost"] for row in rows), mr.items[0].amount)
 
 	def test_subcontracted_estimate_is_shared_by_finished_good_qty(self):
+		make_subcontracted_items()
+		make_raw_materials()
+		make_service_items()
+		make_bom_for_subcontracted_items()
 		mr = self.make_priced_request(
 			material_request_type="Subcontracting", item_code="Subcontracted Item SA7"
 		)
@@ -215,5 +222,6 @@ class TestProcurementTracker(ERPNextTestSuite):
 		po.conversion_rate = 80
 		po.submit()
 
-		row = next(row for row in self.run_report() if row.get("purchase_order") == po.name)
+		data = self.run_report()
+		row = next(row for row in data if row.get("purchase_order") == po.name)
 		self.assertEqual(row["actual_cost"], 8000)

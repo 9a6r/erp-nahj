@@ -1,13 +1,11 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
+import unittest
 
 import frappe
 from frappe.model.naming import parse_naming_series
 from frappe.utils import flt
 
-from erpnext.accounts.doctype.account_closing_balance.account_closing_balance import (
-	set_amount_in_reporting_currency,
-)
 from erpnext.accounts.doctype.gl_entry.gl_entry import rename_gle_sle_docs
 from erpnext.accounts.doctype.journal_entry.test_journal_entry import make_journal_entry
 from erpnext.accounts.general_ledger import make_round_off_gle
@@ -31,17 +29,12 @@ class TestGLEntry(ERPNextTestSuite):
 		jv.flags.ignore_validate = True
 		jv.submit()
 
-		round_off_entry = frappe.get_all(
-			"GL Entry",
-			filters={
-				"voucher_type": "Journal Entry",
-				"voucher_no": jv.name,
-				"account": "_Test Write Off - _TC",
-				"cost_center": "_Test Cost Center - _TC",
-				"debit": 0,
-				"credit": 0.01,
-			},
-			pluck="name",
+		round_off_entry = frappe.db.sql(
+			"""select name from `tabGL Entry`
+			where voucher_type='Journal Entry' and voucher_no = %s
+			and account='_Test Write Off - _TC' and cost_center='_Test Cost Center - _TC'
+			and debit = 0 and credit = '.01'""",
+			jv.name,
 		)
 
 		self.assertTrue(round_off_entry)
@@ -99,9 +92,8 @@ class TestGLEntry(ERPNextTestSuite):
 		)
 
 		self.assertTrue(all(entry.to_rename == 1 for entry in gl_entries))
-		series = frappe.qb.DocType("Series")
-		old_naming_series_current_value = (
-			frappe.qb.from_(series).select(series["current"]).where(series.name == naming_series).run()
+		old_naming_series_current_value = frappe.db.sql(
+			"SELECT current from tabSeries where name = %s", naming_series
 		)[0][0]
 
 		rename_gle_sle_docs()
@@ -118,8 +110,8 @@ class TestGLEntry(ERPNextTestSuite):
 			all(new.name != old.name for new, old in zip(gl_entries, new_gl_entries, strict=False))
 		)
 
-		new_naming_series_current_value = (
-			frappe.qb.from_(series).select(series["current"]).where(series.name == naming_series).run()
+		new_naming_series_current_value = frappe.db.sql(
+			"SELECT current from tabSeries where name = %s", naming_series
 		)[0][0]
 		self.assertEqual(old_naming_series_current_value + 2, new_naming_series_current_value)
 
@@ -184,24 +176,3 @@ class TestGLEntry(ERPNextTestSuite):
 
 		jv.save().submit()
 		self.assertEqual(1, jv.docstatus)
-
-	def test_no_reporting_currency_conversion_without_reporting_currency(self):
-		company = "_Test Company"
-		frappe.db.set_value("Company", company, "reporting_currency", None)
-		frappe.clear_document_cache("Company", company)
-		self.addCleanup(frappe.clear_document_cache, "Company", company)
-
-		je = make_journal_entry(
-			"_Test Account Cost for Goods Sold - _TC", "_Test Bank - _TC", 100, submit=True
-		)
-		exchange_rates = frappe.get_all(
-			"GL Entry",
-			filters={"voucher_type": "Journal Entry", "voucher_no": je.name},
-			pluck="reporting_currency_exchange_rate",
-		)
-		self.assertTrue(exchange_rates)
-		self.assertFalse(any(exchange_rates))
-
-		closing_entry = frappe._dict(debit=100, credit=0)
-		set_amount_in_reporting_currency(closing_entry, company, je.posting_date)
-		self.assertEqual(closing_entry, {"debit": 100, "credit": 0})

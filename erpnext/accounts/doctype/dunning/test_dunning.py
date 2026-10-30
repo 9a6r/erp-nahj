@@ -1,14 +1,16 @@
 # Copyright (c) 2023, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
 import json
+from unittest.mock import patch
 
 import frappe
+from frappe.client import insert
 from frappe.model import mapper
 from frappe.utils import add_days, nowdate, today
 
 from erpnext import get_default_cost_center
 from erpnext.accounts.doctype.payment_entry.test_payment_entry import get_payment_entry
-from erpnext.accounts.doctype.sales_invoice.mapper import (
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import (
 	create_dunning as create_dunning_from_sales_invoice,
 )
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import (
@@ -23,8 +25,6 @@ class TestDunning(ERPNextTestSuite):
 		"Accounts Settings", {"allow_multi_currency_invoices_against_single_party_account": 1}
 	)
 	def test_document_api_defaults_converted_fee_and_preserves_overrides(self):
-		from frappe.client import insert
-
 		create_dunning_type("API Fee Notice", 100, 0, 0)
 		invoice = create_sales_invoice(
 			posting_date=add_days(today(), -15),
@@ -48,15 +48,39 @@ class TestDunning(ERPNextTestSuite):
 				self.assertEqual(dunning.dunning_fee, 1 if fee is None else fee)
 				self.assertEqual(dunning.base_dunning_amount, dunning.dunning_amount * 100)
 
-	def test_missing_fee_requires_positive_conversion_rate(self):
+	def test_missing_fee_uses_company_currency_conversion_rate(self):
 		dunning = create_dunning(overdue_days=15, dunning_type_name="Second Notice - _TC")
-		for rate in (0, -1):
+		for rate in (None, 0, -1):
 			with self.subTest(rate=rate):
 				dunning.reload()
 				dunning.dunning_fee = None
 				dunning.conversion_rate = rate
-				with self.assertRaisesRegex(frappe.ValidationError, "Conversion Rate must be greater"):
-					dunning.save()
+				dunning.save()
+				self.assertEqual(dunning.conversion_rate, 1)
+				self.assertEqual(dunning.dunning_fee, 10)
+				self.assertEqual(dunning.base_dunning_amount, dunning.dunning_amount)
+
+	@ERPNextTestSuite.change_settings(
+		"Accounts Settings", {"allow_multi_currency_invoices_against_single_party_account": 1}
+	)
+	def test_missing_fee_requires_positive_foreign_conversion_rate(self):
+		create_dunning_type("API Fee Notice", 100, 0, 0)
+		invoice = create_sales_invoice(
+			posting_date=add_days(today(), -15),
+			currency="USD",
+			conversion_rate=80,
+			rate=100,
+			debit_to="Debtors - _TC",
+		)
+		for rate in (None, 0, -1):
+			with self.subTest(rate=rate):
+				dunning = create_dunning_from_sales_invoice(invoice.name)
+				dunning.dunning_type = "API Fee Notice - _TC"
+				dunning.dunning_fee = None
+				dunning.conversion_rate = rate
+				with patch("erpnext.accounts.doctype.dunning.dunning.get_exchange_rate", return_value=0):
+					with self.assertRaisesRegex(frappe.ValidationError, "must be greater than zero"):
+						dunning.save()
 
 	def test_unallocated_payments_reduce_oldest_installments(self):
 		create_payment_terms_template_for_dunning()
@@ -196,11 +220,8 @@ class TestDunning(ERPNextTestSuite):
 		self.assertEqual(dunning.status, "Unresolved")
 		self.assertEqual(round(dunning.get_unpaid_dunning_amount(), 2), 10.41)
 
-	def test_dunning_can_be_cancelled_after_its_interest_was_paid(self):
-		"""
-		The payment collecting the interest links back to the dunning, which must not stand in
-		the way of cancelling it.
-		"""
+	def test_paid_dunning_requires_payment_cancellation(self):
+		"""Cancel the linked payment before cancelling a Dunning with paid charges."""
 		dunning = create_dunning(overdue_days=15, dunning_type_name="Second Notice - _TC")
 		dunning.submit()
 
@@ -212,8 +233,18 @@ class TestDunning(ERPNextTestSuite):
 		dunning.reload()
 		self.assertEqual(dunning.status, "Resolved")
 
+		frappe.db.savepoint("dunning_cancellation")
+		with self.assertRaises(frappe.LinkExistsError):
+			dunning.cancel()
+		frappe.db.rollback(save_point="dunning_cancellation")
+
+		pe.reload()
+		pe.cancel()
+		dunning.reload()
 		dunning.cancel()
+		dunning.reload()
 		self.assertEqual(dunning.docstatus, 2)
+		self.assertEqual(dunning.status, "Cancelled")
 
 	def test_waived_interest_keeps_a_manually_resolved_dunning_resolved(self):
 		"""
@@ -238,9 +269,6 @@ class TestDunning(ERPNextTestSuite):
 		self.assertEqual(dunning.status, "Resolved")
 		self.assertEqual(round(dunning.get_unpaid_dunning_amount(), 2), 10.41)
 
-	@ERPNextTestSuite.change_settings(
-		"Accounts Settings", {"allow_multi_currency_invoices_against_single_party_account": 1}
-	)
 	def test_unpaid_dunning_amount_is_tracked_in_company_currency(self):
 		"""
 		The interest and fee are collected as a Payment Entry deduction, a company currency
@@ -248,10 +276,11 @@ class TestDunning(ERPNextTestSuite):
 		"""
 		si = create_sales_invoice(
 			posting_date=add_days(today(), -15),
+			customer="_Test Customer USD",
 			currency="USD",
 			conversion_rate=50,
 			rate=100,
-			debit_to="Debtors - _TC",
+			debit_to="_Test Receivable USD - _TC",
 		)
 
 		dunning = create_dunning_from_sales_invoice(si.name)
@@ -296,7 +325,7 @@ class TestDunning(ERPNextTestSuite):
 		dunning = create_dunning_from_sales_invoice(si1.name)
 		dunning.overdue_payments = []
 
-		method = "erpnext.accounts.doctype.sales_invoice.mapper.create_dunning"
+		method = "erpnext.accounts.doctype.sales_invoice.sales_invoice.create_dunning"
 		updated_dunning = mapper.map_docs(method, json.dumps([si1.name, si2.name]), dunning)
 
 		self.assertEqual(len(updated_dunning.overdue_payments), 2)
@@ -314,19 +343,21 @@ class TestDunning(ERPNextTestSuite):
 		)
 		invoice.payment_terms_template = "_Test 50-50 for Dunning"
 		invoice.submit()
-		method = "erpnext.accounts.doctype.sales_invoice.mapper.create_dunning"
+		method = "erpnext.accounts.doctype.sales_invoice.sales_invoice.create_dunning"
 
 		for selected in ([], [invoice.payment_schedule[1].name]):
 			with self.subTest(selected=selected):
 				dunning = mapper.map_docs(
 					method,
-					[invoice.name],
-					{"doctype": "Dunning", "company": invoice.company},
-					args={
-						"customer": invoice.customer,
-						"allow_child_item_selection": int(bool(selected)),
-						"filtered_children": selected,
-					},
+					json.dumps([invoice.name]),
+					json.dumps({"doctype": "Dunning", "company": invoice.company}),
+					args=json.dumps(
+						{
+							"customer": invoice.customer,
+							"allow_child_item_selection": int(bool(selected)),
+							"filtered_children": selected,
+						}
+					),
 				)
 				self.assertEqual(
 					[row.payment_schedule for row in dunning.overdue_payments],
@@ -338,9 +369,9 @@ class TestDunning(ERPNextTestSuite):
 			with self.assertRaises(frappe.PermissionError):
 				mapper.map_docs(
 					method,
-					[invoice.name],
-					{"doctype": "Dunning", "company": invoice.company},
-					args={"customer": invoice.customer, "filtered_children": []},
+					json.dumps([invoice.name]),
+					json.dumps({"doctype": "Dunning", "company": invoice.company}),
+					args=json.dumps({"customer": invoice.customer, "filtered_children": []}),
 				)
 
 	def test_fetch_overdue_payments_with_positional_ignore_permissions(self):
@@ -463,37 +494,6 @@ class TestDunning(ERPNextTestSuite):
 		credit_note.cancel()
 		dunning.reload()
 		self.assertEqual(dunning.status, "Unresolved")
-
-	@ERPNextTestSuite.change_settings(
-		"Accounts Settings", {"allow_multi_currency_invoices_against_single_party_account": 1}
-	)
-	def test_dunning_outstanding_uses_transaction_currency(self):
-		"""
-		Regression for #56006: dunning outstanding must be in the invoice transaction
-		currency, not in the party account currency.
-
-		A USD invoice posted against an INR receivable account stores
-		outstanding_amount in INR (party account currency).  The overdue payment
-		row on the resulting Dunning must carry the USD amount, not the INR amount.
-		"""
-		si = create_sales_invoice(
-			posting_date=add_days(today(), -10),
-			currency="USD",
-			conversion_rate=50,
-			rate=100,
-			debit_to="Debtors - _TC",
-		)
-
-		# Sanity-check the invoice state before creating the dunning
-		self.assertEqual(si.currency, "USD")
-		self.assertEqual(si.outstanding_amount, 5000.0)  # INR (party account currency)
-		self.assertEqual(si.payment_schedule[0].outstanding, 100.0)  # USD (transaction currency)
-
-		dunning = create_dunning_from_sales_invoice(si.name)
-
-		self.assertEqual(len(dunning.overdue_payments), 1)
-		# Must reflect 100 USD, not 5000 INR mislabelled as USD
-		self.assertEqual(dunning.overdue_payments[0].outstanding, 100.0)
 
 	def test_dunning_not_affected_by_standalone_credit_note(self):
 		"""

@@ -3,12 +3,12 @@
 
 import frappe
 
-from erpnext.accounts.doctype.sales_invoice.mapper import make_sales_return
+from erpnext.accounts.doctype.sales_invoice.sales_invoice import make_sales_return
 from erpnext.accounts.report.delivered_items_to_be_billed.delivered_items_to_be_billed import execute
-from erpnext.selling.doctype.sales_order.mapper import make_delivery_note
-from erpnext.selling.doctype.sales_order.mapper import make_sales_invoice as make_si_from_so
+from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note
+from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice as make_si_from_so
 from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
-from erpnext.stock.doctype.delivery_note.mapper import make_sales_invoice
+from erpnext.stock.doctype.delivery_note.delivery_note import make_sales_invoice
 from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
 from erpnext.tests.utils import ERPNextTestSuite

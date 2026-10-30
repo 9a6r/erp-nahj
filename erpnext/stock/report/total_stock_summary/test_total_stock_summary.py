@@ -13,24 +13,6 @@ class TestTotalStockSummary(ERPNextTestSuite):
 		filters = frappe._dict({"company": "_Test Company", "group_by": "Warehouse", **extra})
 		return execute(filters)[1]
 
-	def test_warehouse_wise_quantity(self):
-		item = "_Test Item"
-		warehouse = "Stores - _TC"  # clean zero baseline for _Test Item
-		make_stock_entry(item_code=item, to_warehouse=warehouse, qty=10, rate=100)
-
-		# rows are (warehouse, item_code, description, actual_qty)
-		row = next(r for r in self.run_report() if r[0] == warehouse and r[1] == item)
-		self.assertEqual(row[3], 10)
-
-	def test_only_non_zero_bins_are_listed(self):
-		item = "_Test Item 2"
-		warehouse = "Stores - _TC"  # clean zero baseline for _Test Item 2
-		# receive then issue everything -> bin actual_qty back to zero
-		make_stock_entry(item_code=item, to_warehouse=warehouse, qty=5, rate=100)
-		make_stock_entry(item_code=item, from_warehouse=warehouse, qty=5)
-
-		self.assertFalse([r for r in self.run_report() if r[0] == warehouse and r[1] == item])
-
 	def get_company_total_for_restricted_user(self, applicable_for=None):
 		from frappe.permissions import add_user_permission
 

@@ -7,18 +7,19 @@ import frappe
 from frappe import _, qb
 from frappe.model.document import Document
 from frappe.query_builder import Criterion
-from frappe.query_builder.functions import Abs, Max, Sum
-from frappe.utils import cstr
+from frappe.query_builder.functions import Abs, Sum
+from frappe.utils import cstr, flt
 from frappe.utils.data import comma_and
 
 from erpnext import _refuse
 from erpnext.accounts.utils import (
 	cancel_exchange_gain_loss_journal,
+	get_linked_exchange_gain_loss_journal,
 	unlink_ref_doc_from_payment_entries,
 	update_voucher_outstanding,
 )
 
-UNRECONCILABLE_DOCTYPES = ("Payment Entry", "Journal Entry")
+SUPPORTED_VOUCHER_TYPES = ["Payment Entry", "Journal Entry"]
 
 
 class UnreconcilePayment(Document):
@@ -42,7 +43,7 @@ class UnreconcilePayment(Document):
 	# end: auto-generated types
 
 	def validate(self):
-		self.supported_types = list(UNRECONCILABLE_DOCTYPES)
+		self.supported_types = SUPPORTED_VOUCHER_TYPES
 		if self.voucher_type not in self.supported_types:
 			frappe.throw(_("Only {0} are supported").format(comma_and(self.supported_types)))
 
@@ -61,6 +62,7 @@ class UnreconcilePayment(Document):
 			self.append("allocations", alloc)
 
 	def on_submit(self):
+		self.cancel_legacy_return_exchange_journal()
 		# todo: more granular unreconciliation
 		for alloc in self.allocations:
 			doc = frappe.get_doc(alloc.reference_doctype, alloc.reference_name)
@@ -76,7 +78,146 @@ class UnreconcilePayment(Document):
 				alloc.party,
 			)
 
-			frappe.db.set_value("Unreconcile Payment Entries", alloc.name, "unlinked", 1)
+			frappe.db.set_value("Unreconcile Payment Entries", alloc.name, "unlinked", True)
+
+	def cancel_legacy_return_exchange_journal(self):
+		if self.voucher_type != "Journal Entry":
+			return
+
+		journal = frappe.get_doc("Journal Entry", self.voucher_no)
+		if not (
+			journal.docstatus == 1
+			and journal.is_system_generated
+			and journal.voucher_type in ("Credit Note", "Debit Note")
+			and len(journal.accounts) == 2
+		):
+			return
+
+		journal.check_permission("write")
+		return_rows = [
+			row
+			for row in journal.accounts
+			if row.reference_type in ("Sales Invoice", "Purchase Invoice")
+			and row.reference_name
+			and frappe.get_cached_value(row.reference_type, row.reference_name, "is_return")
+		]
+		if len(return_rows) != 1:
+			return
+
+		return_row = return_rows[0]
+		invoice_row = next(row for row in journal.accounts if row.name != return_row.name)
+		if not any(
+			row.reference_doctype == return_row.reference_type
+			and row.reference_name == return_row.reference_name
+			for row in self.allocations
+		):
+			return
+
+		legacy_journals = self.get_legacy_return_exchange_journals(journal, invoice_row, return_row)
+		if not legacy_journals:
+			return
+
+		self.validate_legacy_return_exchange_journal(journal, invoice_row, return_row, legacy_journals)
+		gain_loss = legacy_journals[0]
+		precision = gain_loss.precision("total_debit")
+		amount = return_row.debit_in_account_currency - return_row.credit_in_account_currency
+		return_rate = frappe.get_cached_value(
+			return_row.reference_type, return_row.reference_name, "conversion_rate"
+		)
+		difference = flt(amount * return_rate, precision) - flt(amount * return_row.exchange_rate, precision)
+		if gain_loss.creation < journal.creation or flt(
+			sum(row.debit - row.credit for row in gain_loss.accounts if row.account == return_row.account)
+			- difference,
+			precision,
+		):
+			frappe.throw(
+				_("Exchange journal {0} could not be matched to reconciliation journal {1}.").format(
+					frappe.bold(gain_loss.name), frappe.bold(journal.name)
+				),
+				title=_("Exchange Journal Mismatch"),
+			)
+
+		gain_loss.cancel()
+
+	def get_legacy_return_exchange_journals(self, journal, invoice_row, return_row):
+		legacy_journals = []
+		for name in get_linked_exchange_gain_loss_journal(
+			return_row.reference_type, return_row.reference_name, 1
+		):
+			gain_loss = frappe.get_doc("Journal Entry", name)
+			if any(
+				row.reference_type == "Journal Entry" and row.reference_name == journal.name
+				for row in gain_loss.accounts
+			):
+				return []
+
+			if len(gain_loss.accounts) != 2 or gain_loss.company != journal.company:
+				continue
+
+			party_rows = gain_loss.get("accounts", {"account": return_row.account})
+			if len(party_rows) != 1:
+				continue
+
+			party_row = party_rows[0]
+			reference_row = next(row for row in gain_loss.accounts if row.name != party_row.name)
+			if (
+				party_row.reference_type == return_row.reference_type
+				and party_row.reference_name == return_row.reference_name
+				and party_row.party_type == return_row.party_type
+				and party_row.party == return_row.party
+				and reference_row.reference_type == return_row.reference_type
+				and (
+					not invoice_row.reference_name
+					or reference_row.reference_name == invoice_row.reference_name
+				)
+			):
+				legacy_journals.append(gain_loss)
+
+		return legacy_journals
+
+	def validate_legacy_return_exchange_journal(self, journal, invoice_row, return_row, legacy_journals):
+		# Old exchange journals identify the invoice pair, not the individual reconciliation.
+		linked_journals = frappe.get_all(
+			"Journal Entry Account",
+			filters={
+				"reference_type": return_row.reference_type,
+				"reference_name": return_row.reference_name,
+				"docstatus": 1,
+			},
+			pluck="parent",
+		)
+		if invoice_row.reference_name:
+			linked_journals = frappe.get_all(
+				"Journal Entry Account",
+				filters={
+					"parent": ("in", linked_journals),
+					"reference_type": invoice_row.reference_type,
+					"reference_name": invoice_row.reference_name,
+					"docstatus": 1,
+				},
+				pluck="parent",
+			)
+
+		linked_journals = frappe.get_all(
+			"Journal Entry",
+			filters={
+				"name": ("in", linked_journals),
+				"company": journal.company,
+				"voucher_type": journal.voucher_type,
+				"is_system_generated": 1,
+				"docstatus": 1,
+			},
+			pluck="name",
+		)
+		if len(legacy_journals) != 1 or linked_journals != [journal.name]:
+			frappe.throw(
+				_(
+					"Cannot uniquely match exchange journals {0} to {1}. Review and cancel the matching exchange journal and reconciliation journal instead."
+				).format(
+					comma_and([frappe.bold(row.name) for row in legacy_journals]), frappe.bold(journal.name)
+				),
+				title=_("Ambiguous Exchange Journal"),
+			)
 
 
 @frappe.whitelist()
@@ -130,20 +271,18 @@ def get_linked_payments_for_doc(
 			res = (
 				qb.from_(ple)
 				.select(
-					Max(ple.account).as_("account"),
-					Max(ple.party_type).as_("party_type"),
-					Max(ple.party).as_("party"),
-					Max(ple.company).as_("company"),
-					Max(ple.voucher_type).as_("reference_doctype"),
+					ple.account,
+					ple.party_type,
+					ple.party,
+					ple.company,
+					ple.voucher_type.as_("reference_doctype"),
 					ple.voucher_no.as_("reference_name"),
 					Abs(Sum(ple.amount_in_account_currency)).as_("allocated_amount"),
-					Max(ple.account_currency).as_("account_currency"),
+					ple.account_currency,
 				)
 				.where(Criterion.all(criteria))
 				.groupby(ple.voucher_no, ple.against_voucher_no)
-				.having(Abs(Sum(ple.amount_in_account_currency)) > 0)
-				# deterministic order across backends (postgres GROUP BY does not imply ordering)
-				.orderby(ple.voucher_no)
+				.having(qb.Field("allocated_amount") > 0)
 				.run(as_dict=True)
 			)
 			return res
@@ -158,19 +297,17 @@ def get_linked_payments_for_doc(
 			query = (
 				qb.from_(ple)
 				.select(
-					Max(ple.company).as_("company"),
-					Max(ple.account).as_("account"),
-					Max(ple.party_type).as_("party_type"),
-					Max(ple.party).as_("party"),
-					Max(ple.against_voucher_type).as_("reference_doctype"),
+					ple.company,
+					ple.account,
+					ple.party_type,
+					ple.party,
+					ple.against_voucher_type.as_("reference_doctype"),
 					ple.against_voucher_no.as_("reference_name"),
 					Abs(Sum(ple.amount_in_account_currency)).as_("allocated_amount"),
-					Max(ple.account_currency).as_("account_currency"),
+					ple.account_currency,
 				)
 				.where(Criterion.all(criteria))
 				.groupby(ple.against_voucher_no)
-				# deterministic order across backends (postgres GROUP BY does not imply ordering)
-				.orderby(ple.against_voucher_no)
 			)
 
 			res = query.run(as_dict=True)
@@ -194,18 +331,15 @@ def get_linked_advances(company, docname):
 	return (
 		qb.from_(adv)
 		.select(
-			# non-grouped columns are constant per against_voucher_no -> Max() is unchanged and postgres-valid
-			Max(adv.company).as_("company"),
-			Max(adv.against_voucher_type).as_("reference_doctype"),
+			adv.company,
+			adv.against_voucher_type.as_("reference_doctype"),
 			adv.against_voucher_no.as_("reference_name"),
 			Abs(Sum(adv.amount)).as_("allocated_amount"),
-			Max(adv.currency).as_("currency"),
+			adv.currency,
 		)
 		.where(Criterion.all(criteria))
-		.having(Abs(Sum(adv.amount)) > 0)
+		.having(qb.Field("allocated_amount") > 0)
 		.groupby(adv.against_voucher_no)
-		# deterministic order across backends (postgres GROUP BY does not imply ordering)
-		.orderby(adv.against_voucher_no)
 		.run(as_dict=True)
 	)
 
@@ -213,14 +347,14 @@ def get_linked_advances(company, docname):
 @frappe.whitelist()
 def create_unreconcile_doc_for_selection(selections: str | list | None = None):
 	if selections:
-		selections = frappe.parse_json(selections)
+		if isinstance(selections, str):
+			selections = json.loads(selections)
 		for row in selections:
-			voucher_type = row.get("voucher_type")
-			if voucher_type not in UNRECONCILABLE_DOCTYPES:
-				frappe.throw(_("Only {0} are supported").format(comma_and(list(UNRECONCILABLE_DOCTYPES))))
+			if row.get("voucher_type") not in SUPPORTED_VOUCHER_TYPES:
+				frappe.throw(_("Only {0} are supported").format(comma_and(SUPPORTED_VOUCHER_TYPES)))
 			row["voucher_no"] = cstr(row.get("voucher_no"))
 			if not row["voucher_no"] or not frappe.has_permission(
-				voucher_type, "write", doc=row["voucher_no"]
+				row.get("voucher_type"), "write", doc=row["voucher_no"]
 			):
 				_refuse()
 

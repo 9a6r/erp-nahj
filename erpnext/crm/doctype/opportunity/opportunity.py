@@ -7,11 +7,11 @@ import json
 import frappe
 from frappe import _
 from frappe.contacts.address_and_contact import load_address_and_contact
-from frappe.model.document import Document
+from frappe.email.inbox import link_communication_to_document
+from frappe.model.mapper import get_mapped_doc
 from frappe.query_builder import DocType, Interval
 from frappe.query_builder.functions import Now
-from frappe.utils import comma_or, flt, get_fullname, today
-from pypika.terms import Criterion
+from frappe.utils import flt, get_fullname
 
 from erpnext.accounts.party import validate_party_frozen_disabled
 from erpnext.crm.utils import (
@@ -23,9 +23,6 @@ from erpnext.crm.utils import (
 )
 from erpnext.setup.utils import get_exchange_rate
 from erpnext.utilities.transaction_base import TransactionBase
-
-PARTY_DOCTYPES = ("Lead", "Customer", "Prospect")
-PARTY_DERIVED_FIELDS = ("territory", "customer_group")
 
 
 class Opportunity(TransactionBase, CRMNote):
@@ -68,7 +65,6 @@ class Opportunity(TransactionBase, CRMNote):
 		items: DF.Table[OpportunityItem]
 		job_title: DF.Data | None
 		language: DF.Link | None
-		lost_on: DF.Date | None
 		lost_reasons: DF.TableMultiSelect[OpportunityLostReasonDetail]
 		market_segment: DF.Link | None
 		naming_series: DF.Literal["CRM-OPP-.YYYY.-"]
@@ -99,19 +95,28 @@ class Opportunity(TransactionBase, CRMNote):
 	# end: auto-generated types
 
 	def onload(self):
+		ref_doc = frappe.get_doc(self.opportunity_from, self.party_name)
+
+		load_address_and_contact(ref_doc)
 		load_address_and_contact(self)
-		if self.party_name and frappe.has_permission(self.opportunity_from, "read", self.party_name):
-			self.add_party_address_and_contact()
 
-	def add_party_address_and_contact(self):
-		"""Show the party's contacts and addresses first, followed by the ones linked to this Opportunity."""
-		party = frappe.get_doc(self.opportunity_from, self.party_name)
-		load_address_and_contact(party)
+		ref_doc_contact_list = ref_doc.get("__onload").get("contact_list")
+		opportunity_doc_contact_list = [
+			contact
+			for contact in self.get("__onload").get("contact_list")
+			if contact not in ref_doc_contact_list
+		]
+		ref_doc_contact_list.extend(opportunity_doc_contact_list)
+		ref_doc.set_onload("contact_list", ref_doc_contact_list)
 
-		for key in ("contact_list", "addr_list"):
-			party_list = party.get("__onload").get(key)
-			party_list.extend(entry for entry in self.get("__onload").get(key) if entry not in party_list)
-			self.set_onload(key, party_list)
+		ref_doc_addr_list = ref_doc.get("__onload").get("addr_list")
+		opportunity_doc_addr_list = [
+			addr for addr in self.get("__onload").get("addr_list") if addr not in ref_doc_addr_list
+		]
+		ref_doc_addr_list.extend(opportunity_doc_addr_list)
+		ref_doc.set_onload("addr_list", ref_doc_addr_list)
+
+		self.set("__onload", ref_doc.get("__onload"))
 
 	def after_insert(self):
 		if self.opportunity_from == "Lead":
@@ -120,31 +125,20 @@ class Opportunity(TransactionBase, CRMNote):
 			ignore_permissions = self.flags.ignore_permissions
 			link_open_tasks(self.opportunity_from, self.party_name, self, ignore_permissions)
 			link_open_events(self.opportunity_from, self.party_name, self, ignore_permissions)
-
-		if self.opportunity_from in ("Lead", "Prospect"):
-			self.carry_forward_communication()
-
-	def carry_forward_communication(self):
-		if frappe.db.get_single_value("CRM Settings", "carry_forward_communication_and_comments"):
-			ignore_permissions = self.flags.ignore_permissions
-			copy_comments(self.opportunity_from, self.party_name, self, ignore_permissions)
-			link_communications(self.opportunity_from, self.party_name, self, ignore_permissions)
+			if frappe.db.get_single_value("CRM Settings", "carry_forward_communication_and_comments"):
+				copy_comments(self.opportunity_from, self.party_name, self, ignore_permissions)
+				link_communications(self.opportunity_from, self.party_name, self, ignore_permissions)
 
 	def validate(self):
 		self.set_opportunity_type()
 		self.make_new_lead_if_required()
-		self.validate_opportunity_from()
 		self.validate_item_details()
 		self.validate_uom_is_integer("uom", "qty")
 		self.validate_cust_name()
 		self.validate_party()
 		self.validate_party_specific_items()
-		self.validate_party_contact_and_address()
-		self.refresh_party_fields()
 		self.map_fields()
 		self.validate_qty()
-		self.validate_status()
-		self.set_lost_on()
 		self.set_exchange_rate()
 
 		if not self.title:
@@ -154,29 +148,36 @@ class Opportunity(TransactionBase, CRMNote):
 
 	def on_update(self):
 		self.update_prospect()
-		if self.has_value_changed("status"):
-			self.update_lead_status()
-
-	def after_delete(self):
-		self.update_lead_status()
-
-	def update_lead_status(self):
-		if self.opportunity_from == "Lead" and frappe.db.exists("Lead", self.party_name):
-			frappe.get_doc("Lead", self.party_name).set_status(update=True)
-
-	def on_trash(self):
-		frappe.db.delete("Prospect Opportunity", {"opportunity": self.name})
 
 	def validate_party_specific_items(self):
-		from erpnext.accounts.services.party_validation import PartyValidator
+		if self.opportunity_from != "Customer" or not self.party_name:
+			return
 
-		PartyValidator(self).validate_party_specific_items()
+		from erpnext.selling.doctype.party_specific_item.party_specific_item import (
+			get_allowed_items_condition,
+		)
 
-	def validate_opportunity_from(self):
-		if self.opportunity_from not in PARTY_DOCTYPES:
-			frappe.throw(
-				_("Opportunity From must be one of {0}").format(comma_or([_(d) for d in PARTY_DOCTYPES]))
-			)
+		allowed_items_condition = get_allowed_items_condition("Customer", self.party_name)
+		if allowed_items_condition is None:
+			return
+
+		rows = [row for row in self.get("items") if row.item_code]
+		item = frappe.qb.DocType("Item")
+		allowed_items = (
+			frappe.qb.from_(item)
+			.select(item.name)
+			.where(item.name.isin(list({row.item_code for row in rows})))
+			.where(allowed_items_condition)
+			.run(pluck=True)
+		)
+		for row in rows:
+			if row.item_code not in allowed_items:
+				frappe.throw(
+					_("Row {0}: Item {1} is not allowed for {2} {3}.").format(
+						row.idx, frappe.bold(row.item_code), _("Customer"), frappe.bold(self.party_name)
+					),
+					title=_("Item Restricted for Party"),
+				)
 
 	def validate_qty(self):
 		for item in self.items:
@@ -186,48 +187,6 @@ class Opportunity(TransactionBase, CRMNote):
 						item.idx, item.item_code
 					)
 				)
-
-	def validate_status(self):
-		"""Quotation and Converted come from the linked quotations and can't be set or left by hand."""
-		if self.is_new() or not self.has_value_changed("status"):
-			return
-
-		quotation_status = self.get_quotation_status()
-		if self.status != quotation_status and (
-			quotation_status or self.status in ("Quotation", "Converted")
-		):
-			if self.status == "Lost":
-				frappe.throw(_("Cannot declare as Lost because an active Quotation exists."))
-			frappe.throw(
-				_("Status {0} is set from the Opportunity's Quotations").format(
-					frappe.bold(_(quotation_status or self.status))
-				)
-			)
-
-		previous = self.get_doc_before_save()
-		if previous and previous.status == "Lost":
-			self.lost_reasons = []
-			self.order_lost_reason = None
-
-	def get_quotation_status(self) -> str | None:
-		if self.has_ordered_quotation():
-			return "Converted"
-		if self.has_active_quotation():
-			return "Quotation"
-
-	def set_lost_on(self) -> None:
-		if self.has_value_changed("status"):
-			self.lost_on = self.get_lost_on()
-
-	def get_lost_on(self) -> str | None:
-		return today() if self.status == "Lost" else None
-
-	def set_status(self, update: bool = False, status: str | None = None, update_modified: bool = True):
-		"""Also keep Lost On in step when the status is changed from a linked Quotation."""
-		previous_status = self.status
-		super().set_status(update=update, status=status, update_modified=update_modified)
-		if update and self.status != previous_status:
-			self.db_set("lost_on", self.get_lost_on(), update_modified=update_modified)
 
 	def map_fields(self):
 		for field in self.meta.get_valid_columns():
@@ -248,15 +207,8 @@ class Opportunity(TransactionBase, CRMNote):
 			self.conversion_rate = 1.0
 			return
 
-		if not self.conversion_rate or self.conversion_rate == 1.0 or self.is_currency_changed_alone():
+		if not self.conversion_rate or self.conversion_rate == 1.0:
 			self.conversion_rate = get_exchange_rate(self.currency, company_currency, self.transaction_date)
-
-	def is_currency_changed_alone(self) -> bool:
-		return (
-			not self.is_new()
-			and self.has_value_changed("currency")
-			and not self.has_value_changed("conversion_rate")
-		)
 
 	def calculate_totals(self):
 		total = base_total = 0
@@ -269,11 +221,14 @@ class Opportunity(TransactionBase, CRMNote):
 
 		self.total = flt(total)
 		self.base_total = flt(base_total)
-		self.base_opportunity_amount = flt(self.opportunity_amount) * flt(self.conversion_rate)
 
 	def update_prospect(self):
-		prospect_name = get_party_prospect(self.opportunity_from, self.party_name)
-		self.remove_from_previous_prospect(prospect_name)
+		prospect_name = None
+		if self.opportunity_from == "Prospect" and self.party_name:
+			prospect_name = self.party_name
+		elif self.opportunity_from == "Lead":
+			prospect_name = frappe.db.get_value("Prospect Lead", {"lead": self.party_name}, "parent")
+
 		if prospect_name:
 			prospect = frappe.get_doc("Prospect", prospect_name)
 
@@ -300,19 +255,6 @@ class Opportunity(TransactionBase, CRMNote):
 				prospect.flags.ignore_permissions = True
 				prospect.flags.ignore_mandatory = True
 				prospect.save()
-
-	def remove_from_previous_prospect(self, prospect_name: str | None):
-		"""Remove the row added for the previous party; rows added by hand on other Prospects stay."""
-		previous = self.get_doc_before_save()
-		if not previous:
-			return
-
-		previous_prospect = get_party_prospect(previous.opportunity_from, previous.party_name)
-		if previous_prospect and previous_prospect != prospect_name:
-			frappe.db.delete(
-				"Prospect Opportunity",
-				{"opportunity": self.name, "parenttype": "Prospect", "parent": previous_prospect},
-			)
 
 	def make_new_lead_if_required(self):
 		"""Set lead against new opportunity"""
@@ -363,13 +305,8 @@ class Opportunity(TransactionBase, CRMNote):
 			self.party_name = lead_name
 
 	@frappe.whitelist()
-	def declare_enquiry_lost(
-		self, lost_reasons_list: list, competitors: list, detailed_reason: str | None = None
-	):
+	def declare_enquiry_lost(self, lost_reasons_list, competitors, detailed_reason=None):
 		if not self.has_active_quotation():
-			if not lost_reasons_list:
-				frappe.throw(_("Please select at least one Lost Reason"))
-
 			self.status = "Lost"
 			self.lost_reasons = []
 			self.competitors = []
@@ -388,40 +325,57 @@ class Opportunity(TransactionBase, CRMNote):
 		else:
 			frappe.throw(_("Cannot declare as Lost because an active Quotation exists."))
 
-	def has_active_quotation(self) -> list[str]:
-		quotation = frappe.qb.DocType("Quotation")
-		return self.get_linked_quotations(
-			(quotation.docstatus == 1)
-			& (quotation.is_active == 1)
-			& quotation.status.notin(["Lost", "Cancelled", "Expired"])
-		)
-
-	def has_ordered_quotation(self) -> list[str]:
-		quotation = frappe.qb.DocType("Quotation")
-		return self.get_linked_quotations(
-			(quotation.docstatus == 1) & quotation.status.isin(["Ordered", "Partially Ordered"])
-		)
-
-	def get_linked_quotations(self, condition: Criterion) -> list[str]:
-		"""Quotations made from this Opportunity, linked in the header or in the items."""
-		quotation = frappe.qb.DocType("Quotation")
-		quotation_item = frappe.qb.DocType("Quotation Item")
-		return (
-			frappe.qb.from_(quotation)
-			.left_join(quotation_item)
-			.on(quotation_item.parent == quotation.name)
-			.select(quotation.name)
-			.distinct()
-			.where(
-				condition
-				& ((quotation.opportunity == self.name) | (quotation_item.prevdoc_docname == self.name))
+	def has_active_quotation(self):
+		if not self.get("items", []):
+			return frappe.get_all(
+				"Quotation",
+				{
+					"opportunity": self.name,
+					"status": ("not in", ["Lost", "Cancelled", "Expired"]),
+					"docstatus": 1,
+				},
+				"name",
 			)
-			.run(pluck=True)
-		)
+		else:
+			return frappe.db.sql(
+				"""
+				select q.name
+				from `tabQuotation` q, `tabQuotation Item` qi
+				where q.name = qi.parent and q.docstatus=1 and qi.prevdoc_docname =%s
+				and q.status not in ('Lost', 'Cancelled', 'Expired')""",
+				self.name,
+			)
+
+	def has_ordered_quotation(self):
+		if not self.get("items", []):
+			return frappe.get_all(
+				"Quotation",
+				{
+					"opportunity": self.name,
+					"status": ("in", ["Ordered", "Partially Ordered"]),
+					"docstatus": 1,
+				},
+				"name",
+			)
+		else:
+			return frappe.db.sql(
+				"""
+				select q.name
+				from `tabQuotation` q, `tabQuotation Item` qi
+				where q.name = qi.parent and q.docstatus=1 and qi.prevdoc_docname =%s
+				and q.status in ('Ordered', 'Partially Ordered')""",
+				self.name,
+			)
 
 	def has_lost_quotation(self):
-		lost_quotation = frappe.get_all(
-			"Quotation", filters={"docstatus": 1, "opportunity": self.name, "status": "Lost"}
+		lost_quotation = frappe.db.sql(
+			"""
+			select name
+			from `tabQuotation`
+			where docstatus=1
+				and opportunity =%s and status = 'Lost'
+			""",
+			self.name,
 		)
 		if lost_quotation:
 			if self.has_active_quotation():
@@ -431,60 +385,6 @@ class Opportunity(TransactionBase, CRMNote):
 	def validate_party(self) -> None:
 		if self.opportunity_from == "Customer":
 			validate_party_frozen_disabled(self.company, "Customer", self.party_name)
-
-	def validate_party_contact_and_address(self):
-		"""Contact and address must be linked to the party, as the form's filters require."""
-		if not self.party_name:
-			return
-
-		for fieldname, doctype in (("contact_person", "Contact"), ("customer_address", "Address")):
-			value = self.get(fieldname)
-			if not value or not (self.has_value_changed(fieldname) or self.has_party_changed()):
-				continue
-
-			if not self.is_linked_to_party(doctype, value):
-				frappe.throw(
-					_("{0} {1} is not linked to {2} {3}").format(
-						_(doctype), frappe.bold(value), _(self.opportunity_from), frappe.bold(self.party_name)
-					)
-				)
-
-	def is_linked_to_party(self, doctype: str, name: str) -> bool:
-		return bool(
-			frappe.db.exists(
-				"Dynamic Link",
-				{
-					"parenttype": doctype,
-					"parent": name,
-					"link_doctype": self.opportunity_from,
-					"link_name": self.party_name,
-				},
-			)
-		)
-
-	def refresh_party_fields(self):
-		"""On a party change, replace the title and party fields still holding the previous party's values."""
-		if self.is_new() or not self.has_party_changed():
-			return
-
-		previous = self.get_doc_before_save()
-		if not self.has_value_changed("title") and self.title == previous.customer_name:
-			self.title = self.customer_name
-
-		party_meta = frappe.get_meta(self.opportunity_from)
-		for fieldname in PARTY_DERIVED_FIELDS:
-			if party_meta.has_field(fieldname) and self.holds_previous_party_value(previous, fieldname):
-				self.set(fieldname, frappe.db.get_value(self.opportunity_from, self.party_name, fieldname))
-
-	def holds_previous_party_value(self, previous: "Opportunity", fieldname: str) -> bool:
-		"""True if `fieldname` was not edited in this save and still matches what the previous party supplies."""
-		if self.has_value_changed(fieldname):
-			return False
-
-		return self.get(fieldname) == get_party_field_value(previous, fieldname)
-
-	def has_party_changed(self) -> bool:
-		return self.has_value_changed("party_name") or self.has_value_changed("opportunity_from")
 
 	def validate_cust_name(self):
 		if self.party_name:
@@ -518,53 +418,142 @@ class Opportunity(TransactionBase, CRMNote):
 				if not d.get(key):
 					d.set(key, item.get(key))
 
-	def get_notification_email(self):
-		"""Hook to return the target email address for notifications."""
-		if self.opportunity_owner:
-			return frappe.db.get_value("User", self.opportunity_owner, "email")
-
-		return None
-
-
-def get_party_prospect(opportunity_from: str, party_name: str | None) -> str | None:
-	if opportunity_from == "Prospect":
-		return party_name
-	if opportunity_from == "Lead":
-		return frappe.db.get_value("Prospect Lead", {"lead": party_name}, "parent")
-
-
-def get_party_field_value(opportunity: "Opportunity", fieldname: str) -> str | None:
-	"""Return the value the opportunity's party supplies for `fieldname`, if the party has that field."""
-	if not opportunity.party_name or not frappe.get_meta(opportunity.opportunity_from).has_field(fieldname):
-		return None
-
-	return frappe.db.get_value(opportunity.opportunity_from, opportunity.party_name, fieldname)
-
 
 @frappe.whitelist()
-def get_item_details(item_code: str):
-	if frappe.db.exists("Item", item_code):
-		frappe.has_permission("Item", "read", item_code, throw=True)
-
-	item = frappe.db.get_value(
-		"Item",
+def get_item_details(item_code):
+	item = frappe.db.sql(
+		"""select item_name, stock_uom, image, description, item_group, brand
+		from `tabItem` where name = %s""",
 		item_code,
-		["item_name", "stock_uom", "image", "description", "item_group", "brand"],
-		as_dict=True,
+		as_dict=1,
 	)
 	return {
-		"item_name": item and item.item_name or "",
-		"uom": item and item.stock_uom or "",
-		"description": item and item.description or "",
-		"image": item and item.image or "",
-		"item_group": item and item.item_group or "",
-		"brand": item and item.brand or "",
+		"item_name": item and item[0]["item_name"] or "",
+		"uom": item and item[0]["stock_uom"] or "",
+		"description": item and item[0]["description"] or "",
+		"image": item and item[0]["image"] or "",
+		"item_group": item and item[0]["item_group"] or "",
+		"brand": item and item[0]["brand"] or "",
 	}
 
 
-@frappe.whitelist(methods=["POST"])
-def set_multiple_status(names: str | list[str], status: str):
-	names = frappe.parse_json(names)
+@frappe.whitelist()
+def make_quotation(source_name, target_doc=None):
+	def set_missing_values(source, target):
+		from erpnext.controllers.accounts_controller import _get_default_taxes_and_charges
+
+		quotation = frappe.get_doc(target)
+
+		company_currency = frappe.get_cached_value("Company", quotation.company, "default_currency")
+
+		if company_currency == quotation.currency:
+			exchange_rate = 1
+		else:
+			exchange_rate = get_exchange_rate(
+				quotation.currency, company_currency, quotation.transaction_date, args="for_selling"
+			)
+
+		quotation.conversion_rate = exchange_rate
+
+		# get default taxes
+		taxes = _get_default_taxes_and_charges("Sales Taxes and Charges Template", company=quotation.company)
+		if taxes.get("taxes"):
+			quotation.update(taxes)
+
+		quotation.run_method("set_missing_values")
+		quotation.run_method("calculate_taxes_and_totals")
+		if not source.get("items", []):
+			quotation.opportunity = source.name
+
+	doclist = get_mapped_doc(
+		"Opportunity",
+		source_name,
+		{
+			"Opportunity": {
+				"doctype": "Quotation",
+				"field_map": {"opportunity_from": "quotation_to", "name": "enq_no"},
+			},
+			"Opportunity Item": {
+				"doctype": "Quotation Item",
+				"field_map": {
+					"parent": "prevdoc_docname",
+					"parenttype": "prevdoc_doctype",
+					"uom": "stock_uom",
+				},
+				"add_if_empty": True,
+			},
+		},
+		target_doc,
+		set_missing_values,
+	)
+
+	return doclist
+
+
+@frappe.whitelist()
+def make_request_for_quotation(source_name, target_doc=None):
+	def update_item(obj, target, source_parent):
+		target.conversion_factor = 1.0
+
+	doclist = get_mapped_doc(
+		"Opportunity",
+		source_name,
+		{
+			"Opportunity": {"doctype": "Request for Quotation"},
+			"Opportunity Item": {
+				"doctype": "Request for Quotation Item",
+				"field_map": [["name", "opportunity_item"], ["parent", "opportunity"], ["uom", "uom"]],
+				"postprocess": update_item,
+			},
+		},
+		target_doc,
+	)
+
+	return doclist
+
+
+@frappe.whitelist()
+def make_customer(source_name, target_doc=None):
+	def set_missing_values(source, target):
+		target.opportunity_name = source.name
+
+		if source.opportunity_from == "Lead":
+			target.lead_name = source.party_name
+
+	doclist = get_mapped_doc(
+		"Opportunity",
+		source_name,
+		{
+			"Opportunity": {
+				"doctype": "Customer",
+				"field_map": {"currency": "default_currency", "customer_name": "customer_name"},
+			}
+		},
+		target_doc,
+		set_missing_values,
+	)
+
+	return doclist
+
+
+@frappe.whitelist()
+def make_supplier_quotation(source_name, target_doc=None):
+	doclist = get_mapped_doc(
+		"Opportunity",
+		source_name,
+		{
+			"Opportunity": {"doctype": "Supplier Quotation", "field_map": {"name": "opportunity"}},
+			"Opportunity Item": {"doctype": "Supplier Quotation Item", "field_map": {"uom": "stock_uom"}},
+		},
+		target_doc,
+	)
+
+	return doclist
+
+
+@frappe.whitelist()
+def set_multiple_status(names, status):
+	names = json.loads(names)
 	for name in names:
 		opp = frappe.get_doc("Opportunity", name)
 		opp.status = status
@@ -572,8 +561,8 @@ def set_multiple_status(names: str | list[str], status: str):
 
 
 def auto_close_opportunity():
-	"""Auto close `Replied` Opportunities inactive for the days configured in CRM Settings."""
-	auto_close_after_days = frappe.db.get_single_value("CRM Settings", "close_opportunity_after_days")
+	"""auto close the `Replied` Opportunities after 7 days"""
+	auto_close_after_days = frappe.db.get_single_value("CRM Settings", "close_opportunity_after_days") or 15
 
 	table = frappe.qb.DocType("Opportunity")
 	opportunities = (
@@ -584,5 +573,42 @@ def auto_close_opportunity():
 		)
 	).run(pluck=True)
 
-	if opportunities:
-		frappe.db.set_value("Opportunity", {"name": ("in", opportunities)}, "status", "Closed")
+	for opportunity in opportunities:
+		doc = frappe.get_doc("Opportunity", opportunity)
+		doc.status = "Closed"
+		doc.flags.ignore_permissions = True
+		doc.flags.ignore_mandatory = True
+		doc.save()
+
+
+@frappe.whitelist()
+def make_opportunity_from_communication(
+	communication: str, company: str, ignore_communication_links: bool = False
+):
+	from erpnext.crm.doctype.lead.lead import make_lead_from_communication
+
+	# Communication grants read to `All` only for the owner and carries a has_permission hook, so doc=
+	# is what decides access.
+	frappe.has_permission("Communication", doc=communication, throw=True)
+
+	doc = frappe.get_doc("Communication", communication)
+
+	# make_lead_from_communication() checks, but is skipped when the email already references a Lead.
+	lead = doc.reference_name if doc.reference_doctype == "Lead" else None
+	if not lead:
+		lead = make_lead_from_communication(communication, ignore_communication_links=True)
+
+	opportunity_from = "Lead"
+
+	opportunity = frappe.get_doc(
+		{
+			"doctype": "Opportunity",
+			"company": company,
+			"opportunity_from": opportunity_from,
+			"party_name": lead,
+		}
+	).insert()
+
+	link_communication_to_document(doc, "Opportunity", opportunity.name, ignore_communication_links)
+
+	return opportunity.name

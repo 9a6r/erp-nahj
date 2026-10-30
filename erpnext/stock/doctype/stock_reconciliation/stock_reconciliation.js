@@ -6,7 +6,7 @@ frappe.provide("erpnext.accounts.dimensions");
 
 frappe.ui.form.on("Stock Reconciliation", {
 	setup(frm) {
-		frm.ignore_doctypes_on_cancel_all = ["Serial and Batch Bundle", "Item Standard Cost"];
+		frm.ignore_doctypes_on_cancel_all = ["Serial and Batch Bundle"];
 		frm.barcode_scanner = new erpnext.utils.BarcodeScanner({
 			frm: frm,
 			uom_field: "stock_uom",
@@ -22,7 +22,6 @@ frappe.ui.form.on("Stock Reconciliation", {
 				query: "erpnext.controllers.queries.item_query",
 				filters: {
 					is_stock_item: 1,
-					company: doc.company,
 				},
 			};
 		});
@@ -387,4 +386,4 @@ erpnext.stock.StockReconciliation = class StockReconciliation extends erpnext.st
 	}
 };
 
-frappe.ui.form.set_controller("Stock Reconciliation", erpnext.stock.StockReconciliation);
+cur_frm.cscript = new erpnext.stock.StockReconciliation({ frm: cur_frm });

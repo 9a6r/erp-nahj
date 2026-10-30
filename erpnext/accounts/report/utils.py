@@ -3,8 +3,7 @@ from frappe import _
 from frappe.query_builder import Case
 from frappe.query_builder.custom import ConstantColumn
 from frappe.query_builder.functions import Sum
-from frappe.utils import flt, formatdate, get_datetime_str, get_link_to_form, get_table_name
-from frappe.utils.data import DateTimeLikeObject
+from frappe.utils import flt, formatdate, get_datetime_str, get_table_name
 from frappe.utils.nestedset import get_descendants_of
 from pypika import Order
 
@@ -79,7 +78,7 @@ def convert(value, from_, to, date):
 	:return: Result of converting `value`
 	"""
 	rate = get_rate_as_at(date, from_, to)
-	converted_value = flt(value) / rate
+	converted_value = flt(value) / (rate or 1)
 	return converted_value
 
 
@@ -94,43 +93,21 @@ def get_rate_as_at(date, from_currency, to_currency):
 	:param to_currency: Quote currency
 	:return: Retrieved exchange rate
 	"""
-	if from_currency == to_currency:
-		return 1
 
 	rate = __exchange_rates.get(f"{from_currency}-{to_currency}@{date}")
 	if not rate:
-		rate = get_exchange_rate(from_currency, to_currency, date)
-		if not rate:
-			throw_missing_exchange_rate(date, from_currency, to_currency)
+		rate = get_exchange_rate(from_currency, to_currency, date) or 1
 		__exchange_rates[f"{from_currency}-{to_currency}@{date}"] = rate
 
 	return rate
 
 
-def throw_missing_exchange_rate(date: DateTimeLikeObject, from_currency: str, to_currency: str) -> None:
-	frappe.throw(
-		_(
-			"Exchange rate from {0} to {1} on {2} not found. Create a {3} record and run the report again."
-		).format(
-			frappe.bold(from_currency),
-			frappe.bold(to_currency),
-			frappe.bold(formatdate(date)),
-			get_link_to_form("Currency Exchange", None, _("Currency Exchange")),
-		),
-		title=_("Exchange Rate Missing"),
-	)
-
-
-def convert_to_presentation_currency(
-	gl_entries, currency_info, filters=None, use_account_currency: bool = False
-):
+def convert_to_presentation_currency(gl_entries, currency_info, filters=None):
 	"""
 	Take a list of GL Entries and change the 'debit' and 'credit' values to currencies
 	in `currency_info`.
 	:param gl_entries:
 	:param currency_info:
-	:param use_account_currency: Use the account-currency amounts as is when every entry is on an
-	        account in the presentation currency. Only the General Ledger sets it.
 	:return:
 	"""
 	converted_gl_list = []
@@ -154,12 +131,10 @@ def convert_to_presentation_currency(
 		account_currency = entry["account_currency"]
 
 		if (
-			use_account_currency
-			and len(account_currencies) == 1
+			len(account_currencies) == 1
 			and account_currency == presentation_currency
 			and not exchange_gain_or_loss
-			and not (filters and filters.get("show_amount_in_company_currency"))
-		):
+		) and not (filters and filters.get("show_amount_in_company_currency")):
 			entry["debit"] = debit_in_account_currency
 			entry["credit"] = credit_in_account_currency
 		else:
@@ -187,12 +162,7 @@ def get_appropriate_company(filters):
 	return company
 
 
-def get_invoiced_item_gross_margin(
-	sales_invoice: str | None = None,
-	item_code: str | None = None,
-	company: str | None = None,
-	with_item_data: bool = False,
-):
+def get_invoiced_item_gross_margin(sales_invoice=None, item_code=None, company=None, with_item_data=False):
 	from erpnext.accounts.report.gross_profit.gross_profit import GrossProfitGenerator
 
 	sales_invoice = sales_invoice or frappe.form_dict.get("sales_invoice")

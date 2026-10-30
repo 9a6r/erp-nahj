@@ -1,5 +1,6 @@
 # Copyright (c) 2019, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
+import unittest
 
 import frappe
 
@@ -18,10 +19,6 @@ class TestTaskType(ERPNextTestSuite):
 		task.task_weight = 5
 		task.save()
 		self.assertEqual(task.task_weight, 5)
-
-		task.task_weight = 0
-		task.save()
-		self.assertEqual(task.task_weight, 0)
 
 	def test_zero_task_weight_is_kept(self):
 		task_type = frappe.get_doc(
@@ -52,3 +49,11 @@ class TestTaskType(ERPNextTestSuite):
 		task.task_weight = 0
 		task.save()
 		self.assertEqual(task.task_weight, 0)
+
+	def test_negative_weight_is_refused(self):
+		task_type = frappe.get_doc({"doctype": "Task Type", "name": "_Test Negative Task Type", "weight": -2})
+		self.assertRaises(frappe.NonNegativeError, task_type.insert)
+
+		task = create_task("_Test Negative Weight Task", save=False)
+		task.task_weight = -2
+		self.assertRaises(frappe.NonNegativeError, task.insert)

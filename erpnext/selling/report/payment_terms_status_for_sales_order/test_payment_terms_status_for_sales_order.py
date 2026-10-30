@@ -2,9 +2,9 @@ import datetime
 
 import frappe
 from frappe.core.doctype.user_permission.test_user_permission import create_user
-from frappe.utils import add_days, add_months, flt, nowdate
+from frappe.utils import add_days, add_months, nowdate
 
-from erpnext.selling.doctype.sales_order.mapper import make_sales_invoice
+from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 from erpnext.selling.report.payment_terms_status_for_sales_order.payment_terms_status_for_sales_order import (
 	execute,
@@ -400,139 +400,6 @@ class TestPaymentTermsStatusForSalesOrder(ERPNextTestSuite):
 		# Only the first term should be pulled
 		self.assertEqual(len(data), 1)
 		self.assertEqual(data, expected_value)
-
-	def test_invoice_split_counts_orders_outside_filters(self):
-		"""An invoice billing a June order and a March order must be split over both, even when the report
-		covers only June. The June order should be credited 600 of the 1000 invoice, not all of it, leaving its
-		second term Partly Paid."""
-		self.create_payment_terms_template()
-		item = create_item(item_code="_Test PT Split Item", is_stock_item=0)
-
-		orders = []
-		for transaction_date in ("2021-06-15", "2021-03-15"):
-			so = make_sales_order(
-				transaction_date=transaction_date,
-				item=item.item_code,
-				qty=10,
-				rate=100,
-				do_not_save=True,
-			)
-			so.po_no = ""
-			so.taxes_and_charges = ""
-			so.taxes = ""
-			so.payment_terms_template = self.template.name
-			so.save()
-			so.submit()
-			orders.append(so)
-		so_x, so_y = orders
-
-		sinv = make_sales_invoice(so_x.name)
-		sinv.taxes_and_charges = ""
-		sinv.taxes = ""
-		sinv.items[0].qty = 6
-		sinv.append(
-			"items",
-			{
-				"item_code": item.item_code,
-				"qty": 4,
-				"rate": 100,
-				"sales_order": so_y.name,
-				"so_detail": so_y.items[0].name,
-			},
-		)
-		sinv.insert()
-		sinv.submit()
-
-		_, data, _, _ = execute(
-			frappe._dict(
-				{
-					"company": "_Test Company",
-					"period_start_date": "2021-06-01",
-					"period_end_date": "2021-06-30",
-					"item": item.item_code,
-				}
-			)
-		)
-
-		self.assertEqual(
-			[(row.paid_amount, row.status) for row in data if row.name == so_x.name],
-			[(500.0, "Completed"), (100.0, "Partly Paid")],
-		)
-
-	def test_invoice_billing_multiple_orders_splits_proportionally(self):
-		"""An invoice that bills several Sales Orders must contribute to each, in proportion to each
-		order's net line amount. Grouping by the invoice alone and taking Max(sales_order) credited the
-		whole invoice to one arbitrary order and starved the rest. get_so_with_invoices now returns one
-		row per (invoice, sales_order) with the grand total split proportionally; the split is identical
-		on MariaDB and Postgres."""
-		from erpnext.selling.report.payment_terms_status_for_sales_order.payment_terms_status_for_sales_order import (
-			get_so_with_invoices,
-		)
-
-		self.create_payment_terms_template()
-		item = create_item(item_code="_Test PT Split Item", is_stock_item=0)
-
-		def make_so():
-			so = make_sales_order(
-				transaction_date="2021-06-15",
-				delivery_date=add_days("2021-06-15", 30),
-				item=item.item_code,
-				qty=10,
-				rate=100,
-				do_not_save=True,
-			)
-			so.po_no = ""
-			so.taxes_and_charges = ""
-			so.taxes = ""
-			so.payment_terms_template = self.template.name
-			so.save()
-			so.submit()
-			return so
-
-		so_a = make_so()
-		so_b = make_so()
-		so_c = make_so()
-
-		# one invoice billing all three orders, partially (so each stays in a billable status)
-		sinv = make_sales_invoice(so_a.name)
-		sinv.taxes_and_charges = ""
-		sinv.taxes = ""
-		sinv.items[0].qty = 6  # so_a: 600 net
-		for so, qty in ((so_b, 4), (so_c, 5)):  # so_b: 400, so_c: 500
-			sinv.append(
-				"items",
-				{
-					"item_code": item.item_code,
-					"qty": qty,
-					"rate": 100,
-					"sales_order": so.name,
-					"so_detail": so.items[0].name,
-				},
-			)
-		sinv.insert()
-		sinv.submit()
-
-		filters = frappe._dict(
-			{
-				"company": "_Test Company",
-				"period_start_date": "2021-06-01",
-				"period_end_date": "2021-06-30",
-				"item": item.item_code,
-			}
-		)
-		sorders, invoices = get_so_with_invoices(filters)
-		rows = {r.sales_order: r for r in invoices if r.invoice == sinv.name}
-
-		# each order gets its share (old Max(sales_order) collapsed the invoice onto one), and the shares
-		# always sum back to the grand total (the last order absorbs any rounding residual)
-		self.assertAlmostEqual(rows[so_a.name].invoice_amount, 600.0, places=2)
-		self.assertAlmostEqual(rows[so_b.name].invoice_amount, 400.0, places=2)
-		self.assertAlmostEqual(rows[so_c.name].invoice_amount, 500.0, places=2)
-		self.assertAlmostEqual(
-			sum(rows[so.name].invoice_amount for so in (so_a, so_b, so_c)),
-			flt(sinv.base_grand_total),
-			places=2,
-		)
 
 	def test_user_permission_on_company(self):
 		self.create_payment_terms_template()

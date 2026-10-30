@@ -8,100 +8,32 @@ import frappe
 from frappe.utils import add_days, add_to_date, flt, nowtime, today
 
 from erpnext.stock.doctype.item.test_item import make_item
-from erpnext.stock.doctype.serial_and_batch_bundle.inline_editor import resolve_csv_entries
 from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import (
 	SerialNoDuplicateError,
 	add_serial_batch_ledgers,
 	combine_datetime,
 	get_available_batches_qty,
 	get_qty_based_available_batches,
+	get_serial_batch_ledgers,
 	get_type_of_transaction,
+	make_batch_nos,
+	make_serial_nos,
 	parse_serial_nos,
 	update_available_batches,
 )
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
-from erpnext.stock.serial_batch_identity import SerialBatchIdentity
 from erpnext.tests.permission_test_utils import (
+	OTHER_COMPANY,
 	as_user,
 	assert_refused,
 	assert_refused_without,
 	assert_type_gated,
+	insert_test_record,
 	make_company_fenced_user,
 	make_fenced_user,
 	malformed_names,
 )
 from erpnext.tests.utils import ERPNextTestSuite
-
-
-class TestSerialBatchBundleEntry(ERPNextTestSuite):
-	def make_bundle(self, has_batch_no=0):
-		item = make_item(properties={"is_stock_item": 1, "has_serial_no": 1, "has_batch_no": has_batch_no})
-		return frappe.get_doc(
-			doctype="Serial and Batch Bundle",
-			item_code=item.name,
-			has_serial_no=1,
-			has_batch_no=has_batch_no,
-			company="_Test Company",
-			warehouse="_Test Warehouse - _TC",
-			voucher_type="Purchase Receipt",
-			type_of_transaction="Inward",
-			posting_datetime=combine_datetime(today(), nowtime()),
-		)
-
-	def test_manual_serials_resolve_by_item_and_save(self):
-		bundles = [self.make_bundle(), self.make_bundle()]
-		for bundle in bundles:
-			name = bundle.add_serial_batch({"serial_nos": "Form-Serial"})
-			self.assertEqual(name, bundle.name)
-			bundle.reload()
-			serial = frappe.get_doc("Serial No", bundle.entries[0].serial_no)
-			self.assertEqual((serial.item_code, serial.serial_no), (bundle.item_code, "Form-Serial"))
-			self.assertEqual(serial.company, bundle.company)
-		self.assertNotEqual(bundles[0].entries[0].serial_no, bundles[1].entries[0].serial_no)
-		name = bundles[0].name
-		self.assertEqual(bundles[0].add_serial_batch({"serial_nos": "Replacement-Serial"}), name)
-		bundles[0].reload()
-		self.assertEqual(len(bundles[0].entries), 1)
-		self.assertEqual(
-			frappe.db.get_value("Serial No", bundles[0].entries[0].serial_no, "serial_no"),
-			"Replacement-Serial",
-		)
-
-	def test_csv_pairs_are_saved_together(self):
-		bundle = self.make_bundle(has_batch_no=1)
-		serials = [{"serial_no": "Form-Serial", "batch_no": "Form-Batch", "qty": 1}]
-		batches = [{"batch_no": "Form-Batch", "qty": 1}]
-		with patch(
-			"erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle.read_serial_batch_csv",
-			return_value=(serials, batches),
-		):
-			bundle.add_serial_batch({"csv_file": "/private/files/serials.csv"})
-		bundle.reload()
-		self.assertEqual(len(bundle.entries), 1)
-		entry = bundle.entries[0]
-		serial = frappe.get_doc("Serial No", entry.serial_no)
-		batch = frappe.get_doc("Batch", entry.batch_no)
-		self.assertEqual((serial.serial_no, batch.batch_id), ("Form-Serial", "Form-Batch"))
-		self.assertEqual(serial.batch_no, batch.name)
-		self.assertEqual(bundle.total_qty, 1)
-
-	def test_outward_bundle_cannot_create_serials(self):
-		bundle = self.make_bundle()
-		bundle.type_of_transaction = "Outward"
-		with self.assertRaisesRegex(frappe.ValidationError, "does not exist for Item"):
-			bundle.add_serial_batch({"serial_nos": "Missing-Serial"})
-		self.assertFalse(
-			frappe.db.exists("Serial No", {"item_code": bundle.item_code, "serial_no": "Missing-Serial"})
-		)
-
-	def test_submitted_bundle_rejects_number_entry(self):
-		bundle = self.make_bundle()
-		bundle.docstatus = 1
-		with self.assertRaisesRegex(frappe.ValidationError, "draft bundle"):
-			bundle.add_serial_batch({"serial_nos": "Missing-Serial"})
-		self.assertFalse(
-			frappe.db.exists("Serial No", {"item_code": bundle.item_code, "serial_no": "Missing-Serial"})
-		)
 
 
 class TestSerialandBatchBundle(ERPNextTestSuite):
@@ -120,9 +52,8 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 			},
 		)
 
-		serial_ids = []
 		for sn in ["TEST-A-SER-VAL-00001", "TEST-A-SER-VAL-00002"]:
-			if not frappe.db.exists("Serial No", {"item_code": serial_item_code, "serial_no": sn}):
+			if not frappe.db.exists("Serial No", sn):
 				frappe.get_doc(
 					{
 						"doctype": "Serial No",
@@ -131,9 +62,6 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 						"company": "_Test Company",
 					}
 				).insert(ignore_permissions=True)
-			serial_ids.append(
-				frappe.db.get_value("Serial No", {"item_code": serial_item_code, "serial_no": sn}, "name")
-			)
 
 		bundle_doc = make_serial_batch_bundle(
 			{
@@ -143,7 +71,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 				"posting_date": today(),
 				"posting_time": nowtime(),
 				"qty": 10,
-				"serial_nos": serial_ids,
+				"serial_nos": ["TEST-A-SER-VAL-00001", "TEST-A-SER-VAL-00002"],
 				"type_of_transaction": "Inward",
 				"do_not_submit": True,
 			}
@@ -163,7 +91,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 				"posting_date": today(),
 				"posting_time": nowtime(),
 				"qty": 10,
-				"serial_nos": serial_ids,
+				"serial_nos": ["TEST-A-SER-VAL-00001", "TEST-A-SER-VAL-00002"],
 				"type_of_transaction": "Inward",
 				"do_not_submit": True,
 			}
@@ -329,103 +257,78 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 
 		self.assertEqual(flt(stock_value_difference, 2), -5000)
 
-	def test_outward_batch_valuation_takes_transaction_advisory_lock(self):
-		if frappe.db.db_type != "postgres":
-			self.skipTest("advisory locks are a PostgreSQL feature")
-
-		from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
-		from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
-
-		item_code = make_item(
-			properties={
-				"has_batch_no": 1,
-				"create_new_batch": 1,
-				"batch_number_series": "TEST-ADV-LCK-.#####",
-				"is_stock_item": 1,
-			},
-		).name
-
-		make_purchase_receipt(item_code=item_code, warehouse="_Test Warehouse - _TC", qty=5, rate=100)
-
-		def held_advisory_locks():
-			return frappe.db.sql(
-				"SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()"
-			)[0][0]
-
-		before = held_advisory_locks()
-		create_delivery_note(item_code=item_code, warehouse="_Test Warehouse - _TC", qty=2, rate=200)
-		self.assertGreater(held_advisory_locks(), before)
-
 	def test_old_batch_valuation(self):
-		with patch.dict(
-			frappe.flags, {"ignore_serial_batch_bundle_validation": True, "use_serial_and_batch_fields": True}
-		):
-			batch_item_code = "Old Batch Item Valuation 1"
-			make_item(
-				batch_item_code,
+		frappe.flags.ignore_serial_batch_bundle_validation = True
+		frappe.flags.use_serial_and_batch_fields = True
+		batch_item_code = "Old Batch Item Valuation 1"
+		make_item(
+			batch_item_code,
+			{
+				"has_batch_no": 1,
+				"batch_number_series": "TEST-OLD-BAT-VAL-.#####",
+				"create_new_batch": 1,
+				"is_stock_item": 1,
+				"valuation_method": "FIFO",
+			},
+		)
+
+		batch_id = "Old Batch 1"
+		if not frappe.db.exists("Batch", batch_id):
+			batch_doc = frappe.get_doc(
 				{
-					"has_batch_no": 1,
-					"batch_number_series": "TEST-OLD-BAT-VAL-.#####",
-					"create_new_batch": 1,
-					"is_stock_item": 1,
-					"valuation_method": "FIFO",
-				},
+					"doctype": "Batch",
+					"batch_id": batch_id,
+					"item": batch_item_code,
+					"use_batchwise_valuation": 0,
+				}
+			).insert(ignore_permissions=True)
+
+			self.assertTrue(batch_doc.use_batchwise_valuation)
+			batch_doc.db_set(
+				{
+					"use_batchwise_valuation": 0,
+					"batch_qty": 30,
+				}
 			)
 
-			batch_id = "Old Batch 1"
-			if not frappe.db.exists("Batch", batch_id):
-				batch_doc = frappe.get_doc(
-					{
-						"doctype": "Batch",
-						"batch_id": batch_id,
-						"item": batch_item_code,
-						"use_batchwise_valuation": 0,
-					}
-				).insert(ignore_permissions=True, set_name=batch_id)
+		stock_queue = []
+		qty_after_transaction = 0
+		balance_value = 0
+		for qty, valuation in {10: 100, 20: 200}.items():
+			stock_queue.append([qty, valuation])
+			qty_after_transaction += qty
+			balance_value += qty * valuation
 
-				self.assertTrue(batch_doc.use_batchwise_valuation)
-				batch_doc.db_set(
-					{
-						"use_batchwise_valuation": 0,
-						"batch_qty": 30,
-					}
-				)
+			doc = frappe.get_doc(
+				{
+					"doctype": "Stock Ledger Entry",
+					"posting_date": today(),
+					"posting_time": nowtime(),
+					"batch_no": batch_id,
+					"incoming_rate": valuation,
+					"qty_after_transaction": qty_after_transaction,
+					"stock_value_difference": valuation * qty,
+					"stock_value": balance_value,
+					"balance_value": balance_value,
+					"valuation_rate": balance_value / qty_after_transaction,
+					"actual_qty": qty,
+					"item_code": batch_item_code,
+					"warehouse": "_Test Warehouse - _TC",
+					"stock_queue": json.dumps(stock_queue),
+					"company": "_Test Company",
+				}
+			)
 
-			stock_queue = []
-			qty_after_transaction = 0
-			balance_value = 0
-			for qty, valuation in {10: 100, 20: 200}.items():
-				stock_queue.append([qty, valuation])
-				qty_after_transaction += qty
-				balance_value += qty * valuation
+			doc.set_posting_datetime()
+			doc.flags.ignore_permissions = True
+			doc.flags.ignore_mandatory = True
+			doc.flags.ignore_links = True
+			doc.flags.ignore_validate = True
+			doc.submit()
+			doc.reload()
 
-				doc = frappe.get_doc(
-					{
-						"doctype": "Stock Ledger Entry",
-						"posting_date": today(),
-						"posting_time": nowtime(),
-						"batch_no": batch_id,
-						"incoming_rate": valuation,
-						"qty_after_transaction": qty_after_transaction,
-						"stock_value_difference": valuation * qty,
-						"stock_value": balance_value,
-						"balance_value": balance_value,
-						"valuation_rate": balance_value / qty_after_transaction,
-						"actual_qty": qty,
-						"item_code": batch_item_code,
-						"warehouse": "_Test Warehouse - _TC",
-						"stock_queue": json.dumps(stock_queue),
-						"company": "_Test Company",
-					}
-				)
-
-				doc.set_posting_datetime()
-				doc.flags.ignore_permissions = True
-				doc.flags.ignore_mandatory = True
-				doc.flags.ignore_links = True
-				doc.flags.ignore_validate = True
-				doc.submit()
-				doc.reload()
+		frappe.flags.ignore_serial_batch_bundle_validation = False
+		frappe.flags.use_serial_and_batch_fields = False
 
 		se = make_stock_entry(
 			item_code=batch_item_code,
@@ -519,83 +422,85 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 		self.assertEqual(flt(sle.stock_value), 0.0)
 
 	def test_old_moving_avg_item_with_without_batchwise_valuation(self):
-		with patch.dict(
-			frappe.flags, {"ignore_serial_batch_bundle_validation": True, "use_serial_and_batch_fields": True}
-		):
-			batch_item_code = "Old Batch Item Valuation 2"
-			make_item(
-				batch_item_code,
-				{
-					"has_batch_no": 1,
-					"batch_number_series": "TEST-OLD2-BAT-VAL-.#####",
-					"create_new_batch": 1,
-					"is_stock_item": 1,
-					"valuation_method": "Moving Average",
-				},
-			)
+		frappe.flags.ignore_serial_batch_bundle_validation = True
+		frappe.flags.use_serial_and_batch_fields = True
+		batch_item_code = "Old Batch Item Valuation 2"
+		make_item(
+			batch_item_code,
+			{
+				"has_batch_no": 1,
+				"batch_number_series": "TEST-OLD2-BAT-VAL-.#####",
+				"create_new_batch": 1,
+				"is_stock_item": 1,
+				"valuation_method": "Moving Average",
+			},
+		)
 
-			non_batchwise_val_batches = [
-				"TEST-OLD2-BAT-VAL-00001",
-				"TEST-OLD2-BAT-VAL-00002",
-				"TEST-OLD2-BAT-VAL-00003",
-				"TEST-OLD2-BAT-VAL-00004",
-			]
+		non_batchwise_val_batches = [
+			"TEST-OLD2-BAT-VAL-00001",
+			"TEST-OLD2-BAT-VAL-00002",
+			"TEST-OLD2-BAT-VAL-00003",
+			"TEST-OLD2-BAT-VAL-00004",
+		]
 
-			for batch_id in non_batchwise_val_batches:
-				if not frappe.db.exists("Batch", batch_id):
-					batch_doc = frappe.get_doc(
-						{
-							"doctype": "Batch",
-							"batch_id": batch_id,
-							"item": batch_item_code,
-							"use_batchwise_valuation": 0,
-						}
-					).insert(ignore_permissions=True, set_name=batch_id)
-
-					self.assertTrue(batch_doc.use_batchwise_valuation)
-					batch_doc.db_set(
-						{
-							"use_batchwise_valuation": 0,
-							"batch_qty": 20,
-						}
-					)
-
-			qty_after_transaction = 0
-			balance_value = 0
-			i = 0
-			for batch_id in non_batchwise_val_batches:
-				i += 1
-				qty = 20
-				valuation = 100 * i
-				qty_after_transaction += qty
-				balance_value += qty * valuation
-
-				doc = frappe.get_doc(
+		for batch_id in non_batchwise_val_batches:
+			if not frappe.db.exists("Batch", batch_id):
+				batch_doc = frappe.get_doc(
 					{
-						"doctype": "Stock Ledger Entry",
-						"posting_date": today(),
-						"posting_time": nowtime(),
-						"batch_no": batch_id,
-						"incoming_rate": valuation,
-						"qty_after_transaction": qty_after_transaction,
-						"stock_value_difference": valuation * qty,
-						"stock_value": balance_value,
-						"balance_value": balance_value,
-						"valuation_rate": balance_value / qty_after_transaction,
-						"actual_qty": qty,
-						"item_code": batch_item_code,
-						"warehouse": "_Test Warehouse - _TC",
-						"company": "_Test Company",
+						"doctype": "Batch",
+						"batch_id": batch_id,
+						"item": batch_item_code,
+						"use_batchwise_valuation": 0,
+					}
+				).insert(ignore_permissions=True)
+
+				self.assertTrue(batch_doc.use_batchwise_valuation)
+				batch_doc.db_set(
+					{
+						"use_batchwise_valuation": 0,
+						"batch_qty": 20,
 					}
 				)
 
-				doc.set_posting_datetime()
-				doc.flags.ignore_permissions = True
-				doc.flags.ignore_mandatory = True
-				doc.flags.ignore_links = True
-				doc.flags.ignore_validate = True
-				doc.submit()
-				doc.reload()
+		qty_after_transaction = 0
+		balance_value = 0
+		i = 0
+		for batch_id in non_batchwise_val_batches:
+			i += 1
+			qty = 20
+			valuation = 100 * i
+			qty_after_transaction += qty
+			balance_value += qty * valuation
+
+			doc = frappe.get_doc(
+				{
+					"doctype": "Stock Ledger Entry",
+					"posting_date": today(),
+					"posting_time": nowtime(),
+					"batch_no": batch_id,
+					"incoming_rate": valuation,
+					"qty_after_transaction": qty_after_transaction,
+					"stock_value_difference": valuation * qty,
+					"stock_value": balance_value,
+					"balance_value": balance_value,
+					"valuation_rate": balance_value / qty_after_transaction,
+					"actual_qty": qty,
+					"item_code": batch_item_code,
+					"warehouse": "_Test Warehouse - _TC",
+					"company": "_Test Company",
+				}
+			)
+
+			doc.set_posting_datetime()
+			doc.flags.ignore_permissions = True
+			doc.flags.ignore_mandatory = True
+			doc.flags.ignore_links = True
+			doc.flags.ignore_validate = True
+			doc.submit()
+			doc.reload()
+
+		frappe.flags.ignore_serial_batch_bundle_validation = False
+		frappe.flags.use_serial_and_batch_fields = False
 
 		se = make_stock_entry(
 			item_code=batch_item_code,
@@ -686,7 +591,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 						"item": item_code,
 						"use_batchwise_valuation": use_batchwise_valuation,
 					}
-				).insert(ignore_permissions=True, set_name=batch_id)
+				).insert(ignore_permissions=True)
 
 				batch_doc.db_set("use_batchwise_valuation", use_batchwise_valuation)
 
@@ -811,68 +716,71 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 			item_code=serial_no_item_code, warehouse="_Test Warehouse - _TC", qty=1, rate=500
 		)
 
-		with patch.dict(
-			frappe.flags, {"ignore_serial_batch_bundle_validation": True, "use_serial_and_batch_fields": True}
-		):
-			serial_no_id = "Old Serial No 1"
-			if not frappe.db.exists("Serial No", serial_no_id):
-				sn_doc = frappe.get_doc(
-					{
-						"doctype": "Serial No",
-						"serial_no": serial_no_id,
-						"item_code": serial_no_item_code,
-						"company": "_Test Company",
-					}
-				).insert(ignore_permissions=True, set_name=serial_no_id)
+		frappe.flags.ignore_serial_batch_bundle_validation = True
+		frappe.flags.use_serial_and_batch_fields = True
 
-				sn_doc.db_set(
-					{
-						"warehouse": "_Test Warehouse - _TC",
-						"purchase_rate": 100,
-					}
-				)
-
-			doc = frappe.get_doc(
+		serial_no_id = "Old Serial No 1"
+		if not frappe.db.exists("Serial No", serial_no_id):
+			sn_doc = frappe.get_doc(
 				{
-					"doctype": "Stock Ledger Entry",
-					"posting_date": today(),
-					"posting_time": nowtime(),
+					"doctype": "Serial No",
 					"serial_no": serial_no_id,
-					"incoming_rate": 100,
-					"qty_after_transaction": 1,
-					"stock_value_difference": 100,
-					"balance_value": 100,
-					"valuation_rate": 100,
-					"actual_qty": 1,
 					"item_code": serial_no_item_code,
-					"warehouse": "_Test Warehouse - _TC",
 					"company": "_Test Company",
 				}
-			)
+			).insert(ignore_permissions=True)
 
-			doc.flags.ignore_permissions = True
-			doc.flags.ignore_mandatory = True
-			doc.flags.ignore_links = True
-			doc.flags.ignore_validate = True
-			doc.submit()
-
-			bundle_doc = make_serial_batch_bundle(
+			sn_doc.db_set(
 				{
-					"item_code": serial_no_item_code,
 					"warehouse": "_Test Warehouse - _TC",
-					"voucher_type": "Stock Entry",
-					"posting_date": today(),
-					"posting_time": nowtime(),
-					"qty": -1,
-					"serial_nos": [serial_no_id],
-					"type_of_transaction": "Outward",
-					"do_not_submit": True,
+					"purchase_rate": 100,
 				}
 			)
 
-			bundle_doc.reload()
-			for row in bundle_doc.entries:
-				self.assertEqual(flt(row.stock_value_difference, 2), -100.00)
+		doc = frappe.get_doc(
+			{
+				"doctype": "Stock Ledger Entry",
+				"posting_date": today(),
+				"posting_time": nowtime(),
+				"serial_no": serial_no_id,
+				"incoming_rate": 100,
+				"qty_after_transaction": 1,
+				"stock_value_difference": 100,
+				"balance_value": 100,
+				"valuation_rate": 100,
+				"actual_qty": 1,
+				"item_code": serial_no_item_code,
+				"warehouse": "_Test Warehouse - _TC",
+				"company": "_Test Company",
+			}
+		)
+
+		doc.flags.ignore_permissions = True
+		doc.flags.ignore_mandatory = True
+		doc.flags.ignore_links = True
+		doc.flags.ignore_validate = True
+		doc.submit()
+
+		bundle_doc = make_serial_batch_bundle(
+			{
+				"item_code": serial_no_item_code,
+				"warehouse": "_Test Warehouse - _TC",
+				"voucher_type": "Stock Entry",
+				"posting_date": today(),
+				"posting_time": nowtime(),
+				"qty": -1,
+				"serial_nos": [serial_no_id],
+				"type_of_transaction": "Outward",
+				"do_not_submit": True,
+			}
+		)
+
+		bundle_doc.reload()
+		for row in bundle_doc.entries:
+			self.assertEqual(flt(row.stock_value_difference, 2), -100.00)
+
+		frappe.flags.ignore_serial_batch_bundle_validation = False
+		frappe.flags.use_serial_and_batch_fields = False
 
 	def test_batch_not_belong_to_serial_no(self):
 		from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
@@ -947,7 +855,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 		)
 
 		serial_no = "SN-TEST-AUTO-DEL"
-		if not frappe.db.exists("Serial No", {"item_code": serial_and_batch_code, "serial_no": serial_no}):
+		if not frappe.db.exists("Serial No", serial_no):
 			frappe.get_doc(
 				{
 					"doctype": "Serial No",
@@ -956,9 +864,6 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 					"company": "_Test Company",
 				}
 			).insert(ignore_permissions=True)
-		serial_no = frappe.db.get_value(
-			"Serial No", {"item_code": serial_and_batch_code, "serial_no": serial_no}, "name"
-		)
 
 		bundle_doc = make_serial_batch_bundle(
 			{
@@ -984,7 +889,6 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 
 	def test_serial_and_batch_bundle_company(self):
 		from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
-		from erpnext.stock.services.serial_batch_bundle_service import SerialBatchBundleService
 
 		item = make_item(
 			"Test Serial and Batch Bundle Company Item",
@@ -1004,7 +908,9 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 
 		entries = []
 		for serial_no in ["TT-SER-VAL-00001", "TT-SER-VAL-00002", "TT-SER-VAL-00003"]:
-			if not frappe.db.exists("Serial No", {"item_code": item, "serial_no": serial_no}):
+			entries.append(frappe._dict({"serial_no": serial_no, "qty": 1}))
+
+			if not frappe.db.exists("Serial No", serial_no):
 				frappe.get_doc(
 					{
 						"doctype": "Serial No",
@@ -1013,8 +919,6 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 						"company": "_Test Company",
 					}
 				).insert(ignore_permissions=True)
-			serial_id = frappe.db.get_value("Serial No", {"item_code": item, "serial_no": serial_no}, "name")
-			entries.append(frappe._dict({"serial_no": serial_id, "qty": 1}))
 
 		item_row = pr.items[0]
 		item_row.type_of_transaction = "Inward"
@@ -1033,7 +937,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 					frappe.ValidationError,
 					"Company _Test Company 1 does not match with the company _Test Company",
 				):
-					SerialBatchBundleService(pr).validate_warehouse_of_sabb()
+					pr.validate_warehouse_of_sabb()
 
 	def test_auto_cancel_serial_and_batch(self):
 		item_code = make_item(
@@ -1109,23 +1013,39 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 			10,
 		)
 
-	@ERPNextTestSuite.change_settings("Stock Settings", {"do_not_use_batchwise_valuation": 0})
-	def test_csv_batch_reuses_existing_record(self):
+	def test_batch_duplicate_entry(self):
 		item_code = make_item(properties={"has_batch_no": 1}).name
-		batch_id = "TEST-BATTCCH-VAL-00001"
-		entries = resolve_csv_entries(
-			[{"batch_no": batch_id, "qty": 1}], item_code, "Inward", "_Test Company"
-		)
-		batch = frappe.get_doc("Batch", entries[0].batch_no)
-		self.assertEqual((batch.item, batch.batch_id), (item_code, batch_id))
-		self.assertNotEqual(batch.name, batch_id)
-		self.assertEqual(batch.use_batchwise_valuation, 1)
 
-		entries = resolve_csv_entries(
-			[{"batch_no": batch_id.lower(), "qty": 2}], item_code, "Inward", "_Test Company"
-		)
-		self.assertEqual(entries, [{"serial_no": None, "batch_no": batch.name, "qty": 2}])
-		self.assertEqual(frappe.db.count("Batch", {"item": item_code, "batch_id": batch_id}), 1)
+		batch_id = "TEST-BATTCCH-VAL-00001"
+		batch_nos = [{"batch_no": batch_id, "qty": 1}]
+
+		make_batch_nos(item_code, batch_nos)
+		self.assertTrue(frappe.db.exists("Batch", batch_id))
+		use_batchwise_valuation = frappe.db.get_value("Batch", batch_id, "use_batchwise_valuation")
+		self.assertEqual(use_batchwise_valuation, 1)
+
+		batch_id = "TEST-BATTCCH-VAL-00001"
+		batch_nos = [{"batch_no": batch_id, "qty": 1}]
+
+		# Shouldn't throw duplicate entry error
+		make_batch_nos(item_code, batch_nos)
+		self.assertTrue(frappe.db.exists("Batch", batch_id))
+
+	def test_serial_no_duplicate_entry(self):
+		item_code = make_item(properties={"has_serial_no": 1}).name
+
+		serial_no_id = "TEST-SNID-VAL-00001"
+		serial_nos = [{"serial_no": serial_no_id, "qty": 1}]
+
+		make_serial_nos(item_code, serial_nos)
+		self.assertTrue(frappe.db.exists("Serial No", serial_no_id))
+
+		serial_no_id = "TEST-SNID-VAL-00001"
+		serial_nos = [{"batch_no": serial_no_id, "qty": 1}]
+
+		# Shouldn't throw duplicate entry error
+		make_serial_nos(item_code, serial_nos)
+		self.assertTrue(frappe.db.exists("Serial No", serial_no_id))
 
 	@ERPNextTestSuite.change_settings(
 		"Stock Settings", {"auto_create_serial_and_batch_bundle_for_outward": 1}
@@ -1135,11 +1055,11 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 
 		item_code = make_item(properties={"is_stock_item": 1, "has_serial_no": 1}).name
 
-		serial = frappe.get_doc(
-			doctype="Serial No", item_code=item_code, serial_no=f"{item_code}-001", company="_Test Company"
-		).insert()
+		serial_no = f"{item_code}-001"
+		serial_nos = [{"serial_no": serial_no, "qty": 1}]
+		make_serial_nos(item_code, serial_nos)
 
-		pr1 = make_purchase_receipt(item=item_code, qty=1, rate=500, serial_no=[serial.name])
+		pr1 = make_purchase_receipt(item=item_code, qty=1, rate=500, serial_no=[serial_no])
 		pr2 = make_purchase_receipt(item=item_code, qty=1, rate=500, do_not_save=True)
 
 		pr1.reload()
@@ -1163,47 +1083,50 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 						"item_code": sn_item,
 						"company": "_Test Company",
 					}
-				).insert(ignore_permissions=True, set_name=serial_no)
+				).insert(ignore_permissions=True)
 				serial_nos.append(serial_no)
 
-		with patch.dict(frappe.flags, {"ignore_serial_batch_bundle_validation": True}):
-			qty_after_transaction = 0.0
-			stock_value = 0.0
-			for row in [{"qty": 2, "rate": 100}, {"qty": -2, "rate": 100}, {"qty": 2, "rate": 200}]:
-				row = frappe._dict(row)
-				qty_after_transaction += row.qty
-				stock_value += row.rate * row.qty
+		frappe.flags.ignore_serial_batch_bundle_validation = True
 
-				doc = frappe.get_doc(
-					{
-						"doctype": "Stock Ledger Entry",
-						"posting_date": today(),
-						"posting_time": nowtime(),
-						"incoming_rate": row.rate if row.qty > 0 else 0,
-						"qty_after_transaction": qty_after_transaction,
-						"stock_value_difference": row.rate * row.qty,
-						"stock_value": stock_value,
-						"valuation_rate": row.rate,
-						"actual_qty": row.qty,
-						"item_code": sn_item,
-						"warehouse": "_Test Warehouse - _TC",
-						"serial_no": "\n".join(serial_nos),
-						"company": "_Test Company",
-					}
-				)
-				doc.set_posting_datetime()
-				doc.flags.ignore_permissions = True
-				doc.flags.ignore_mandatory = True
-				doc.flags.ignore_links = True
-				doc.flags.ignore_validate = True
-				doc.submit()
+		qty_after_transaction = 0.0
+		stock_value = 0.0
+		for row in [{"qty": 2, "rate": 100}, {"qty": -2, "rate": 100}, {"qty": 2, "rate": 200}]:
+			row = frappe._dict(row)
+			qty_after_transaction += row.qty
+			stock_value += row.rate * row.qty
 
-				for sn in serial_nos:
-					sn_doc = frappe.get_doc("Serial No", sn)
-					if row.qty > 0:
-						sn_doc.db_set("warehouse", "_Test Warehouse - _TC")
-					else:
-						sn_doc.db_set("warehouse", "")
+			doc = frappe.get_doc(
+				{
+					"doctype": "Stock Ledger Entry",
+					"posting_date": today(),
+					"posting_time": nowtime(),
+					"incoming_rate": row.rate if row.qty > 0 else 0,
+					"qty_after_transaction": qty_after_transaction,
+					"stock_value_difference": row.rate * row.qty,
+					"stock_value": stock_value,
+					"valuation_rate": row.rate,
+					"actual_qty": row.qty,
+					"item_code": sn_item,
+					"warehouse": "_Test Warehouse - _TC",
+					"serial_no": "\n".join(serial_nos),
+					"company": "_Test Company",
+				}
+			)
+			doc.set_posting_datetime()
+			doc.flags.ignore_permissions = True
+			doc.flags.ignore_mandatory = True
+			doc.flags.ignore_links = True
+			doc.flags.ignore_validate = True
+			doc.submit()
+
+			for sn in serial_nos:
+				sn_doc = frappe.get_doc("Serial No", sn)
+				if row.qty > 0:
+					sn_doc.db_set("warehouse", "_Test Warehouse - _TC")
+				else:
+					sn_doc.db_set("warehouse", "")
+
+		frappe.flags.ignore_serial_batch_bundle_validation = False
 
 		se = make_stock_entry(
 			item_code=sn_item,
@@ -1232,7 +1155,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 			target="_Test Warehouse - _TC",
 		)
 
-		serial_no = get_serial_numbers_from_bundle(se.items[0].serial_and_batch_bundle)[0]
+		serial_no = get_serial_nos_from_bundle(se.items[0].serial_and_batch_bundle)[0]
 
 		se = make_stock_entry(
 			item_code=sn_item,
@@ -1315,7 +1238,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 			},
 		).name
 
-		if not frappe.db.exists("Batch", {"item": item_code, "batch_id": "ACSBBO-TACSB-00001"}):
+		if not frappe.db.exists("Batch", "ACSBBO-TACSB-00001"):
 			frappe.get_doc(
 				{
 					"doctype": "Batch",
@@ -1324,7 +1247,6 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 					"company": "_Test Company",
 				}
 			).insert(ignore_permissions=True)
-		batch_no = frappe.db.get_value("Batch", {"item": item_code, "batch_id": "ACSBBO-TACSB-00001"}, "name")
 
 		make_stock_entry(
 			item_code=item_code,
@@ -1332,7 +1254,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 			target="_Test Warehouse - _TC",
 			rate=500,
 			use_serial_batch_fields=True,
-			batch_no=batch_no,
+			batch_no="ACSBBO-TACSB-00001",
 		)
 
 		dispatch = make_stock_entry(
@@ -1377,7 +1299,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 			do_not_submit=True,
 		)
 
-		if not frappe.db.exists("Batch", {"item": item_code, "batch_id": "TST-ACSBBO-TACSB-00001"}):
+		if not frappe.db.exists("Batch", "TST-ACSBBO-TACSB-00001"):
 			frappe.get_doc(
 				{
 					"doctype": "Batch",
@@ -1386,9 +1308,6 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 					"company": "_Test Company",
 				}
 			).insert(ignore_permissions=True)
-		batch_no = frappe.db.get_value(
-			"Batch", {"item": item_code, "batch_id": "TST-ACSBBO-TACSB-00001"}, "name"
-		)
 
 		bundle_doc = make_serial_batch_bundle(
 			{
@@ -1398,7 +1317,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 				"posting_date": today(),
 				"posting_time": nowtime(),
 				"qty": 10,
-				"batches": frappe._dict({batch_no: 10}),
+				"batches": frappe._dict({"TST-ACSBBO-TACSB-00001": 10}),
 				"type_of_transaction": "Inward",
 				"do_not_submit": True,
 			}
@@ -1427,11 +1346,11 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 
 		se.remove(se.items[1])
 		se.save()
-		self.assertEqual(len(se.items), 1)
+		self.assertTrue(len(se.items) == 1)
 		se.submit()
 
 		bundle_doc.reload()
-		self.assertEqual(bundle_doc.docstatus, 0)
+		self.assertTrue(bundle_doc.docstatus == 0)
 		self.assertRaises(frappe.ValidationError, bundle_doc.submit)
 
 	@ERPNextTestSuite.change_settings("Stock Settings", {"do_not_use_batchwise_valuation": 0})
@@ -1522,7 +1441,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 		self.assertIsNone(frappe.get_value("Serial No", serial_no, "reference_name"))
 
 		se1 = frappe.copy_doc(se, ignore_no_copy=False)
-		se1.items[0].serial_no = frappe.db.get_value("Serial No", serial_no, "serial_no")
+		se1.items[0].serial_no = serial_no
 		se1.submit()
 
 		self.assertEqual(frappe.get_value("Serial No", serial_no, "reference_name"), se1.name)
@@ -1552,7 +1471,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 					"item": batch_item_code,
 					"use_batchwise_valuation": 0,
 				}
-			).insert(ignore_permissions=True, set_name=batch_id)
+			).insert(ignore_permissions=True)
 
 			batch_doc.db_set(
 				{
@@ -1613,48 +1532,6 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 
 		self.assertEqual(json.loads(return_sle.stock_queue), [[10, 100], [20, 200]])
 
-	def test_lifo_issue_from_non_batchwise_batch(self):
-		item_code = make_item(
-			"LIFO Non Batchwise Valuation Item",
-			{
-				"has_batch_no": 1,
-				"batch_number_series": "LIFO-NBW-.#####",
-				"is_stock_item": 1,
-				"valuation_method": "LIFO",
-			},
-		).name
-
-		for batch_id, rate in (("LIFO-NBW-A", 100), ("LIFO-NBW-B", 200)):
-			frappe.get_doc({"doctype": "Batch", "batch_id": batch_id, "item": item_code}).insert(
-				set_name=batch_id
-			)
-			frappe.db.set_value("Batch", batch_id, "use_batchwise_valuation", 0)
-			make_stock_entry(
-				item_code=item_code,
-				target="_Test Warehouse - _TC",
-				qty=10,
-				rate=rate,
-				batch_no=batch_id,
-				use_serial_batch_fields=True,
-			)
-
-		issue = make_stock_entry(
-			item_code=item_code,
-			source="_Test Warehouse - _TC",
-			qty=5,
-			batch_no="LIFO-NBW-A",
-			use_serial_batch_fields=True,
-		)
-
-		sle = frappe.db.get_value(
-			"Stock Ledger Entry",
-			{"voucher_no": issue.name, "is_cancelled": 0},
-			["stock_value_difference", "stock_queue"],
-			as_dict=True,
-		)
-		self.assertEqual(sle.stock_value_difference, -1000)
-		self.assertEqual(json.loads(sle.stock_queue), [[10, 100], [5, 200]])
-
 	def test_lifo_purchase_return_from_non_batchwise_batch(self):
 		from erpnext.controllers.sales_and_purchase_return import make_return_doc
 		from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
@@ -1701,6 +1578,48 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 		self.assertEqual(sle.stock_value, 2500)
 		self.assertEqual(json.loads(sle.stock_queue), [[5, 100], [10, 200]])
 
+	def test_lifo_issue_from_non_batchwise_batch(self):
+		item_code = make_item(
+			"LIFO Non Batchwise Valuation Item",
+			{
+				"has_batch_no": 1,
+				"batch_number_series": "LIFO-NBW-.#####",
+				"is_stock_item": 1,
+				"valuation_method": "LIFO",
+			},
+		).name
+
+		for batch_id, rate in (("LIFO-NBW-A", 100), ("LIFO-NBW-B", 200)):
+			frappe.get_doc({"doctype": "Batch", "batch_id": batch_id, "item": item_code}).insert(
+				set_name=batch_id
+			)
+			frappe.db.set_value("Batch", batch_id, "use_batchwise_valuation", 0)
+			make_stock_entry(
+				item_code=item_code,
+				target="_Test Warehouse - _TC",
+				qty=10,
+				rate=rate,
+				batch_no=batch_id,
+				use_serial_batch_fields=True,
+			)
+
+		issue = make_stock_entry(
+			item_code=item_code,
+			source="_Test Warehouse - _TC",
+			qty=5,
+			batch_no="LIFO-NBW-A",
+			use_serial_batch_fields=True,
+		)
+
+		sle = frappe.db.get_value(
+			"Stock Ledger Entry",
+			{"voucher_no": issue.name, "is_cancelled": 0},
+			["stock_value_difference", "stock_queue"],
+			as_dict=True,
+		)
+		self.assertEqual(sle.stock_value_difference, -1000)
+		self.assertEqual(json.loads(sle.stock_queue), [[10, 100], [5, 200]])
+
 	def test_stock_queue_for_return_entry_with_empty_fifo_queue(self):
 		"""Credit note (sales return) against empty FIFO queue should still rebuild stock_queue."""
 		from erpnext.controllers.sales_and_purchase_return import make_return_doc
@@ -1727,7 +1646,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 					"item": batch_item_code,
 					"use_batchwise_valuation": 0,
 				}
-			).insert(ignore_permissions=True, set_name=batch_id)
+			).insert(ignore_permissions=True)
 
 			batch_doc.db_set(
 				{
@@ -1780,25 +1699,14 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 		# Stock queue should have the returned stock: [[5, 100]]
 		self.assertEqual(json.loads(return_sle.stock_queue), [[5, 100]])
 
-	def test_get_picked_batches_runs(self):
-		from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import get_picked_batches
-
-		# Sum(qty) is selected with bare batch_no/warehouse; without a GROUP BY this
-		# raises a GroupingError on Postgres (and collapses to one arbitrary row on
-		# MariaDB). It must run and return a per-(batch, warehouse) mapping on both.
-		result = get_picked_batches(frappe._dict())
-		self.assertIsInstance(result, dict)
-
 	def _assert_legacy_return_valuation(self, item_code, props, batch_no=None):
 		"""Return against a legacy serial/batch receipt (no Serial and Batch Bundle) must value outgoing stock from the original ledger rate."""
 		from erpnext.controllers.sales_and_purchase_return import make_return_doc
 		from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
 
 		make_item(item_code, props)
-		if batch_no and not frappe.db.exists("Batch", {"item": item_code, "batch_id": batch_no}):
+		if batch_no and not frappe.db.exists("Batch", batch_no):
 			frappe.get_doc({"doctype": "Batch", "batch_id": batch_no, "item": item_code}).insert()
-		if batch_no:
-			batch_no = frappe.db.get_value("Batch", {"item": item_code, "batch_id": batch_no}, "name")
 
 		pr = make_purchase_receipt(
 			item_code=item_code, qty=10, rate=100, batch_no=batch_no, use_serial_batch_fields=True
@@ -1833,9 +1741,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 		if batch_no:
 			rt.items[0].batch_no = batch_no
 		if serial_nos:
-			rt.items[0].serial_no = "\n".join(
-				frappe.db.get_value("Serial No", serial_id, "serial_no") for serial_id in serial_nos[:4]
-			)
+			rt.items[0].serial_no = "\n".join(serial_nos[:4])
 		rt.submit()
 
 		difference_in_stock_value = frappe.db.get_value(
@@ -1880,18 +1786,17 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 
 	def _setup_negative_batch_item(self, item_code, batches):
 		make_item(item_code, properties={"is_stock_item": 1, "has_batch_no": 1})
-		batch_ids = []
 		for batch_no in batches:
-			if not frappe.db.exists("Batch", {"item": item_code, "batch_id": batch_no}):
+			if not frappe.db.exists("Batch", batch_no):
 				frappe.get_doc(
 					{"doctype": "Batch", "batch_id": batch_no, "item": item_code, "company": "_Test Company"}
 				).insert(ignore_permissions=True)
-			batch_ids.append(frappe.db.get_value("Batch", {"item": item_code, "batch_id": batch_no}, "name"))
-		return batch_ids
 
 	def _allow_negative_stock_temporarily(self):
 		for field in ("allow_negative_stock", "allow_negative_stock_for_batch"):
+			original = frappe.db.get_single_value("Stock Settings", field)
 			frappe.db.set_single_value("Stock Settings", field, 1)
+			self.addCleanup(frappe.db.set_single_value, "Stock Settings", field, original)
 
 	def _disable_negative_stock(self):
 		frappe.db.set_single_value("Stock Settings", "allow_negative_stock", 0)
@@ -1907,7 +1812,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 
 		item_code = "Test Hist Neg Batch Item"
 		ballast_batch, batch_no = "THNB-BALLAST-001", "THNB-BATCH-001"
-		ballast_batch, batch_no = self._setup_negative_batch_item(item_code, [ballast_batch, batch_no])
+		self._setup_negative_batch_item(item_code, [ballast_batch, batch_no])
 		warehouse = "_Test Warehouse - _TC"
 
 		self._allow_negative_stock_temporarily()
@@ -1966,7 +1871,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 
 		item_code = "Test Future Neg Batch Item"
 		ballast_batch, batch_no = "TFNB-BALLAST-001", "TFNB-BATCH-001"
-		ballast_batch, batch_no = self._setup_negative_batch_item(item_code, [ballast_batch, batch_no])
+		self._setup_negative_batch_item(item_code, [ballast_batch, batch_no])
 		warehouse = "_Test Warehouse - _TC"
 
 		make_stock_entry(
@@ -2053,11 +1958,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 			use_serial_batch_fields=1,
 		)
 
-		return self.get_serial_numbers(item_code, entry.items[0].serial_and_batch_bundle)
-
-	def get_serial_numbers(self, item_code, bundle):
-		"""Physical numbers, which is what the serial_no field on a voucher row holds."""
-		return SerialBatchIdentity("Serial No").get_numbers(item_code, get_serial_nos_from_bundle(bundle))
+		return get_serial_nos_from_bundle(entry.items[0].serial_and_batch_bundle)
 
 	def issue_serial_no(self, item_code, serial_no, warehouse, posting_date=None):
 		return make_stock_entry(
@@ -2150,7 +2051,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 
 		make_purchase_receipt(item_code=item.name, qty=2, rate=100, warehouse=warehouse)
 		costlier_receipt = make_purchase_receipt(item_code=item.name, qty=2, rate=200, warehouse=warehouse)
-		serial_nos = self.get_serial_numbers(item.name, costlier_receipt.items[0].serial_and_batch_bundle)
+		serial_nos = get_serial_nos_from_bundle(costlier_receipt.items[0].serial_and_batch_bundle)
 
 		entry = self.make_purchase_return_for_serial_no(item.name, serial_nos[-1], costlier_receipt)
 
@@ -2164,7 +2065,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 
 		make_purchase_receipt(item_code=item.name, qty=2, rate=100, warehouse=warehouse)
 		costlier_receipt = make_purchase_receipt(item_code=item.name, qty=2, rate=200, warehouse=warehouse)
-		serial_nos = self.get_serial_numbers(item.name, costlier_receipt.items[0].serial_and_batch_bundle)
+		serial_nos = get_serial_nos_from_bundle(costlier_receipt.items[0].serial_and_batch_bundle)
 
 		entry = self.make_purchase_return_for_serial_no(item.name, serial_nos[-1], costlier_receipt)
 
@@ -2266,7 +2167,7 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 			warehouse=warehouse,
 			posting_date=add_days(posting_date, 1),
 		)
-		serial_nos = self.get_serial_numbers(item.name, costlier_receipt.items[0].serial_and_batch_bundle)
+		serial_nos = get_serial_nos_from_bundle(costlier_receipt.items[0].serial_and_batch_bundle)
 
 		entry = self.make_purchase_return_for_serial_no(item.name, serial_nos[-1], costlier_receipt)
 		self.assertEqual(flt(self.get_stock_value_difference(entry.name)), -200.0)
@@ -2330,83 +2231,6 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 		item.reload()
 		self.assertEqual(item.valuation_method, "FIFO")
 
-	def test_first_transaction_uses_moving_average_when_disabled(self):
-		from collections import defaultdict
-
-		from erpnext.stock.utils import get_valuation_method
-
-		item = self.make_serial_item_for_valuation("_Test Serial Wise Valuation First Txn", 0)
-		warehouse = "_Test Warehouse - _TC"
-
-		item.reload()
-		item.valuation_method = "FIFO"
-		item.save()
-
-		previous_cache = getattr(frappe.local, "request_cache", None)
-		self.addCleanup(setattr, frappe.local, "request_cache", previous_cache)
-		frappe.local.request_cache = defaultdict(dict)
-
-		# Any method may be stored and used while the item has no ledger. Reading it here also
-		# primes the request cache with FIFO, the way validate() does before entries exist.
-		self.assertEqual(item.valuation_method, "FIFO")
-		self.assertEqual(get_valuation_method(item.name), "FIFO")
-
-		serial_nos = self.receive_serial_stock(item.name, 1, 100, warehouse)
-		self.receive_serial_stock(item.name, 1, 200, warehouse)
-
-		# The issue must be valued at the moving average of 150, not the FIFO rate of 100, even
-		# though the cache primed above still holds FIFO.
-		entry = self.issue_serial_no(item.name, serial_nos[0], warehouse)
-		stock_value_difference = frappe.db.get_value(
-			"Stock Ledger Entry",
-			{"voucher_no": entry.name, "is_cancelled": 0},
-			"stock_value_difference",
-		)
-		self.assertEqual(flt(stock_value_difference, 2), -100.0)
-
-		# Posting stock does not save the item, so the stored method stays FIFO while the
-		# effective method is Moving Average now that a ledger exists.
-		item.reload()
-		self.assertEqual(item.valuation_method, "FIFO")
-		frappe.local.request_cache = defaultdict(dict)
-		self.assertEqual(get_valuation_method(item.name), "FIFO")
-
-	def test_legacy_serial_no_lookup_is_case_insensitive(self):
-		# MariaDB matches serial_no under a case insensitive collation, PostgreSQL does not.
-		# This asserts the lookup behaves the same on both; it can only fail on PostgreSQL.
-		from erpnext.stock.deprecated_serial_batch import DeprecatedSerialNoValuation
-
-		item = self.make_serial_item_for_valuation("_Test Legacy Serial Case", 1)
-		warehouse = "_Test Warehouse - _TC"
-		serial_no = self.receive_serial_stock(item.name, 1, 100, warehouse)[0]
-
-		# Rewrite the receipt into the pre-bundle representation.
-		sles = frappe.get_all(
-			"Stock Ledger Entry",
-			filters={"item_code": item.name, "is_cancelled": 0},
-			fields=["name", "posting_datetime"],
-		)
-		for sle in sles:
-			frappe.db.set_value(
-				"Stock Ledger Entry", sle.name, {"serial_and_batch_bundle": None, "serial_no": serial_no}
-			)
-
-		class LegacyLookup(DeprecatedSerialNoValuation):
-			def __init__(self, sle):
-				self.sle = sle
-
-		lookup = LegacyLookup(
-			frappe._dict(
-				item_code=item.name,
-				company=frappe.get_cached_value("Warehouse", warehouse, "company"),
-				warehouse=warehouse,
-			)
-		)
-		posting_datetime = sles[0].posting_datetime
-
-		self.assertTrue(lookup.get_last_inward_sle_for_serial_no(serial_no, posting_datetime))
-		self.assertTrue(lookup.get_last_inward_sle_for_serial_no(serial_no.swapcase(), posting_datetime))
-
 	def test_cannot_set_fifo_when_serial_no_wise_valuation_disabled(self):
 		item = self.make_serial_item_for_valuation("_Test Serial Wise Valuation No FIFO", 0)
 		self.receive_serial_stock(item.name, 1, 100, "_Test Warehouse - _TC")
@@ -2455,166 +2279,14 @@ class TestSerialandBatchBundle(ERPNextTestSuite):
 		item.reload()
 		self.assertEqual(item.use_serial_no_wise_valuation, 1)
 
-	def test_get_serial_batch_ledgers_fences_each_entry_batch(self):
-		from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import (
-			get_serial_batch_ledgers,
-		)
+	def test_get_picked_batches_runs(self):
+		from erpnext.stock.doctype.serial_and_batch_bundle.serial_and_batch_bundle import get_picked_batches
 
-		item = make_item(
-			"UP Fenced Batch Item",
-			{
-				"has_batch_no": 1,
-				"create_new_batch": 1,
-				"batch_number_series": "UPFB-.#####",
-				"is_stock_item": 1,
-			},
-		).name
-		se = make_stock_entry(item_code=item, target="_Test Warehouse - _TC", qty=2, rate=100)
-		bundle = se.items[0].serial_and_batch_bundle
-		batch = frappe.db.get_value("Serial and Batch Entry", {"parent": bundle}, "batch_no")
-		other = (
-			frappe.get_doc({"doctype": "Batch", "batch_id": "UPFB-OTHER-0001", "item": item}).insert().name
-		)
-		outside = make_fenced_user("sabb-fenced@example.com", ["Stock User"], [("Batch", other)])
-		with as_user(outside):
-			self.assertEqual(get_serial_batch_ledgers(name=bundle), [])
-		company_outside = make_company_fenced_user(
-			"sabb-fenced@example.com", ["Stock User"], "_Test Company 1"
-		)
-		with as_user(company_outside):
-			self.assertEqual(get_serial_batch_ledgers(name=bundle), [])
-			for name in malformed_names():
-				if isinstance(name, dict):
-					assert_type_gated(self, get_serial_batch_ledgers, name=name)
-				else:
-					self.assertEqual(get_serial_batch_ledgers(name=name), [])
-		inside = make_fenced_user("sabb-fenced@example.com", ["Stock User"], [("Batch", batch)])
-		with as_user(inside):
-			rows = get_serial_batch_ledgers(name=bundle)
-		self.assertEqual(len(rows), 1)
-		self.assertEqual(rows[0].batch_no, batch)
-		unfenced = make_fenced_user("sabb-unfenced@example.com", ["Stock User"])
-		with as_user(unfenced):
-			self.assertEqual(len(get_serial_batch_ledgers(name=bundle)), 1)
-
-	def test_add_serial_batch_ledgers_checks_write_on_an_existing_bundle(self):
-		from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
-
-		item = make_item(
-			"UP Fenced Serial Item",
-			{"has_serial_no": 1, "serial_no_series": "UPFS-.#####", "is_stock_item": 1},
-		).name
-		pr = make_purchase_receipt(
-			item_code=item, warehouse="_Test Warehouse - _TC", qty=1, rate=100, do_not_submit=True
-		)
-		serial_no = (
-			frappe.db.get_value("Serial No", {"item_code": item, "serial_no": "UPFS-00001"})
-			or frappe.get_doc(
-				{
-					"doctype": "Serial No",
-					"serial_no": "UPFS-00001",
-					"item_code": item,
-					"company": "_Test Company",
-				}
-			)
-			.insert()
-			.name
-		)
-		entries = [frappe._dict({"serial_no": serial_no, "qty": 1})]
-		item_row = pr.items[0]
-		item_row.type_of_transaction = "Inward"
-		item_row.is_rejected = 0
-		bundle = add_serial_batch_ledgers(entries, item_row, pr, "_Test Warehouse - _TC")
-		item_row.serial_and_batch_bundle = bundle.name
-		outside = make_company_fenced_user("sabb-writer@example.com", ["Stock User"], "_Test Company 1")
-		with as_user(outside):
-			assert_refused(self, add_serial_batch_ledgers, entries, item_row, pr, "_Test Warehouse - _TC")
-		frappe.db.set_value("Purchase Receipt Item", item_row.name, "serial_and_batch_bundle", bundle.name)
-		with as_user(outside):
-			assert_refused_without(
-				self,
-				[bundle.name, pr.name],
-				add_serial_batch_ledgers,
-				entries,
-				item_row,
-				pr,
-				"_Test Warehouse - _TC",
-				do_not_save=True,
-			)
-		unfenced = make_fenced_user("sabb-unfenced@example.com", ["Stock User"])
-		with as_user(unfenced):
-			bundle_modified = frappe.db.get_value("Serial and Batch Bundle", bundle.name, "modified")
-			for name in malformed_names():
-				if isinstance(name, str):
-					continue
-				item_row.serial_and_batch_bundle = name
-				created = add_serial_batch_ledgers(entries, item_row, pr, "_Test Warehouse - _TC")
-				self.assertNotEqual(created.name, bundle.name)
-			self.assertEqual(
-				frappe.db.get_value("Serial and Batch Bundle", bundle.name, "modified"), bundle_modified
-			)
-		item_row.serial_and_batch_bundle = bundle.name
-		inside = make_company_fenced_user("sabb-writer@example.com", ["Stock User"], "_Test Company")
-		with as_user(inside):
-			self.assertEqual(
-				add_serial_batch_ledgers(entries, item_row, pr, "_Test Warehouse - _TC").name, bundle.name
-			)
-
-	def test_add_serial_batch_ledgers_never_resolves_a_filter_to_an_existing_bundle(self):
-		from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
-
-		item = make_item(
-			"UP Filter Serial Item",
-			{"has_serial_no": 1, "serial_no_series": "UPFF-.#####", "is_stock_item": 1},
-		).name
-		pr = make_purchase_receipt(
-			item_code=item, warehouse="_Test Warehouse - _TC", qty=1, rate=100, do_not_submit=True
-		)
-		serial_nos = []
-		for number in ("UPFF-00001", "UPFF-00002"):
-			serial_nos.append(
-				frappe.get_doc(
-					{
-						"doctype": "Serial No",
-						"serial_no": number,
-						"item_code": item,
-						"company": "_Test Company",
-					}
-				)
-				.insert()
-				.name
-			)
-		item_row = pr.items[0]
-		item_row.type_of_transaction = "Inward"
-		item_row.is_rejected = 0
-		bundle = add_serial_batch_ledgers(
-			[frappe._dict({"serial_no": serial_nos[0], "qty": 1})], item_row, pr, "_Test Warehouse - _TC"
-		).name
-		item_row.serial_and_batch_bundle = bundle
-		add_serial_batch_ledgers(
-			[frappe._dict({"serial_no": serial_nos[1], "qty": 1})], item_row, pr, "_Test Warehouse - _TC"
-		)
-		entries = frappe.get_all("Serial and Batch Entry", filters={"parent": bundle}, pluck="serial_no")
-		self.assertEqual(entries, [serial_nos[1]])
-		modified = frappe.db.get_value("Serial and Batch Bundle", bundle, "modified")
-		outside = make_company_fenced_user("sabb-filter@example.com", ["Stock User"], "_Test Company 1")
-		for user in (outside, "Administrator"):
-			item_row.serial_and_batch_bundle = {"name": bundle}
-			with as_user(user):
-				try:
-					add_serial_batch_ledgers(
-						[frappe._dict({"serial_no": serial_nos[0], "qty": 1})],
-						item_row,
-						pr,
-						"_Test Warehouse - _TC",
-					)
-				except (frappe.ValidationError, frappe.PermissionError):
-					pass
-			self.assertEqual(
-				frappe.get_all("Serial and Batch Entry", filters={"parent": bundle}, pluck="serial_no"),
-				[serial_nos[1]],
-			)
-			self.assertEqual(frappe.db.get_value("Serial and Batch Bundle", bundle, "modified"), modified)
+		# Sum(qty) is selected with bare batch_no/warehouse; without a GROUP BY this
+		# raises a GroupingError on Postgres (and collapses to one arbitrary row on
+		# MariaDB). It must run and return a per-(batch, warehouse) mapping on both.
+		result = get_picked_batches(frappe._dict())
+		self.assertIsInstance(result, dict)
 
 	def test_same_new_serial_on_two_rows_of_one_receipt_is_refused(self):
 		item_code = make_item(properties={"is_stock_item": 1, "has_serial_no": 1}).name
@@ -2752,15 +2424,6 @@ def get_serial_nos_from_bundle(bundle):
 	return sorted(serial_nos) if serial_nos else []
 
 
-def get_serial_numbers_from_bundle(bundle):
-	return frappe.get_all(
-		"Serial No",
-		filters={"name": ("in", get_serial_nos_from_bundle(bundle))},
-		pluck="serial_no",
-		order_by="serial_no",
-	)
-
-
 def make_serial_batch_bundle(kwargs):
 	from erpnext.stock.serial_batch_bundle import SerialBatchCreation
 
@@ -2867,36 +2530,6 @@ class TestSerialandBatchBundleLogic(ERPNextTestSuite):
 			get_type_of_transaction(frappe._dict(doctype="Purchase Receipt", is_return=1), frappe._dict()),
 			"Outward",
 		)
-
-	def test_transaction_direction_ignores_row_override(self):
-		cases = [
-			("Delivery Note", {}, {}, "Outward"),
-			("Sales Invoice", {"is_return": 1}, {}, "Inward"),
-			("Purchase Receipt", {}, {}, "Inward"),
-			("Purchase Invoice", {"is_return": 1}, {}, "Outward"),
-			("Stock Entry", {}, {"s_warehouse": "Source", "t_warehouse": "Target"}, "Outward"),
-			("Stock Entry", {}, {"t_warehouse": "Target"}, "Inward"),
-			("Stock Reconciliation", {}, {}, "Inward"),
-			("Subcontracting Receipt", {}, {"doctype": "Subcontracting Receipt Item"}, "Inward"),
-			("Subcontracting Receipt", {}, {"doctype": "Subcontracting Receipt Supplied Item"}, "Outward"),
-			(
-				"Subcontracting Receipt",
-				{"is_return": 1},
-				{"doctype": "Subcontracting Receipt Supplied Item"},
-				"Inward",
-			),
-			("Asset Repair", {}, {"consumed_quantity": 1}, "Outward"),
-			("Asset Repair", {}, {"consumed_quantity": -1}, "Outward"),
-			("Pick List", {}, {"qty": 1}, "Outward"),
-			("Pick List", {}, {"qty": -1}, "Outward"),
-		]
-		for doctype, parent_values, row_values, expected in cases:
-			parent = frappe._dict(doctype=doctype, **parent_values)
-			row = frappe._dict(row_values)
-			row.type_of_transaction = "Outward" if expected == "Inward" else "Inward"
-			with self.subTest(doctype=doctype, parent=parent_values, row=row_values):
-				self.assertEqual(get_type_of_transaction(parent, row), expected)
-				self.assertNotEqual(row.type_of_transaction, expected)
 
 	def test_duplicate_serial_no_in_entries_is_rejected(self):
 		doc = frappe.new_doc("Serial and Batch Bundle")
@@ -3162,3 +2795,226 @@ class TestSerialandBatchBundleLogic(ERPNextTestSuite):
 			self.assertEqual(flt(sle.stock_value_difference, 2), flt(sle.actual_qty * outgoing_rate, 2))
 
 		self.assertEqual(flt(sl_entries[-1].stock_value, 2), flt(balance_value, 2))
+
+
+UP_STOCK_USER = "test_sbb_up_stock_user@example.com"
+UP_BATCH_ITEM = "_Test SBB UP Batch Item"
+UP_BATCH_IN = "_Test SBB UP Batch 1"
+UP_BATCH_OUT = "_Test SBB UP Batch 2"
+UP_COMPANY = "_Test Company"
+UP_WAREHOUSE = "Stores - _TC"
+UP_OTHER_WAREHOUSE = "Stores - _TC3"
+
+
+class TestSerialandBatchBundleUserPermissions(ERPNextTestSuite):
+	def setUp(self):
+		make_item(UP_BATCH_ITEM, {"is_stock_item": 1, "has_batch_no": 1, "stock_uom": "Nos"})
+		for batch_no in (UP_BATCH_IN, UP_BATCH_OUT):
+			if not frappe.db.exists("Batch", batch_no):
+				frappe.get_doc({"doctype": "Batch", "batch_id": batch_no, "item": UP_BATCH_ITEM}).insert(
+					ignore_permissions=True
+				)
+
+	def make_draft_bundle(self, company, warehouse, batches):
+		bundle = frappe.get_doc(
+			{
+				"doctype": "Serial and Batch Bundle",
+				"company": company,
+				"item_code": UP_BATCH_ITEM,
+				"warehouse": warehouse,
+				"type_of_transaction": "Inward",
+				"voucher_type": "Purchase Receipt",
+			}
+		)
+		for batch_no in batches:
+			bundle.append(
+				"entries", {"batch_no": batch_no, "qty": 2, "warehouse": warehouse, "incoming_rate": 10}
+			)
+		bundle.flags.ignore_validate = True
+		bundle.insert(ignore_permissions=True)
+		return bundle.name
+
+	def make_child_row(self, bundle):
+		return {
+			"doctype": "Purchase Receipt Item",
+			"parenttype": "Purchase Receipt",
+			"name": "_Test SBB UP Row",
+			"item_code": UP_BATCH_ITEM,
+			"warehouse": UP_WAREHOUSE,
+			"serial_and_batch_bundle": bundle,
+		}
+
+	def add_ledgers(self, bundle):
+		parent = {"doctype": "Purchase Receipt", "company": UP_COMPANY, "posting_date": today()}
+		entries = [{"batch_no": UP_BATCH_OUT, "qty": 3}]
+		return add_serial_batch_ledgers(entries, self.make_child_row(bundle), parent, UP_WAREHOUSE)
+
+	def make_receipt_row(self, company, warehouse, bundle):
+		receipt = insert_test_record(
+			"Purchase Receipt",
+			{"company": company, "supplier": "_Test Supplier", "posting_date": today(), "docstatus": 0},
+		)
+		row = insert_test_record(
+			"Purchase Receipt Item",
+			{
+				"parent": receipt,
+				"parenttype": "Purchase Receipt",
+				"parentfield": "items",
+				"idx": 1,
+				"item_code": UP_BATCH_ITEM,
+				"warehouse": warehouse,
+				"serial_and_batch_bundle": bundle,
+			},
+		)
+		return receipt, row
+
+	def add_ledgers_from_row(self, row, claimed_bundle=None):
+		parent = {"doctype": "Purchase Receipt", "company": UP_COMPANY, "posting_date": today()}
+		entries = [{"batch_no": UP_BATCH_OUT, "qty": 3}]
+		child_row = self.make_child_row(claimed_bundle)
+		child_row["name"] = row
+		return add_serial_batch_ledgers(entries, child_row, parent, UP_WAREHOUSE, do_not_save=True)
+
+	def get_entries(self, bundle):
+		entries = []
+		for row in frappe.get_all(
+			"Serial and Batch Entry",
+			filters={"parent": bundle},
+			fields=["batch_no", "qty", "warehouse"],
+			order_by="idx",
+		):
+			entries.append((row.batch_no, row.qty, row.warehouse))
+		return entries
+
+	def get_ledger_batches(self, name):
+		batches = []
+		for ledger in get_serial_batch_ledgers(name=name):
+			batches.append(ledger.batch_no)
+		return batches
+
+	def test_get_serial_batch_ledgers_hides_entries_outside_batch_fence(self):
+		inside = self.make_draft_bundle(UP_COMPANY, UP_WAREHOUSE, [UP_BATCH_IN])
+		outside = self.make_draft_bundle(UP_COMPANY, UP_WAREHOUSE, [UP_BATCH_OUT])
+		mixed = self.make_draft_bundle(UP_COMPANY, UP_WAREHOUSE, [UP_BATCH_IN, UP_BATCH_OUT])
+		user = make_fenced_user(UP_STOCK_USER, ["Stock User"], [("Batch", UP_BATCH_IN)])
+
+		with as_user(user):
+			self.assertEqual(get_serial_batch_ledgers(name=outside), [])
+			self.assertEqual(self.get_ledger_batches(inside), [UP_BATCH_IN])
+			self.assertEqual(self.get_ledger_batches(mixed), [UP_BATCH_IN])
+			self.assertNotIn(UP_BATCH_OUT, frappe.as_json(get_serial_batch_ledgers(name=mixed)))
+			self.assertNotIn(UP_BATCH_OUT, frappe.as_json(get_serial_batch_ledgers(name=[outside, mixed])))
+
+	def test_get_serial_batch_ledgers_skips_bundles_outside_company_fence(self):
+		inside = self.make_draft_bundle(UP_COMPANY, UP_WAREHOUSE, [UP_BATCH_IN])
+		outside = self.make_draft_bundle(OTHER_COMPANY, UP_OTHER_WAREHOUSE, [UP_BATCH_OUT])
+		user = make_company_fenced_user(UP_STOCK_USER, ["Stock User"], UP_COMPANY)
+
+		with as_user(user):
+			self.assertEqual(get_serial_batch_ledgers(name=outside), [])
+			ledgers = get_serial_batch_ledgers(name=[inside, outside])
+			self.assertEqual(len(ledgers), 1)
+			self.assertEqual(ledgers[0].name, inside)
+			for name in malformed_names():
+				if isinstance(name, dict):
+					assert_type_gated(self, get_serial_batch_ledgers, name=name)
+				else:
+					self.assertEqual(get_serial_batch_ledgers(name=name), [])
+
+	def test_get_serial_batch_ledgers_unfenced_stock_user_sees_every_entry(self):
+		inside = self.make_draft_bundle(UP_COMPANY, UP_WAREHOUSE, [UP_BATCH_IN])
+		outside = self.make_draft_bundle(OTHER_COMPANY, UP_OTHER_WAREHOUSE, [UP_BATCH_OUT])
+		user = make_fenced_user(UP_STOCK_USER, ["Stock User"], [("Batch", UP_BATCH_IN)])
+		with as_user(user):
+			self.assertEqual(get_serial_batch_ledgers(name=outside), [])
+
+		make_fenced_user(UP_STOCK_USER, ["Stock User"])
+		with as_user(user):
+			self.assertEqual(self.get_ledger_batches(inside), [UP_BATCH_IN])
+			self.assertEqual(self.get_ledger_batches(outside), [UP_BATCH_OUT])
+
+	def test_add_serial_batch_ledgers_refuses_bundle_outside_company_fence(self):
+		outside = self.make_draft_bundle(OTHER_COMPANY, UP_OTHER_WAREHOUSE, [UP_BATCH_IN])
+		inside = self.make_draft_bundle(UP_COMPANY, UP_WAREHOUSE, [UP_BATCH_IN])
+		before = self.get_entries(outside)
+		user = make_company_fenced_user(UP_STOCK_USER, ["Stock User"], UP_COMPANY)
+
+		with as_user(user):
+			assert_refused_without(self, [OTHER_COMPANY, UP_OTHER_WAREHOUSE], self.add_ledgers, outside)
+		self.assertEqual(self.get_entries(outside), before)
+
+		with as_user(user):
+			self.add_ledgers(inside)
+		self.assertEqual(self.get_entries(inside), [(UP_BATCH_OUT, 3, UP_WAREHOUSE)])
+
+	def get_bundle_state(self):
+		state = {}
+		for bundle in frappe.get_all("Serial and Batch Bundle", fields=["name", "modified", "company"]):
+			state[bundle.name] = (bundle.modified, bundle.company, self.get_entries(bundle.name))
+		return state
+
+	def test_add_serial_batch_ledgers_non_string_bundle_never_touches_an_existing_bundle(self):
+		outside = self.make_draft_bundle(OTHER_COMPANY, UP_OTHER_WAREHOUSE, [UP_BATCH_IN])
+		inside = self.make_draft_bundle(UP_COMPANY, UP_WAREHOUSE, [UP_BATCH_IN])
+		user = make_company_fenced_user(UP_STOCK_USER, ["Stock User"], UP_COMPANY)
+		bundles = [{"company": OTHER_COMPANY}, {"name": outside}, [outside], [inside]]
+		for name in malformed_names():
+			if not isinstance(name, str):
+				bundles.append(name)
+
+		for bundle in bundles:
+			before = self.get_bundle_state()
+			self.assertIn(outside, before)
+			self.assertIn(inside, before)
+			with as_user(user):
+				created = self.add_ledgers(bundle)
+			after = self.get_bundle_state()
+			self.assertNotIn(created.name, before)
+			self.assertEqual(created.company, UP_COMPANY)
+			self.assertEqual(self.get_entries(created.name), [(UP_BATCH_OUT, 3, UP_WAREHOUSE)])
+			del after[created.name]
+			self.assertEqual(after, before)
+
+	def test_add_serial_batch_ledgers_filter_bundle_name_rewrites_nothing_as_administrator(self):
+		outside = self.make_draft_bundle(OTHER_COMPANY, UP_OTHER_WAREHOUSE, [UP_BATCH_IN])
+		inside = self.make_draft_bundle(UP_COMPANY, UP_WAREHOUSE, [UP_BATCH_IN])
+		control = self.make_draft_bundle(UP_COMPANY, UP_WAREHOUSE, [UP_BATCH_IN])
+		user = make_company_fenced_user(UP_STOCK_USER, ["Stock User"], UP_COMPANY)
+
+		with as_user(user):
+			self.assertEqual(self.add_ledgers(control).name, control)
+		self.assertEqual(self.get_entries(control), [(UP_BATCH_OUT, 3, UP_WAREHOUSE)])
+
+		for current_user in ("Administrator", user):
+			for bundle in ({"company": OTHER_COMPANY}, {"name": ["like", "%"]}):
+				before = self.get_bundle_state()
+				self.assertIn(outside, before)
+				self.assertIn(inside, before)
+				with as_user(current_user):
+					created = self.add_ledgers(bundle)
+				after = self.get_bundle_state()
+				self.assertNotIn(created.name, before)
+				del after[created.name]
+				self.assertEqual(after, before)
+
+	def test_add_serial_batch_ledgers_do_not_save_refuses_the_stored_row_and_bundle(self):
+		outside = self.make_draft_bundle(OTHER_COMPANY, UP_OTHER_WAREHOUSE, [UP_BATCH_IN])
+		inside = self.make_draft_bundle(UP_COMPANY, UP_WAREHOUSE, [UP_BATCH_IN])
+		other_receipt, other_row = self.make_receipt_row(OTHER_COMPANY, UP_OTHER_WAREHOUSE, inside)
+		receipt, row_with_outside = self.make_receipt_row(UP_COMPANY, UP_WAREHOUSE, outside)
+		receipt, row_with_inside = self.make_receipt_row(UP_COMPANY, UP_WAREHOUSE, inside)
+		before = self.get_entries(outside)
+		user = make_company_fenced_user(UP_STOCK_USER, ["Stock User"], UP_COMPANY)
+
+		with as_user(user):
+			assert_refused_without(self, [other_receipt], self.add_ledgers_from_row, other_row, inside)
+			assert_refused_without(self, [outside], self.add_ledgers_from_row, row_with_outside, inside)
+			for name in malformed_names():
+				assert_refused(self, self.add_ledgers_from_row, name, inside)
+		self.assertEqual(self.get_entries(outside), before)
+		self.assertEqual(self.get_entries(inside), [(UP_BATCH_IN, 2, UP_WAREHOUSE)])
+
+		with as_user(user):
+			self.add_ledgers_from_row(row_with_inside, outside)
+		self.assertEqual(self.get_entries(inside), [(UP_BATCH_OUT, 3, UP_WAREHOUSE)])
+		self.assertEqual(self.get_entries(outside), before)

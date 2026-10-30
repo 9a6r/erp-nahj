@@ -3,10 +3,11 @@
 
 
 import frappe
+from frappe.tests.utils import make_test_records_for_doctype
 from frappe.utils import add_days, today
 
 from erpnext.stock.doctype.item_price.item_price import ItemPriceDuplicateItem
-from erpnext.stock.get_item_details import get_price_list_rate_for
+from erpnext.stock.get_item_details import ItemDetailsCtx, get_price_list_rate_for
 from erpnext.tests.utils import ERPNextTestSuite
 
 
@@ -55,7 +56,7 @@ class TestItemPrice(ERPNextTestSuite):
 		doc_fields = frappe.copy_doc(self.globalTestRecords["Item Price"][1]).__dict__.keys()
 
 		for test_field in test_fields_existance:
-			self.assertIn(test_field, doc_fields)
+			self.assertTrue(test_field in doc_fields)
 
 	def test_dates_validation_error(self):
 		doc = frappe.copy_doc(self.globalTestRecords["Item Price"][1])
@@ -69,7 +70,7 @@ class TestItemPrice(ERPNextTestSuite):
 		# Check correct price at this quantity
 		doc = frappe.copy_doc(self.globalTestRecords["Item Price"][2])
 
-		ctx = frappe._dict(
+		ctx = ItemDetailsCtx(
 			{
 				"price_list": doc.price_list,
 				"customer": doc.customer,
@@ -85,7 +86,7 @@ class TestItemPrice(ERPNextTestSuite):
 	def test_price_with_no_qty(self):
 		# Check correct price when no quantity
 		doc = frappe.copy_doc(self.globalTestRecords["Item Price"][2])
-		ctx = frappe._dict(
+		ctx = ItemDetailsCtx(
 			{
 				"price_list": doc.price_list,
 				"customer": doc.customer,
@@ -101,7 +102,7 @@ class TestItemPrice(ERPNextTestSuite):
 		# Check correct price at first date
 		doc = frappe.copy_doc(self.globalTestRecords["Item Price"][2])
 
-		ctx = frappe._dict(
+		ctx = ItemDetailsCtx(
 			{
 				"price_list": doc.price_list,
 				"customer": "_Test Customer",
@@ -118,7 +119,7 @@ class TestItemPrice(ERPNextTestSuite):
 		# Check correct price at invalid date
 		doc = frappe.copy_doc(self.globalTestRecords["Item Price"][3])
 
-		ctx = frappe._dict(
+		ctx = ItemDetailsCtx(
 			{
 				"price_list": doc.price_list,
 				"qty": 7,
@@ -134,7 +135,7 @@ class TestItemPrice(ERPNextTestSuite):
 		# Check correct price when outside of the date
 		doc = frappe.copy_doc(self.globalTestRecords["Item Price"][4])
 
-		ctx = frappe._dict(
+		ctx = ItemDetailsCtx(
 			{
 				"price_list": doc.price_list,
 				"customer": "_Test Customer",
@@ -151,7 +152,7 @@ class TestItemPrice(ERPNextTestSuite):
 		# Check lowest price when no date provided
 		doc = frappe.copy_doc(self.globalTestRecords["Item Price"][1])
 
-		ctx = frappe._dict(
+		ctx = ItemDetailsCtx(
 			{
 				"price_list": doc.price_list,
 				"uom": "_Test UOM",
@@ -183,7 +184,7 @@ class TestItemPrice(ERPNextTestSuite):
 		doc.price_list_rate = 21
 		doc.insert()
 
-		ctx = frappe._dict(
+		ctx = ItemDetailsCtx(
 			{
 				"price_list": doc.price_list,
 				"uom": "_Test UOM",

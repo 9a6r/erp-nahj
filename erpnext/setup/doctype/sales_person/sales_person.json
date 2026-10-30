@@ -56,7 +56,7 @@
   },
   {
    "fieldname": "commission_rate",
-   "fieldtype": "Percent",
+   "fieldtype": "Data",
    "in_import_template": 1,
    "label": "Commission Rate",
    "print_hide": 1
@@ -149,7 +149,7 @@
  "idx": 1,
  "is_tree": 1,
  "links": [],
- "modified": "2026-08-21 23:11:48.642478",
+ "modified": "2026-09-16 11:42:07.000000",
  "modified_by": "Administrator",
  "module": "Setup",
  "name": "Sales Person",
@@ -211,7 +211,6 @@
    "select": 1
   }
  ],
- "row_format": "Dynamic",
  "search_fields": "parent_sales_person",
  "show_name_in_global_search": 1,
  "sort_field": "creation",

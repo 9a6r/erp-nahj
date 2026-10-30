@@ -97,7 +97,7 @@ erpnext.stock.StockController = class StockController extends frappe.ui.form.Con
 	show_stock_ledger() {
 		var me = this;
 		if (this.frm.doc.docstatus > 0) {
-			this.frm.add_custom_button(
+			cur_frm.add_custom_button(
 				__("Stock Ledger"),
 				function () {
 					frappe.route_options = {
@@ -118,7 +118,7 @@ erpnext.stock.StockController = class StockController extends frappe.ui.form.Con
 	show_general_ledger() {
 		let me = this;
 		if (this.frm.doc.docstatus > 0) {
-			this.frm.add_custom_button(
+			cur_frm.add_custom_button(
 				__("Accounting Ledger"),
 				function () {
 					frappe.route_options = {

@@ -1,6 +1,6 @@
 # Copyright (c) 2021, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
-
+import unittest
 from unittest.mock import patch
 
 import frappe
@@ -21,6 +21,10 @@ TEST_WAREHOUSE = "_Test Warehouse - _TC"
 
 
 class TestStockRepostingSettings(ERPNextTestSuite):
+	def tearDown(self):
+		frappe.db.set_single_value("Stock Reposting Settings", "repost_incorrect_valuation_entries", 0)
+		super().tearDown()
+
 	def test_widened_overnight_timeslot_runs_past_midnight(self):
 		settings = frappe.get_doc("Stock Reposting Settings")
 		settings.update({"limit_reposting_timeslot": 1, "start_time": "22:00:00", "end_time": "06:00:00"})
@@ -186,9 +190,9 @@ class TestStockRepostingSettingsNotification(ERPNextTestSuite):
 		frappe.db.set_single_value("Stock Reposting Settings", "notify_reposting_error_to_role", "")
 
 		users = get_recipients()
-		self.assertNotIn(user, users)
+		self.assertFalse(user in users)
 
 		frappe.db.set_single_value("Stock Reposting Settings", "notify_reposting_error_to_role", role)
 
 		users = get_recipients()
-		self.assertIn(user, users)
+		self.assertTrue(user in users)

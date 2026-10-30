@@ -184,7 +184,6 @@ def get_columns(filters: Filters) -> list[dict]:
 			"fieldtype": "Link",
 			"options": "Item",
 			"width": 100,
-			"sticky": "True",
 		},
 		{"label": _("Item Name"), "fieldname": "item_name", "fieldtype": "Data", "width": 100},
 		{"label": _("Description"), "fieldname": "description", "fieldtype": "Data", "width": 200},
@@ -212,7 +211,6 @@ def get_columns(filters: Filters) -> list[dict]:
 				"fieldtype": "Link",
 				"options": "Warehouse",
 				"width": 100,
-				"sticky": "True",
 			}
 		]
 
@@ -325,26 +323,15 @@ class FIFOSlots:
 			self._prefetch_batchwise_valuations()
 			self._prefetch_valuation_methods()
 
-			if frappe.db.db_type == "postgres":
-				# postgres server-side cursors can't run nested queries mid-iteration; _get_stock_ledger_entries
-				# returns a buffered result there, so process it directly (no unbuffered cursor).
-				for row in adjustment_netting.net_by_lot(self._get_stock_ledger_entries(), item_field="name"):
-					self._process_stock_ledger_entry(row, bundle_wise_serial_nos, bundle_wise_batch_nos)
-			else:
-				with frappe.db.unbuffered_cursor():
-					stock_ledger_entries = self._get_stock_ledger_entries()
+		with frappe.db.unbuffered_cursor():
+			if stock_ledger_entries is None:
+				stock_ledger_entries = self._get_stock_ledger_entries()
 
-					for row in adjustment_netting.net_by_lot(stock_ledger_entries, item_field="name"):
-						self._process_stock_ledger_entry(row, bundle_wise_serial_nos, bundle_wise_batch_nos)
-
-					# Note that stock_ledger_entries is an iterator, you can not reuse it like a list
-					del stock_ledger_entries
-		else:
-			# entries passed in directly as a list: no streaming cursor is opened, so the batchwise
-			# valuation flags can be resolved lazily — a nested get_value here is safe on postgres too
-			# (running it inside an unbuffered/named cursor would raise on postgres).
 			for row in adjustment_netting.net_by_lot(stock_ledger_entries, item_field="name"):
 				self._process_stock_ledger_entry(row, bundle_wise_serial_nos, bundle_wise_batch_nos)
+
+			# Note that stock_ledger_entries is an iterator, you can not reuse it like a list
+			del stock_ledger_entries
 
 		self._recompute_moving_average_slots()
 		self._rebalance_batch_slots()
@@ -742,7 +729,7 @@ class FIFOSlots:
 		if serial_nos:
 			self._consume_serial_fifo_slots(fifo_queue, serial_nos)
 		elif batch_nos:
-			self._consume_batch_fifo_slots(row, fifo_queue, transfer_key, batch_nos, from_end)
+			self._consume_batch_fifo_slots(row, fifo_queue, transfer_key, batch_nos)
 		else:
 			self._consume_fifo_slots(row, fifo_queue, transfer_key, from_end)
 
@@ -750,16 +737,12 @@ class FIFOSlots:
 		fifo_queue[:] = [slot for slot in fifo_queue if slot[FIFO_QTY_INDEX] not in serial_nos]
 
 	def _consume_batch_fifo_slots(
-		self, row: dict, fifo_queue: list, transfer_key: tuple, batch_nos: list, from_end: bool = False
+		self, row: dict, fifo_queue: list, transfer_key: tuple, batch_nos: list
 	) -> None:
-		"""LIFO consumes the most recent inward first, so walk the queue from the tail.
-		Slots of one batch valued batchwise share a date and the walk cannot tell them
-		apart, but slots pooled across batches carry the date of the batch that filled
-		them."""
 		for batch_no, use_batchwise_valuation, qty, stock_value_difference in batch_nos:
 			items_to_remove = []
 
-			for slot in reversed(fifo_queue) if from_end else fifo_queue:
+			for slot in fifo_queue:
 				if not self._can_consume_batch_slot(slot, batch_no, use_batchwise_valuation):
 					continue
 
@@ -1178,9 +1161,7 @@ class FIFOSlots:
 
 		sle_query = sle_query.orderby(sle.posting_datetime, sle.creation)
 
-		# postgres server-side (named) cursors can't run nested queries mid-iteration, which
-		# _process_stock_ledger_entry needs; fall back to a buffered fetch there. MariaDB streams.
-		return sle_query.run(as_dict=True, as_iterator=frappe.db.db_type != "postgres")
+		return sle_query.run(as_dict=True, as_iterator=True)
 
 	def _get_bundle_wise_serial_nos(self) -> dict:
 		bundle = frappe.qb.DocType("Serial and Batch Bundle")

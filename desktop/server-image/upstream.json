@@ -1,0 +1,8 @@
+{
+  "erpnext_version": "16.53.0",
+  "erpnext_commit": "9cd11b19575bfc34f092a24f6c8b368c4dd69481",
+  "frappe_version": "16.54.0",
+  "frappe_commit": "2fcb9397a1f1da353b21e53d2f97ec56653acd02",
+  "platform": "linux/amd64",
+  "image": "registry-1.docker.io/frappe/erpnext@sha256:8f454efa71e9ffad9de4b9ccf377566134d285612f19e1e12e8a43fe7bf0db75"
+}

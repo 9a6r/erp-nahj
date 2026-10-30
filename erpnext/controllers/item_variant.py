@@ -41,9 +41,8 @@ def get_variant(
 	:param item: Template Item
 	:param args: A dictionary with "Attribute" as key and "Attribute Value" as value
 	"""
-	# The client callers are the Item form (item.js:1144, 1483), so the template Item is the boundary
-	# and `read` is loser-free: the roles that cannot read Item cannot open that form either. The two
-	# server-side callers (item.py:1083 on Item save, item_variant.py:393) already hold the template.
+	# The Item form is the boundary and `read` is loser-free: roles that cannot read Item cannot open
+	# that form. The two server-side callers already hold the template.
 	frappe.has_permission("Item", doc=template, throw=True)
 
 	item_template = frappe.get_doc("Item", template)
@@ -51,7 +50,8 @@ def get_variant(
 	if item_template.variant_based_on == "Manufacturer" and manufacturer:
 		return make_variant_based_on_manufacturer(item_template, manufacturer, manufacturer_part_no)
 
-	args = frappe.parse_json(args)
+	if isinstance(args, str):
+		args = json.loads(args)
 
 	attribute_args = {k: v for k, v in args.items() if k != "use_template_image"}
 	if not attribute_args:
@@ -207,17 +207,13 @@ def update_variant_attribute_values(item_attribute):
 	for old_value, new_value in value_map.items():
 		attribute_value_case = attribute_value_case.when(attribute_value == old_value, new_value)
 
-	# Postgres has no UPDATE ... JOIN; restrict to variant items via a subquery on the parent instead.
-	variant_items = (
-		frappe.qb.from_(item_table)
-		.select(item_table.name)
-		.where(item_table.variant_of.isnotnull())
-		.where(item_table.variant_of != "")
-	)
 	(
 		frappe.qb.update(item_variant_table)
+		.join(item_table)
+		.on(item_table.name == item_variant_table.parent)
 		.set(attribute_value, attribute_value_case.else_(attribute_value))
-		.where(item_variant_table.parent.isin(variant_items))
+		.where(item_table.variant_of.isnotnull())
+		.where(item_table.variant_of != "")
 		.where(item_variant_table.attribute == item_attribute.name)
 		.where(attribute_value.isin(list(value_map)))
 	).run()
@@ -366,15 +362,15 @@ def find_variant(template, args, variant_item_code=None):
 
 
 @frappe.whitelist()
-def create_variant(item: str, args: dict | str, use_template_image: bool = False):
-	# Same right its sibling enqueue_multiple_variant_creation already requires — this builds an
-	# Item the caller is about to insert (item.js:1511) — plus record-level read on the template
-	# it copies from.
+def create_variant(item, args, use_template_image=False):
+	# Same right as the sibling enqueue_multiple_variant_creation, plus record-level read on the
+	# template it copies from.
 	frappe.has_permission("Item", ptype="create", throw=True)
 	frappe.has_permission("Item", doc=item, throw=True)
 
 	use_template_image = frappe.parse_json(use_template_image)
-	args = frappe.parse_json(args)
+	if isinstance(args, str):
+		args = json.loads(args)
 
 	template = frappe.get_doc("Item", item)
 	variant = frappe.new_doc("Item")
@@ -398,11 +394,14 @@ def create_variant(item: str, args: dict | str, use_template_image: bool = False
 
 
 @frappe.whitelist(methods=["POST"])
-def enqueue_multiple_variant_creation(item: str, args: dict | str, use_template_image: bool = False):
+def enqueue_multiple_variant_creation(item, args, use_template_image=False):
+	frappe.has_permission("Item", ptype="create", throw=True)
 	use_template_image = frappe.parse_json(use_template_image)
 	# There can be innumerable attribute combinations, enqueue
-	frappe.has_permission("Item", ptype="create", throw=True)
-	variants = frappe.parse_json(args)
+	if isinstance(args, str):
+		variants = json.loads(args)
+	else:
+		variants = args
 	variants = {key: values for key, values in variants.items() if values}
 	if not variants:
 		frappe.throw(_("Please select at least one attribute value"))
@@ -428,7 +427,8 @@ def enqueue_multiple_variant_creation(item: str, args: dict | str, use_template_
 
 def create_multiple_variants(item, args, use_template_image=False):
 	count = 0
-	args = frappe.parse_json(args)
+	if isinstance(args, str):
+		args = json.loads(args)
 	args = {key: values for key, values in args.items() if values}
 
 	template_item = frappe.get_doc("Item", item)
@@ -622,13 +622,12 @@ def get_attribute_abbreviation(attr):
 
 
 @frappe.whitelist()
-def create_variant_doc_for_quick_entry(template: str, args: dict | str):
-	# Delegates to get_variant and create_variant below, which carry their own checks; this one
-	# fails fast rather than relying on that delegation.
+def create_variant_doc_for_quick_entry(template, args):
+	# get_variant and create_variant carry their own checks; this fails fast rather than relying on them.
 	frappe.has_permission("Item", doc=template, throw=True)
 
 	variant_based_on = frappe.db.get_value("Item", template, "variant_based_on")
-	args = frappe.parse_json(args)
+	args = json.loads(args)
 	if variant_based_on == "Manufacturer":
 		variant = get_variant(template, **args)
 	else:

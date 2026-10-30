@@ -165,7 +165,11 @@ class Bin(Document):
 		self, subcontract_doctype="Subcontracting Order", update_qty=True
 	):
 		subcontract_order = frappe.qb.DocType(subcontract_doctype)
-		supplied_item = frappe.qb.DocType("Subcontracting Order Supplied Item")
+		supplied_item = frappe.qb.DocType(
+			"Purchase Order Item Supplied"
+			if subcontract_doctype == "Purchase Order"
+			else "Subcontracting Order Supplied Item"
+		)
 
 		pending_qty_per_order = (
 			frappe.qb.from_(subcontract_order)
@@ -179,8 +183,15 @@ class Bin(Document):
 				& (subcontract_order.name == supplied_item.parent)
 				& (subcontract_order.per_received < 100)
 				& (supplied_item.reserve_warehouse == self.warehouse)
-				& (subcontract_order.status != "Closed")
-				& (subcontract_order.docstatus == 1)
+				& (
+					(
+						(subcontract_order.is_old_subcontracting_flow == 1)
+						& (subcontract_order.status != "Closed")
+						& (subcontract_order.docstatus == 1)
+					)
+					if subcontract_doctype == "Purchase Order"
+					else ((subcontract_order.status != "Closed") & (subcontract_order.docstatus == 1))
+				)
 			)
 			.groupby(subcontract_order.name)
 		).run(pluck=True)
@@ -252,13 +263,7 @@ def get_projected_qty_term(table, values):
 	return projected_qty
 
 
-def update_qty_from_sle(bin_name, args):
-	"""Refresh the Bin's quantity fields after an SLE has been processed.
-
-	Distinct from ``stock_balance.update_bin_qty``, which writes caller-supplied
-	absolute values; this recomputes every quantity from the ledger and open
-	documents.
-	"""
+def update_qty(bin_name, args):
 	from erpnext.controllers.stock_controller import future_sle_exists
 
 	bin_details = get_bin_details(bin_name)
@@ -287,27 +292,19 @@ def update_qty_from_sle(bin_name, args):
 		- flt(bin_details.reserved_qty_for_production_plan)
 	)
 
-	bin_values = {
-		"actual_qty": actual_qty,
-		"ordered_qty": ordered_qty,
-		"reserved_qty": reserved_qty,
-		"indented_qty": indented_qty,
-		"planned_qty": planned_qty,
-		"projected_qty": projected_qty,
-	}
-
-	# Standard Cost items are not reposted on backdated entries, so the Bin's stock value is not
-	# refreshed by a repost. Keep it in step with the balance at the standard rate.
-	from erpnext.stock.utils import get_valuation_method
-
-	if get_valuation_method(args.get("item_code"), args.get("company")) == "Standard Cost":
-		from erpnext.stock.doctype.item_standard_cost.item_standard_cost import get_item_standard_rate
-
-		bin_values["stock_value"] = flt(actual_qty) * flt(
-			get_item_standard_rate(args.get("item_code"), args.get("company"))
-		)
-
-	frappe.db.set_value("Bin", bin_name, bin_values, update_modified=True)
+	frappe.db.set_value(
+		"Bin",
+		bin_name,
+		{
+			"actual_qty": actual_qty,
+			"ordered_qty": ordered_qty,
+			"reserved_qty": reserved_qty,
+			"indented_qty": indented_qty,
+			"planned_qty": planned_qty,
+			"projected_qty": projected_qty,
+		},
+		update_modified=True,
+	)
 
 
 def get_actual_qty(item_code, warehouse):

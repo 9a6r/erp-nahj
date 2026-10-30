@@ -6,7 +6,7 @@ import frappe
 from frappe.utils import cint
 
 from erpnext.selling.doctype.product_bundle.test_product_bundle import make_product_bundle
-from erpnext.stock.doctype.delivery_note.mapper import make_packing_slip
+from erpnext.stock.doctype.delivery_note.delivery_note import make_packing_slip
 from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
 from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry

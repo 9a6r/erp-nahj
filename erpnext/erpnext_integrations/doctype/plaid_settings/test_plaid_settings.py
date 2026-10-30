@@ -22,7 +22,7 @@ from erpnext.tests.utils import ERPNextTestSuite
 class TestPlaidSettings(ERPNextTestSuite):
 	def test_plaid_disabled(self):
 		frappe.db.set_single_value("Plaid Settings", "enabled", 0)
-		self.assertEqual(get_plaid_configuration(), "disabled")
+		self.assertTrue(get_plaid_configuration() == "disabled")
 
 	def test_add_account_type(self):
 		add_account_type("brokerage")

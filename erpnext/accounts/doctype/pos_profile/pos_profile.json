@@ -65,8 +65,6 @@
   "allow_rate_change",
   "column_break_hwfg",
   "allow_discount_change",
-  "column_break_egpi",
-  "allow_warehouse_change",
   "section_break_15",
   "applicable_for_users",
   "section_break_23",
@@ -76,7 +74,6 @@
   "more_info_tab",
   "section_break_16",
   "print_format",
-  "receipt_email_template",
   "letter_head",
   "column_break0",
   "tc_name",
@@ -319,13 +316,6 @@
    "options": "Print Format"
   },
   {
-   "description": "Subject and message for receipts emailed from the POS. The template gets the invoice as doc. A message typed by the cashier replaces the template message. Leave empty to send the default email.",
-   "fieldname": "receipt_email_template",
-   "fieldtype": "Link",
-   "label": "Receipt Email Template",
-   "options": "Email Template"
-  },
-  {
    "depends_on": "update_stock",
    "fieldname": "warehouse",
    "fieldtype": "Link",
@@ -459,7 +449,7 @@
   },
   {
    "default": "0",
-   "description": "Applicable only on Transactions made using POS",
+   "description": "Applicable on POS Invoice",
    "fieldname": "allow_partial_payment",
    "fieldtype": "Check",
    "label": "Allow Partial Payment"
@@ -471,6 +461,12 @@
   {
    "fieldname": "column_break_xygw",
    "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "utm_analytics_section",
+   "fieldtype": "Section Break",
+   "label": "Campaign"
   },
   {
    "fieldname": "accounting_tab",
@@ -548,22 +544,6 @@
   {
    "fieldname": "column_break_hwfg",
    "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "column_break_egpi",
-   "fieldtype": "Column Break"
-  },
-  {
-   "default": "0",
-   "fieldname": "allow_warehouse_change",
-   "fieldtype": "Check",
-   "label": "Allow User to Edit Warehouse"
-  },
-  {
-   "collapsible": 1,
-   "fieldname": "utm_analytics_section",
-   "fieldtype": "Section Break",
-   "label": "Campaign"
   }
  ],
  "grid_page_length": 50,
@@ -592,7 +572,7 @@
    "link_fieldname": "pos_profile"
   }
  ],
- "modified": "2026-09-23 12:00:00.000000",
+ "modified": "2026-09-16 11:42:07.000000",
  "modified_by": "Administrator",
  "module": "Accounts",
  "name": "POS Profile",

@@ -5,21 +5,17 @@
 import frappe
 from frappe import _
 from frappe.permissions import get_user_permissions
-from frappe.query_builder import Case
-from frappe.query_builder.functions import Count, CurDate, DateDiff, Max, Sum
+from frappe.query_builder import Case, CustomFunction
+from frappe.query_builder.functions import Count, Max, Sum
 from frappe.utils import cint
-from pypika import Order
 from pypika.analytics import RowNumber
-
-from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_companies_condition
-from erpnext.utilities.query import get_match_conditions_qb
 
 
 def execute(filters=None):
 	filters = filters or {}
 
 	doctype = filters.get("doctype")
-	if doctype not in {"Sales Order", "Sales Invoice"}:
+	if doctype not in ("Sales Order", "Sales Invoice"):
 		frappe.throw(_("Invalid value {0} for 'Doctype'").format(doctype))
 
 	check_doctype_access(doctype)
@@ -47,6 +43,9 @@ def get_sales_details(doctype):
 	customer = frappe.qb.DocType("Customer")
 	sales = frappe.qb.DocType(doctype)
 
+	date_diff = CustomFunction("DATEDIFF", ["d1", "d2"])
+	current_date = CustomFunction("CURRENT_DATE", [])
+
 	if doctype == "Sales Order":
 		date_col = sales.transaction_date
 		# a Closed order is only partially fulfilled, so count it pro rata by delivery
@@ -65,7 +64,7 @@ def get_sales_details(doctype):
 		num_of_order = Count(Case().when(not_return, sales.name)).distinct()
 		last_order_date = Max(Case().when(not_return, date_col))
 
-	days_since_last_order = DateDiff(CurDate(), last_order_date)
+	days_since_last_order = date_diff(current_date(), last_order_date)
 
 	query = (
 		frappe.qb.from_(customer)
@@ -84,19 +83,21 @@ def get_sales_details(doctype):
 		)
 		.where(sales.docstatus == 1)
 		.groupby(customer.name)
-		.orderby(days_since_last_order, order=Order.desc)
+		.orderby(days_since_last_order, order=frappe.qb.desc)
 	)
 
 	permitted = get_permitted_customers()
+	# also apply permissions scoped to the sales doctype (applicable_for), which the Customer filter misses
+	sales_permitted = get_sales_permitted_customers(doctype)
+
+	# an empty allow-list means the user may see no customer: return nothing rather than IN ()
+	if permitted == [] or sales_permitted == []:
+		return []
+
 	if permitted is not None:
 		query = query.where(customer.name.isin(permitted))
-
-	if condition := get_allowed_companies_condition(sales.company, doctype):
-		query = query.where(condition)
-
-	# also apply permissions scoped to the sales doctype (applicable_for), which the Customer filter misses
-	for condition in get_match_conditions_qb(doctype, table=sales):
-		query = query.where(condition)
+	if sales_permitted is not None:
+		query = query.where(customer.name.isin(sales_permitted))
 
 	return query.run(as_dict=True)
 
@@ -110,17 +111,12 @@ def get_last_order_amounts(doctype, customers):
 		.select(
 			sales.customer,
 			sales.base_net_total,
-			RowNumber().over(sales.customer).orderby(date_col, sales.name, order=Order.desc).as_("rn"),
+			RowNumber().over(sales.customer).orderby(date_col, sales.name, order=frappe.qb.desc).as_("rn"),
 		)
 		.where((sales.docstatus == 1) & sales.customer.isin(customers))
 	)
 	if doctype == "Sales Invoice":
 		ranked = ranked.where(sales.is_return == 0)
-	if condition := get_allowed_companies_condition(sales.company, doctype):
-		ranked = ranked.where(condition)
-
-	for condition in get_match_conditions_qb(doctype, table=sales):
-		ranked = ranked.where(condition)
 
 	ranked = ranked.as_("ranked")
 	result = (
@@ -151,6 +147,15 @@ def get_permitted_customers():
 		return None
 
 	return frappe.get_list("Customer", pluck="name", limit_page_length=0)
+
+
+def get_sales_permitted_customers(doctype):
+	# customers reachable through the sales doctype's own permissions; get_list applies the
+	# doctype-scoped User Permissions the Customer query skips. None when unrestricted.
+	if not get_user_permissions(frappe.session.user):
+		return None
+
+	return frappe.get_list(doctype, pluck="customer", distinct=True, limit_page_length=0)
 
 
 def get_columns(doctype):

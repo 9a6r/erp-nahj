@@ -461,8 +461,10 @@ class TestMaterialRequirementsPlanningReport(ERPNextTestSuite):
 
 	@ERPNextTestSuite.change_settings("Stock Settings", {"enable_stock_reservation": 1})
 	def test_stock_reserved_in_wip_after_transfer_is_not_free(self):
-		from erpnext.manufacturing.doctype.work_order.mapper import make_stock_entry as make_wo_stock_entry
 		from erpnext.manufacturing.doctype.work_order.test_work_order import make_wo_order_test_record
+		from erpnext.manufacturing.doctype.work_order.work_order import (
+			make_stock_entry as make_wo_stock_entry,
+		)
 		from erpnext.manufacturing.report.material_requirements_planning_report.material_requirements_planning_report import (
 			get_free_stock,
 		)
@@ -508,6 +510,16 @@ class TestMaterialRequirementsPlanningReport(ERPNextTestSuite):
 		]
 		self.assertNotIn(covered_row.item_code, ordered_items)
 		self.assertEqual(sorted(ordered_items), sorted([row.item_code for row in remaining_rows]))
+
+	def test_make_order_creates_nothing_when_every_row_is_covered(self):
+		plan = make_mrp_plan(self)
+		for row in plan.rows:
+			row.required_qty = 0
+
+		make_order(plan.rows, COMPANY, warehouse=WAREHOUSE, mps=plan.mps)
+
+		for doctype in ("Purchase Order", "Work Order"):
+			self.assertFalse(frappe.get_all(doctype, filters={"mps": plan.mps}, pluck="name"))
 
 	def test_make_order_ignores_a_requirement_left_over_by_rounding(self):
 		"""What is left of a covered row after subtracting is not a quantity worth ordering."""

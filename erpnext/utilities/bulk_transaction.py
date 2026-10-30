@@ -7,19 +7,20 @@ from frappe.utils import escape_html, get_link_to_form, today
 
 
 @frappe.whitelist(methods=["POST"])
-def transaction_processing(
-	data: str | list, from_doctype: str, to_doctype: str, args: str | frappe._dict | None = None
-):
+def transaction_processing(data, from_doctype, to_doctype, args=None):
 	frappe.has_permission(from_doctype, "read", throw=True)
 	frappe.has_permission(to_doctype, "create", throw=True)
 
-	deserialized_data = frappe.parse_json(data)
+	if isinstance(data, str):
+		deserialized_data = json.loads(data)
+	else:
+		deserialized_data = data
 
-	args = frappe._dict(frappe.parse_json(args) or {})
+	if isinstance(args, str):
+		args = frappe._dict(json.loads(args))
 
-	# The checks above are doctype level and never consult User Permissions, so on their own they
-	# let a caller convert documents they cannot read — a company-restricted user could turn another
-	# company's orders into invoices. Each source document is checked before anything is enqueued.
+	# The checks above are doctype level, so on their own they let a caller convert documents they
+	# cannot read. Each source document is checked before anything is enqueued.
 	for row in deserialized_data:
 		source_name = row.get("name")
 		if not source_name or not isinstance(source_name, str):
@@ -41,7 +42,7 @@ def transaction_processing(
 
 		skipped_msg += (
 			"<br><br><ul>"
-			+ "".join(_("<li>{0}</li>").format(frappe.bold(row.get("name"))) for row in skipped_records)
+			+ "".join(_("<li>{}</li>").format(frappe.bold(row.get("name"))) for row in skipped_records)
 			+ "</ul>"
 		)
 
@@ -168,14 +169,14 @@ def job(deserialized_data, from_doctype, to_doctype, args):
 
 def task(doc_name, from_doctype, to_doctype):
 	from erpnext.accounts.doctype.payment_entry import payment_entry
-	from erpnext.accounts.doctype.purchase_invoice import mapper as purchase_invoice
-	from erpnext.accounts.doctype.sales_invoice import mapper as sales_invoice
-	from erpnext.buying.doctype.purchase_order import mapper as purchase_order
-	from erpnext.buying.doctype.supplier_quotation import mapper as supplier_quotation
-	from erpnext.selling.doctype.quotation import mapper as quotation
-	from erpnext.selling.doctype.sales_order import mapper as sales_order
-	from erpnext.stock.doctype.delivery_note import mapper as delivery_note
-	from erpnext.stock.doctype.purchase_receipt import mapper as purchase_receipt
+	from erpnext.accounts.doctype.purchase_invoice import purchase_invoice
+	from erpnext.accounts.doctype.sales_invoice import sales_invoice
+	from erpnext.buying.doctype.purchase_order import purchase_order
+	from erpnext.buying.doctype.supplier_quotation import supplier_quotation
+	from erpnext.selling.doctype.quotation import quotation
+	from erpnext.selling.doctype.sales_order import sales_order
+	from erpnext.stock.doctype.delivery_note import delivery_note
+	from erpnext.stock.doctype.purchase_receipt import purchase_receipt
 
 	mapper = {
 		"Sales Order": {

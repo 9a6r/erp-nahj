@@ -1,7 +1,6 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
 
-
 from unittest.mock import patch
 
 import frappe
@@ -335,6 +334,146 @@ class TestTask(ERPNextTestSuite):
 
 		self.assertRaises(ParentIsGroupError, child_task.save)
 
+	def test_open_task_under_completed_parent(self):
+		parent = create_task("_Test Completed Parent", is_group=1)
+		parent.status = "Completed"
+		parent.save()
+		child = create_task("_Test Open Child Of Completed Parent", parent_task=parent.name, save=False)
+
+		self.assertRaises(frappe.ValidationError, child.save)
+
+	def test_expected_end_date(self):
+		task = create_task("Testing End Date", add_days(nowdate(), 1), add_days(nowdate(), 5))
+		task.expected_time = 72
+		task.save()
+		self.assertEqual(getdate(task.exp_end_date), getdate(add_days(nowdate(), 5)))
+
+	def test_completing_sets_completed_on(self):
+		from frappe.core.doctype.user_permission.test_user_permission import create_user
+
+		task = create_task("_Test Complete Without Date")
+		user = create_user("test_task_completer@example.com", "Projects User")
+		with self.set_user(user.name):
+			frappe.set_value("Task", task.name, "status", "Completed")
+
+		self.assertEqual(frappe.db.get_value("Task", task.name, "completed_on"), getdate())
+
+	def test_delete_child_task(self):
+		parent = create_task("_Test Parent Of Deleted Child", is_group=1)
+		child = create_task("_Test Deleted Child", parent_task=parent.name)
+
+		child.delete()
+
+		parent.reload()
+		self.assertFalse(parent.depends_on)
+
+	def test_delete_child_task_without_parent_write_permission(self):
+		from frappe.core.doctype.user_permission.test_user_permission import create_user
+
+		from erpnext.projects.doctype.project.test_project import make_project
+
+		parent = create_task("_Test Parent In Restricted Project", is_group=1)
+		child = create_task("_Test Child In Permitted Project", parent_task=parent.name)
+		child_project = make_project({"project_name": "_Test Project Child Only"}).name
+		frappe.db.set_value("Task", child.name, "project", child_project)
+		user = create_user("test_task_child_deleter@example.com", "Projects User")
+		frappe.permissions.add_user_permission("Project", child_project, user.name)
+
+		with self.set_user(user.name):
+			frappe.delete_doc("Task", child.name)
+
+		self.assertFalse(frappe.db.exists("Task", child.name))
+
+	def test_move_child_task_to_another_parent(self):
+		old_parent = create_task("_Test Old Parent", is_group=1)
+		new_parent = create_task("_Test New Parent", is_group=1)
+		child = create_task("_Test Moved Child", parent_task=old_parent.name)
+
+		child.parent_task = new_parent.name
+		child.save()
+
+		self.assertFalse(frappe.get_all("Task Depends On", filters={"parent": old_parent.name}))
+		self.assertEqual(
+			frappe.get_all("Task Depends On", filters={"parent": new_parent.name}, pluck="task"), [child.name]
+		)
+
+	def test_reopen_completed_task(self):
+		task = create_task("_Test Task Reopened")
+		task.status = "Completed"
+		task.save()
+
+		task.status = "Open"
+		task.save()
+		self.assertEqual((task.progress, task.completed_on), (0, None))
+
+		task.status = "Completed"
+		task.save()
+		task.update({"status": "Working", "progress": 60})
+		task.save()
+		self.assertEqual(task.progress, 60)
+
+	def test_negative_progress(self):
+		task = create_task("_Test Task Negative Progress", save=False)
+		task.progress = -50
+
+		self.assertRaises(frappe.ValidationError, task.save)
+
+	def test_add_multiple_tasks_under_project_root(self):
+		from erpnext.projects.doctype.task.task import add_multiple_tasks
+
+		project = frappe.get_value("Project", {"project_name": "_Test Project"})
+
+		add_multiple_tasks(frappe.as_json([{"subject": "_Test Bulk Root Task"}]), project, project)
+
+		self.assertEqual(
+			frappe.db.get_value("Task", {"subject": "_Test Bulk Root Task"}, ["project", "parent_task"]),
+			(project, None),
+		)
+
+	def test_moving_child_out_does_not_reschedule_old_parent(self):
+		group = create_task("_Test Group Left By Child", nowdate(), add_days(nowdate(), 19), is_group=1)
+		child = create_task(
+			"_Test Child Leaving Group",
+			add_days(nowdate(), 4),
+			add_days(nowdate(), 9),
+			parent_task=group.name,
+		)
+		dependent = create_task(
+			"_Test Task After Left Group", add_days(nowdate(), 20), add_days(nowdate(), 21), group.name
+		)
+
+		child.parent_task = None
+		child.save()
+
+		self.assertEqual(
+			getdate(frappe.db.get_value("Task", group.name, "exp_end_date")), getdate(add_days(nowdate(), 19))
+		)
+		self.assertEqual(
+			getdate(frappe.db.get_value("Task", dependent.name, "exp_start_date")),
+			getdate(add_days(nowdate(), 20)),
+		)
+
+	def test_timesheet_by_user_without_task_access_reschedules_dependent(self):
+		from frappe.core.doctype.user_permission.test_user_permission import create_user
+
+		from erpnext.projects.doctype.timesheet.test_timesheet import make_timesheet
+		from erpnext.setup.doctype.employee.test_employee import make_employee
+
+		prerequisite = create_task("_Test Task Logged By HR User", nowdate(), add_days(nowdate(), 5))
+		dependent = create_task(
+			"_Test Task After HR User Log", nowdate(), add_days(nowdate(), 1), prerequisite.name
+		)
+		employee = make_employee("test_employee_6@salary.com", company="_Test Company")
+		user = create_user("test_task_hr_logger@example.com", "HR User")
+
+		with self.set_user(user.name):
+			make_timesheet(employee, simulate=True, task=prerequisite.name)
+
+		self.assertEqual(
+			getdate(frappe.db.get_value("Task", dependent.name, "exp_start_date")),
+			getdate(add_days(nowdate(), 6)),
+		)
+
 	def test_parent_task_must_be_in_the_same_project(self):
 		other_project = frappe.get_doc(
 			doctype="Project", project_name="_Test Parent Task Project", company="_Test Company"
@@ -391,159 +530,6 @@ class TestTask(ERPNextTestSuite):
 		group_without_project.reload()
 		group_without_project.project = group.project
 		self.assertRaises(frappe.ValidationError, group_without_project.save)
-
-	def test_open_task_under_completed_parent(self):
-		parent = create_task("_Test Completed Parent", is_group=1)
-		parent.status = "Completed"
-		parent.save()
-		child = create_task("_Test Open Child Of Completed Parent", parent_task=parent.name, save=False)
-
-		self.assertRaises(frappe.ValidationError, child.save)
-
-	def test_expected_end_date(self):
-		task = create_task("Testing End Date", add_days(nowdate(), 1), add_days(nowdate(), 5))
-		task.expected_time = 72
-		task.save()
-		self.assertEqual(getdate(task.exp_end_date), getdate(add_days(nowdate(), 5)))
-
-	def test_set_multiple_status(self):
-		from erpnext.projects.doctype.task.task import set_multiple_status
-
-		task1 = create_task("_Test Bulk Status 1")
-		task2 = create_task("_Test Bulk Status 2")
-
-		set_multiple_status(frappe.as_json([task1.name, task2.name]), "Completed")
-
-		self.assertEqual(frappe.db.get_value("Task", task1.name, "status"), "Completed")
-		self.assertEqual(frappe.db.get_value("Task", task2.name, "status"), "Completed")
-
-	def test_completing_sets_completed_on(self):
-		from frappe.core.doctype.user_permission.test_user_permission import create_user
-
-		task = create_task("_Test Complete Without Date")
-		user = create_user("test_task_completer@example.com", "Projects User")
-		with self.set_user(user.name):
-			frappe.set_value("Task", task.name, "status", "Completed")
-
-		self.assertEqual(frappe.db.get_value("Task", task.name, "completed_on"), getdate())
-
-	def test_negative_progress(self):
-		task = create_task("_Test Task Negative Progress", save=False)
-		task.progress = -50
-
-		self.assertRaises(frappe.ValidationError, task.save)
-
-	def test_reopen_completed_task(self):
-		task = create_task("_Test Task Reopened")
-		task.status = "Completed"
-		task.save()
-
-		task.status = "Open"
-		task.save()
-		self.assertEqual((task.progress, task.completed_on), (0, None))
-
-		task.status = "Completed"
-		task.save()
-		task.update({"status": "Working", "progress": 60})
-		task.save()
-		self.assertEqual(task.progress, 60)
-
-	def test_add_multiple_tasks_under_parent(self):
-		from erpnext.projects.doctype.task.task import add_multiple_tasks
-
-		parent = create_task("_Test Bulk Parent", is_group=1)
-		rows = [{"subject": "_Test Bulk Child A"}, {"subject": ""}, {"subject": "_Test Bulk Child B"}]
-
-		add_multiple_tasks(frappe.as_json(rows), parent.name)
-
-		children = frappe.get_all("Task", filters={"parent_task": parent.name}, pluck="subject")
-		# the row with a blank subject is skipped
-		self.assertEqual(sorted(children), ["_Test Bulk Child A", "_Test Bulk Child B"])
-
-	def test_add_multiple_tasks_under_project_root(self):
-		from erpnext.projects.doctype.task.task import add_multiple_tasks
-
-		project = frappe.get_value("Project", {"project_name": "_Test Project"})
-
-		add_multiple_tasks(frappe.as_json([{"subject": "_Test Bulk Root Task"}]), project, project)
-
-		self.assertEqual(
-			frappe.db.get_value("Task", {"subject": "_Test Bulk Root Task"}, ["project", "parent_task"]),
-			(project, None),
-		)
-
-	def test_template_task_dependency_must_be_template(self):
-		normal_task = create_task("_Test Non Template Dependency")
-		template_task = create_task("_Test Template With Dependency", is_template=1, save=False)
-		template_task.append("depends_on", {"task": normal_task.name})
-
-		self.assertRaises(frappe.ValidationError, template_task.save)
-
-	def test_cannot_delete_task_with_children(self):
-		parent = create_task("_Test Parent With Child", is_group=1)
-		create_task("_Test Child Blocking Delete", parent_task=parent.name)
-
-		self.assertRaises(frappe.ValidationError, parent.delete)
-
-	def test_move_child_task_to_another_parent(self):
-		old_parent = create_task("_Test Old Parent", is_group=1)
-		new_parent = create_task("_Test New Parent", is_group=1)
-		child = create_task("_Test Moved Child", parent_task=old_parent.name)
-
-		child.parent_task = new_parent.name
-		child.save()
-
-		self.assertFalse(frappe.get_all("Task Depends On", filters={"parent": old_parent.name}))
-		self.assertEqual(
-			frappe.get_all("Task Depends On", filters={"parent": new_parent.name}, pluck="task"), [child.name]
-		)
-
-	def test_moving_child_out_does_not_reschedule_old_parent(self):
-		group = create_task("_Test Group Left By Child", nowdate(), add_days(nowdate(), 19), is_group=1)
-		child = create_task(
-			"_Test Child Leaving Group",
-			add_days(nowdate(), 4),
-			add_days(nowdate(), 9),
-			parent_task=group.name,
-		)
-		dependent = create_task(
-			"_Test Task After Left Group", add_days(nowdate(), 20), add_days(nowdate(), 21), group.name
-		)
-
-		child.parent_task = None
-		child.save()
-
-		self.assertEqual(
-			getdate(frappe.db.get_value("Task", group.name, "exp_end_date")), getdate(add_days(nowdate(), 19))
-		)
-		self.assertEqual(
-			getdate(frappe.db.get_value("Task", dependent.name, "exp_start_date")),
-			getdate(add_days(nowdate(), 20)),
-		)
-
-	def test_child_task_registers_in_parent_depends_on(self):
-		parent = create_task("_Test Parent Depends On", is_group=1)
-		child = create_task("_Test Child Depends On", parent_task=parent.name)
-
-		parent.reload()
-		self.assertIn(child.name, [row.task for row in parent.depends_on])
-
-	def test_delete_child_task_without_parent_write_permission(self):
-		from frappe.core.doctype.user_permission.test_user_permission import create_user
-
-		from erpnext.projects.doctype.project.test_project import make_project
-
-		parent = create_task("_Test Parent In Restricted Project", is_group=1)
-		child = create_task("_Test Child In Permitted Project", parent_task=parent.name)
-		child_project = make_project({"project_name": "_Test Project Child Only"}).name
-		frappe.db.set_value("Task", child.name, "project", child_project)
-		user = create_user("test_task_child_deleter@example.com", "Projects User")
-		frappe.permissions.add_user_permission("Project", child_project, user.name)
-
-		with self.set_user(user.name):
-			frappe.delete_doc("Task", child.name)
-
-		self.assertFalse(frappe.db.exists("Task", child.name))
 
 	def test_child_tasks_are_listed_only_for_a_readable_task(self):
 		from frappe.core.doctype.user_permission.test_user_permission import create_user

@@ -1,7 +1,7 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors and Contributors
 # See license.txt
-
 import calendar
+import unittest
 
 import frappe
 from frappe import _
@@ -18,11 +18,11 @@ from erpnext.tests.utils import ERPNextTestSuite
 
 class TestSetUp(ERPNextTestSuite):
 	def setUp(self):
-		frappe.db.delete("Service Level Agreement")
-		frappe.db.delete("Service Level Priority")
-		frappe.db.delete("SLA Fulfilled On Status")
-		frappe.db.delete("Pause SLA On Status")
-		frappe.db.delete("Service Day")
+		frappe.db.sql("delete from `tabService Level Agreement`")
+		frappe.db.sql("delete from `tabService Level Priority`")
+		frappe.db.sql("delete from `tabSLA Fulfilled On Status`")
+		frappe.db.sql("delete from `tabPause SLA On Status`")
+		frappe.db.sql("delete from `tabService Day`")
 		frappe.db.set_single_value("Support Settings", "track_service_level_agreement", 1)
 		create_service_level_agreements_for_issues()
 
@@ -32,6 +32,7 @@ class TestIssue(TestSetUp):
 		creation = get_datetime("2019-03-04 12:00")
 
 		# make issue with customer specific SLA
+		create_customer("_Test Customer", "__Test SLA Customer Group", "__Test SLA Territory")
 		issue = make_issue(creation, "_Test Customer", 1)
 
 		self.assertEqual(issue.response_by, get_datetime("2019-03-04 14:00"))
@@ -84,49 +85,6 @@ class TestIssue(TestSetUp):
 		issue.save()
 
 		self.assertEqual(issue.agreement_status, "Fulfilled")
-
-	def test_most_specific_sla_is_applied(self):
-		create_service_level_agreement(
-			default_service_level_agreement=0,
-			holiday_list="__Test Holiday List",
-			entity_type=None,
-			entity=None,
-			response_time=14400,
-			resolution_time=21600,
-			service_level="__Test Generic SLA",
-		)
-		customer_sla = get_service_level_agreement(entity_type="Customer", entity="_Test Customer")
-		group_sla = get_service_level_agreement(
-			entity_type="Customer Group", entity="_Test SLA Customer Group"
-		)
-
-		issue = make_issue(get_datetime("2019-03-04 12:00"), "_Test Customer", 1)
-		self.assertEqual(issue.service_level_agreement, customer_sla.name)
-
-		# the customer's SLA no longer applies once the customer changes
-		create_customer("__Test Customer", "_Test SLA Customer Group", "__Test SLA Territory")
-		issue.customer = "__Test Customer"
-		issue.save()
-		self.assertEqual(issue.service_level_agreement, group_sla.name)
-
-	def test_sla_outside_its_validity_is_not_applied(self):
-		from erpnext.support.doctype.service_level_agreement.service_level_agreement import (
-			check_agreement_status,
-		)
-
-		today = frappe.utils.getdate()
-		customer_sla = get_service_level_agreement(entity_type="Customer", entity="_Test Customer")
-		customer_sla.db_set("start_date", frappe.utils.add_days(today, 1))
-		default_sla = get_service_level_agreement(default_service_level_agreement=1)
-
-		issue = make_issue(get_datetime("2019-03-04 12:00"), "_Test Customer", 1)
-		self.assertEqual(issue.service_level_agreement, default_sla.name)
-
-		default_sla.db_set(
-			{"start_date": frappe.utils.add_days(today, -10), "end_date": frappe.utils.add_days(today, -1)}
-		)
-		check_agreement_status()
-		self.assertFalse(frappe.db.get_value("Service Level Agreement", default_sla.name, "enabled"))
 
 	def test_hold_time_on_replied(self):
 		creation = get_datetime("2020-03-04 4:00")
@@ -259,6 +217,379 @@ class TestIssue(TestSetUp):
 		self.assertEqual(issue.sla_resolution_by, get_datetime("2021-11-02 07:00"))
 		self.assertEqual(issue.agreement_status, "Fulfilled")
 		self.assertEqual(issue.sla_resolution_date, frappe.flags.current_time)
+
+	def test_portal_list_ignores_contact_links(self):
+		from erpnext.support.doctype.issue.issue import get_issue_list
+		from erpnext.tests.permission_test_utils import as_user, make_fenced_user
+
+		user = make_fenced_user("test_issue_portal_list@example.com", ["Customer"])
+		frappe.get_doc(
+			{
+				"doctype": "Contact",
+				"first_name": "Portal",
+				"user": user,
+				"links": [{"link_doctype": "Customer", "link_name": "_Test Customer"}],
+			}
+		).insert(ignore_permissions=True)
+		issue = make_issue(customer="_Test Customer")
+
+		with as_user(user):
+			self.assertNotIn(issue.name, [d.name for d in get_issue_list("Issue", None, None, 0, 500)])
+
+	def test_portal_user_cannot_set_customer_or_status(self):
+		user = "test_issue_portal_user@example.com"
+		if not frappe.db.exists("User", user):
+			frappe.get_doc(
+				{
+					"doctype": "User",
+					"email": user,
+					"first_name": "Portal",
+					"user_type": "Website User",
+					"send_welcome_email": 0,
+				}
+			).insert(ignore_permissions=True)
+		contact = frappe.get_doc("Contact", {"email_id": user})
+		contact.links = []
+		contact.append("links", {"link_doctype": "Customer", "link_name": "_Test Customer"})
+		contact.save(ignore_permissions=True)
+		create_customer("__Test Customer", "_Test SLA Customer Group", "__Test SLA Territory")
+
+		frappe.set_user(user)
+		try:
+			issue = frappe.get_doc(
+				{
+					"doctype": "Issue",
+					"subject": "Portal issue",
+					"customer": "__Test Customer",
+					"status": "Closed",
+					"via_customer_portal": 1,
+				}
+			).insert(ignore_permissions=True)
+			self.assertEqual((issue.customer, issue.status), ("_Test Customer", "Open"))
+
+			issue = frappe.get_doc("Issue", issue.name)
+			issue.customer = "__Test Customer"
+			issue.status = "Closed"
+			issue.save(ignore_permissions=True)
+		finally:
+			frappe.set_user("Administrator")
+
+		self.assertEqual(
+			frappe.db.get_value("Issue", issue.name, ["customer", "status"]), ("_Test Customer", "Open")
+		)
+
+	def test_web_form_ignores_submitted_customer_and_raised_by(self):
+		from erpnext.tests.permission_test_utils import as_user, make_fenced_user
+
+		# a desk user who can pick any Customer in a Link field but cannot create an Issue
+		user = make_fenced_user("test_issue_web_form_user@example.com", ["Stock User"])
+		self.assertTrue(frappe.has_permission("Customer", "select", doc="_Test Customer", user=user))
+		self.assertFalse(frappe.has_permission("Issue", "create", user=user))
+
+		# raised_by is matched to a Contact, which would attribute the issue to its customer
+		victim = "test_issue_web_form_victim@example.com"
+		if not frappe.db.exists("Contact Email", {"email_id": victim}):
+			contact = frappe.get_doc({"doctype": "Contact", "first_name": "Victim"})
+			contact.add_email(victim, is_primary=True)
+			contact.append("links", {"link_doctype": "Customer", "link_name": "_Test Customer"})
+			contact.insert(ignore_permissions=True)
+
+		in_web_form = frappe.flags.get("in_web_form", False)
+		frappe.flags.in_web_form = True
+		try:
+			with as_user(user):
+				issue = frappe.get_doc(
+					{
+						"doctype": "Issue",
+						"subject": "Forged customer",
+						"customer": "_Test Customer",
+						"status": "Closed",
+						"raised_by": victim,
+					}
+				).insert(ignore_permissions=True)
+				self.assertEqual((issue.customer, issue.status, issue.raised_by), (None, "Open", user))
+
+				issue = frappe.get_doc("Issue", issue.name)
+				issue.customer = "_Test Customer"
+				issue.status = "Closed"
+				issue.save(ignore_permissions=True)
+		finally:
+			frappe.flags.in_web_form = in_web_form
+
+		self.assertEqual(frappe.db.get_value("Issue", issue.name, ["customer", "status"]), (None, "Open"))
+
+	def test_split_of_closed_issue_keeps_parent_metrics(self):
+		issue = make_issue(get_datetime("2019-03-04 12:00"), index=1)
+		frappe.flags.current_time = get_datetime("2019-03-04 16:00")
+		issue.status = "Closed"
+		issue.save()
+		communication = frappe.get_doc(
+			{
+				"doctype": "Communication",
+				"communication_type": "Communication",
+				"sent_or_received": "Sent",
+				"subject": "Split",
+				"sender": "test@example.com",
+				"reference_doctype": "Issue",
+				"reference_name": issue.name,
+			}
+		).insert(ignore_permissions=True)
+
+		issue = frappe.get_doc("Issue", issue.name)
+		split = frappe.get_doc("Issue", issue.split_issue("Split issue", communication.name))
+
+		self.assertEqual(frappe.db.get_value("Issue", issue.name, "resolution_time"), 14400)
+		self.assertEqual(split.status, "Open")
+		self.assertEqual(split.opening_date, frappe.utils.getdate())
+		self.assertFalse(split.sla_resolution_date)
+		self.assertFalse(split.resolution_time)
+
+	def test_split_of_issue_on_hold_starts_without_hold_time(self):
+		issue = make_issue(get_datetime("2019-03-04 12:00"), index=1)
+		for current_time, status in (("13:00", "Replied"), ("14:00", "Open"), ("15:00", "Replied")):
+			frappe.flags.current_time = get_datetime(f"2019-03-04 {current_time}")
+			issue.reload()
+			issue.status = status
+			issue.save()
+		self.assertEqual(issue.total_hold_time, 3600)
+		communication = frappe.get_doc(
+			{
+				"doctype": "Communication",
+				"communication_type": "Communication",
+				"sent_or_received": "Sent",
+				"subject": "Split",
+				"sender": "test@example.com",
+				"reference_doctype": "Issue",
+				"reference_name": issue.name,
+			}
+		).insert(ignore_permissions=True)
+
+		issue = frappe.get_doc("Issue", issue.name)
+		split = frappe.get_doc("Issue", issue.split_issue("Split issue", communication.name))
+
+		self.assertFalse(split.on_hold_since)
+		self.assertFalse(split.total_hold_time)
+		self.assertTrue(split.sla_resolution_by)
+
+	def test_issue_from_secondary_email_of_contact_gets_customer(self):
+		contact = frappe.get_doc({"doctype": "Contact", "first_name": "_Test Secondary Email"})
+		contact.append("email_ids", {"email_id": "primary@secondary-email.example", "is_primary": 1})
+		contact.append("email_ids", {"email_id": "second@secondary-email.example"})
+		contact.append("links", {"link_doctype": "Customer", "link_name": "_Test Customer"})
+		contact.insert(ignore_permissions=True)
+
+		issue = frappe.get_doc(
+			{"doctype": "Issue", "subject": "From secondary", "raised_by": "second@secondary-email.example"}
+		).insert(ignore_permissions=True)
+
+		self.assertEqual((issue.contact, issue.customer), (contact.name, "_Test Customer"))
+
+	def test_set_status_validates_the_status(self):
+		from erpnext.support.doctype.issue.issue import set_status
+
+		issue = make_issue(index=1)
+		self.assertRaises(frappe.ValidationError, set_status, issue.name, "Banana")
+
+	def test_issue_from_sent_mail_is_raised_by_the_recipient(self):
+		from erpnext.support.doctype.issue.issue import make_issue_from_communication
+
+		communication = frappe.get_doc(
+			{
+				"doctype": "Communication",
+				"communication_type": "Communication",
+				"communication_medium": "Email",
+				"sent_or_received": "Sent",
+				"subject": "Follow up",
+				"sender": "agent@example.com",
+				"recipients": '"Doe, Jane" <customer@example.com>, other@example.com',
+				"content": "Your order is delayed",
+			}
+		).insert(ignore_permissions=True)
+
+		issue = frappe.get_doc("Issue", make_issue_from_communication(communication.name))
+		self.assertEqual(issue.raised_by, "customer@example.com")
+		self.assertIn("Your order is delayed", issue.description)
+
+	def test_closing_issue_closes_its_assignments(self):
+		from frappe.desk.form.assign_to import add as add_assignment
+
+		create_user("test@admin.com")
+		issue = make_issue(index=1)
+		add_assignment({"doctype": "Issue", "name": issue.name, "assign_to": ["test@admin.com"]})
+
+		issue.reload()
+		issue.status = "Closed"
+		issue.save()
+
+		self.assertEqual(
+			frappe.db.get_value("ToDo", {"reference_type": "Issue", "reference_name": issue.name}, "status"),
+			"Closed",
+		)
+
+	def test_closed_assignments_stay_closed_with_assignment_rule(self):
+		from frappe.cache_manager import clear_doctype_map
+
+		create_user("test@admin.com")
+		frappe.get_doc(
+			{
+				"doctype": "Assignment Rule",
+				"name": "_Test Issue Assignment Rule",
+				"document_type": "Issue",
+				"assign_condition": "status == 'Open'",
+				"rule": "Round Robin",
+				"users": [{"user": "test@admin.com"}],
+				"assignment_days": [{"day": day} for day in calendar.day_name],
+			}
+		).insert(ignore_permissions=True)
+		self.addCleanup(clear_doctype_map, "Assignment Rule", "Issue")
+
+		issue = make_issue(index=1)
+		issue.reload()
+		issue.status = "Closed"
+		issue.save()
+
+		self.assertEqual(
+			frappe.get_all("ToDo", {"reference_type": "Issue", "reference_name": issue.name}, pluck="status"),
+			["Closed"],
+		)
+
+	def test_resetting_sla_needs_write_on_the_document(self):
+		from erpnext.support.doctype.service_level_agreement.service_level_agreement import (
+			reset_service_level_agreement,
+		)
+
+		frappe.db.set_single_value("Support Settings", "allow_resetting_service_level_agreement", 1)
+		issue = make_issue(get_datetime("2019-03-04 12:00"), "_Test Customer", 1)
+
+		website_user = create_user("test_sla_website_user@example.com")
+		website_user.db_set("user_type", "Website User")
+		frappe.set_user(website_user.name)
+		try:
+			self.assertRaises(
+				frappe.PermissionError,
+				reset_service_level_agreement,
+				"Issue",
+				issue.name,
+				"not mine",
+				website_user.name,
+			)
+		finally:
+			frappe.set_user("Administrator")
+		self.assertFalse(
+			frappe.db.exists("Comment", {"reference_name": issue.name, "content": ["like", "%not mine%"]})
+		)
+
+		reset_service_level_agreement("Issue", issue.name, "customer asked", "Administrator")
+		self.assertTrue(
+			frappe.db.exists(
+				"Comment", {"reference_name": issue.name, "content": ["like", "%customer asked%"]}
+			)
+		)
+
+	def test_recording_of_assignment_on_first_reponse_failure(self):
+		from frappe.desk.form.assign_to import add as add_assignment
+
+		frappe.flags.current_time = get_datetime("2021-11-01 19:00")
+
+		issue = make_issue(frappe.flags.current_time, index=1)
+		create_user("test@admin.com")
+		create_communication(issue.name, "test@example.com", "Received", frappe.flags.current_time)
+		add_assignment({"doctype": issue.doctype, "name": issue.name, "assign_to": ["test@admin.com"]})
+		issue.reload()
+
+		# send a reply failing response SLA
+		frappe.flags.current_time = get_datetime("2021-11-02 15:00")
+		create_communication(issue.name, "test@admin.com", "Sent", frappe.flags.current_time)
+
+		# assert if a new timeline item has been added
+		# to record the assignment
+		comment = frappe.db.exists(
+			"Comment",
+			{
+				"reference_doctype": "Issue",
+				"reference_name": issue.name,
+				"comment_type": "Assigned",
+				"content": _("First Response SLA Failed by {}").format("test"),
+			},
+		)
+		self.assertTrue(comment)
+
+	def test_agreement_status_on_response(self):
+		frappe.flags.current_time = get_datetime("2021-11-01 19:00")
+
+		issue = make_issue(frappe.flags.current_time, index=1)
+		create_communication(issue.name, "test@example.com", "Received", frappe.flags.current_time)
+		self.assertTrue(issue.status == "Open")
+
+		# send a reply within response SLA
+		frappe.flags.current_time = get_datetime("2021-11-02 11:00")
+		create_communication(issue.name, "test@admin.com", "Sent", frappe.flags.current_time)
+
+		issue.reload()
+		self.assertEqual(issue.first_responded_on, frappe.flags.current_time)
+		self.assertEqual(issue.agreement_status, "Resolution Due")
+
+	def test_portal_user_changes_only_own_issues(self):
+		from erpnext.tests.permission_test_utils import as_user, make_fenced_user
+
+		user = make_fenced_user("_test_issue_portal_customer@example.com", ["Customer"])
+		customer = frappe.get_doc("Customer", "_Test Customer")
+		if user not in [row.user for row in customer.portal_users]:
+			customer.append("portal_users", {"user": user})
+			customer.save()
+		staff_issue = make_issue(customer="_Test Customer", index=1).name
+		own_issue = make_issue(customer="_Test Customer", index=2).name
+		frappe.db.set_value("Issue", own_issue, "raised_by", user)
+		staff_issue, own_issue = frappe.get_doc("Issue", staff_issue), frappe.get_doc("Issue", own_issue)
+
+		with as_user(user):
+			self.assertTrue(frappe.has_website_permission(staff_issue, "read"))
+			self.assertFalse(frappe.has_website_permission(staff_issue, "write"))
+			self.assertFalse(frappe.has_website_permission(staff_issue, "delete"))
+			self.assertTrue(frappe.has_website_permission(own_issue, "write"))
+
+	def test_most_specific_sla_is_applied(self):
+		create_service_level_agreement(
+			default_service_level_agreement=0,
+			holiday_list="__Test Holiday List",
+			entity_type=None,
+			entity=None,
+			response_time=14400,
+			resolution_time=21600,
+			service_level="__Test Generic SLA",
+		)
+		customer_sla = get_service_level_agreement(entity_type="Customer", entity="_Test Customer")
+		group_sla = get_service_level_agreement(
+			entity_type="Customer Group", entity="_Test SLA Customer Group"
+		)
+
+		issue = make_issue(get_datetime("2019-03-04 12:00"), "_Test Customer", 1)
+		self.assertEqual(issue.service_level_agreement, customer_sla.name)
+
+		# the customer's SLA no longer applies once the customer changes
+		create_customer("__Test Customer", "_Test SLA Customer Group", "__Test SLA Territory")
+		issue.customer = "__Test Customer"
+		issue.save()
+		self.assertEqual(issue.service_level_agreement, group_sla.name)
+
+	def test_sla_outside_its_validity_is_not_applied(self):
+		from erpnext.support.doctype.service_level_agreement.service_level_agreement import (
+			check_agreement_status,
+		)
+
+		today = frappe.utils.getdate()
+		customer_sla = get_service_level_agreement(entity_type="Customer", entity="_Test Customer")
+		customer_sla.db_set("start_date", frappe.utils.add_days(today, 1))
+		default_sla = get_service_level_agreement(default_service_level_agreement=1)
+
+		issue = make_issue(get_datetime("2019-03-04 12:00"), "_Test Customer", 1)
+		self.assertEqual(issue.service_level_agreement, default_sla.name)
+
+		default_sla.db_set(
+			{"start_date": frappe.utils.add_days(today, -10), "end_date": frappe.utils.add_days(today, -1)}
+		)
+		check_agreement_status()
+		self.assertFalse(frappe.db.get_value("Service Level Agreement", default_sla.name, "enabled"))
 
 	def test_hold_time_when_closed_issue_is_reopened_as_replied(self):
 		issue = make_issue(get_datetime("2019-03-04 11:00"), index=1)
@@ -451,118 +782,62 @@ class TestIssue(TestSetUp):
 		self.assertFalse(open_issue.service_level_agreement)
 		self.assertFalse(open_issue.agreement_status)
 
-	def test_portal_user_cannot_set_customer_or_status(self):
-		user = "test_issue_portal_user@example.com"
-		if not frappe.db.exists("User", user):
-			frappe.get_doc(
-				{
-					"doctype": "User",
-					"email": user,
-					"first_name": "Portal",
-					"user_type": "Website User",
-					"send_welcome_email": 0,
-				}
-			).insert(ignore_permissions=True)
-		contact = frappe.get_doc("Contact", {"email_id": user})
-		contact.links = []
-		contact.append("links", {"link_doctype": "Customer", "link_name": "_Test Customer"})
-		contact.save(ignore_permissions=True)
-		create_customer("__Test Customer", "_Test SLA Customer Group", "__Test SLA Territory")
+	def test_sla_whitelisted_methods_use_session_permissions(self):
+		from erpnext.support.doctype.service_level_agreement.service_level_agreement import (
+			get_service_level_agreement_filters,
+			reset_service_level_agreement,
+		)
 
-		frappe.set_user(user)
+		frappe.db.set_single_value("Support Settings", "allow_resetting_service_level_agreement", 1)
+		issue = make_issue(get_datetime("2019-03-04 12:00"), "_Test Customer", 1)
+		reset_service_level_agreement("Issue", issue.name, "customer asked", "someone@example.com")
+		self.assertEqual(
+			frappe.db.get_value(
+				"Comment", {"reference_name": issue.name, "comment_type": "Info"}, "comment_email"
+			),
+			"Administrator",
+		)
+
+		website_user = create_user("test_sla_website_user@example.com")
+		website_user.db_set("user_type", "Website User")
+		frappe.set_user(website_user.name)
 		try:
-			issue = frappe.get_doc(
-				{
-					"doctype": "Issue",
-					"subject": "Portal issue",
-					"customer": "__Test Customer",
-					"status": "Closed",
-					"via_customer_portal": 1,
-				}
-			).insert(ignore_permissions=True)
-			self.assertEqual((issue.customer, issue.status), ("_Test Customer", "Open"))
-
-			issue = frappe.get_doc("Issue", issue.name)
-			issue.customer = "__Test Customer"
-			issue.status = "Closed"
-			issue.save(ignore_permissions=True)
+			self.assertRaises(
+				frappe.PermissionError,
+				get_service_level_agreement_filters,
+				"Issue",
+				issue.service_level_agreement,
+				"_Test Customer",
+			)
 		finally:
 			frappe.set_user("Administrator")
 
-		self.assertEqual(
-			frappe.db.get_value("Issue", issue.name, ["customer", "status"]), ("_Test Customer", "Open")
+	def test_update_agreement_status_on_custom_status(self):
+		from erpnext.support.doctype.service_level_agreement.service_level_agreement import (
+			update_agreement_status_on_custom_status,
 		)
 
-	def test_portal_list_ignores_contact_links(self):
-		from erpnext.support.doctype.issue.issue import get_issue_list
-		from erpnext.tests.permission_test_utils import as_user, make_fenced_user
-
-		user = make_fenced_user("test_issue_portal_list@example.com", ["Customer"])
-		frappe.get_doc(
-			{
-				"doctype": "Contact",
-				"first_name": "Portal",
-				"user": user,
-				"links": [{"link_doctype": "Customer", "link_name": "_Test Customer"}],
-			}
-		).insert(ignore_permissions=True)
-		issue = make_issue(customer="_Test Customer")
-
-		with as_user(user):
-			self.assertNotIn(issue.name, [d.name for d in get_issue_list("Issue", None, None, 0, 500)])
-
-	def test_split_of_closed_issue_keeps_parent_metrics(self):
 		issue = make_issue(get_datetime("2019-03-04 12:00"), index=1)
-		frappe.flags.current_time = get_datetime("2019-03-04 16:00")
+		frappe.flags.current_time = get_datetime("2019-03-04 13:00")
+		issue.first_responded_on = frappe.flags.current_time
+		update_agreement_status_on_custom_status(issue)
+		self.assertEqual(issue.agreement_status, "Resolution Due")
+
+	def test_resetting_sla_of_resolved_issue_recalculates_deadlines(self):
+		from erpnext.support.doctype.service_level_agreement.service_level_agreement import (
+			reset_service_level_agreement,
+		)
+
+		frappe.db.set_single_value("Support Settings", "allow_resetting_service_level_agreement", 1)
+		issue = make_issue(get_datetime("2019-03-04 12:00"), index=1)
+		frappe.flags.current_time = get_datetime("2019-03-04 13:00")
 		issue.status = "Closed"
 		issue.save()
-		communication = frappe.get_doc(
-			{
-				"doctype": "Communication",
-				"communication_type": "Communication",
-				"sent_or_received": "Sent",
-				"subject": "Split",
-				"sender": "test@example.com",
-				"reference_doctype": "Issue",
-				"reference_name": issue.name,
-			}
-		).insert(ignore_permissions=True)
+		old_response_by = issue.response_by
 
-		issue = frappe.get_doc("Issue", issue.name)
-		split = frappe.get_doc("Issue", issue.split_issue("Split issue", communication.name))
-
-		self.assertEqual(frappe.db.get_value("Issue", issue.name, "resolution_time"), 14400)
-		self.assertEqual(split.status, "Open")
-		self.assertEqual(split.opening_date, frappe.utils.getdate())
-		self.assertFalse(split.sla_resolution_date)
-		self.assertFalse(split.resolution_time)
-
-	def test_split_of_issue_on_hold_starts_without_hold_time(self):
-		issue = make_issue(get_datetime("2019-03-04 12:00"), index=1)
-		for current_time, status in (("13:00", "Replied"), ("14:00", "Open"), ("15:00", "Replied")):
-			frappe.flags.current_time = get_datetime(f"2019-03-04 {current_time}")
-			issue.reload()
-			issue.status = status
-			issue.save()
-		self.assertEqual(issue.total_hold_time, 3600)
-		communication = frappe.get_doc(
-			{
-				"doctype": "Communication",
-				"communication_type": "Communication",
-				"sent_or_received": "Sent",
-				"subject": "Split",
-				"sender": "test@example.com",
-				"reference_doctype": "Issue",
-				"reference_name": issue.name,
-			}
-		).insert(ignore_permissions=True)
-
-		issue = frappe.get_doc("Issue", issue.name)
-		split = frappe.get_doc("Issue", issue.split_issue("Split issue", communication.name))
-
-		self.assertFalse(split.on_hold_since)
-		self.assertFalse(split.total_hold_time)
-		self.assertTrue(split.sla_resolution_by)
+		reset_service_level_agreement("Issue", issue.name, "customer asked")
+		issue.reload()
+		self.assertGreater(get_datetime(issue.response_by), get_datetime(old_response_by))
 
 	def test_issue_without_sla_records_resolution_metrics(self):
 		frappe.db.set_single_value("Support Settings", "track_service_level_agreement", 0)
@@ -604,213 +879,6 @@ class TestIssue(TestSetUp):
 		self.assertEqual(issue.resolution_time, 21600)
 		# the 13:00 to 17:00 wait for the customer's reply is not the user's time
 		self.assertEqual(issue.user_resolution_time, 7200)
-
-	def test_issue_from_secondary_email_of_contact_gets_customer(self):
-		contact = frappe.get_doc({"doctype": "Contact", "first_name": "_Test Secondary Email"})
-		contact.append("email_ids", {"email_id": "primary@secondary-email.example", "is_primary": 1})
-		contact.append("email_ids", {"email_id": "second@secondary-email.example"})
-		contact.append("links", {"link_doctype": "Customer", "link_name": "_Test Customer"})
-		contact.insert(ignore_permissions=True)
-
-		issue = frappe.get_doc(
-			{"doctype": "Issue", "subject": "From secondary", "raised_by": "second@secondary-email.example"}
-		).insert(ignore_permissions=True)
-
-		self.assertEqual((issue.contact, issue.customer), (contact.name, "_Test Customer"))
-
-	def test_set_status_validates_the_status(self):
-		from erpnext.support.doctype.issue.issue import set_status
-
-		issue = make_issue(index=1)
-		self.assertRaises(frappe.ValidationError, set_status, issue.name, "Banana")
-
-	def test_issue_from_sent_mail_is_raised_by_the_recipient(self):
-		from erpnext.support.doctype.issue.issue import make_issue_from_communication
-
-		communication = frappe.get_doc(
-			{
-				"doctype": "Communication",
-				"communication_type": "Communication",
-				"communication_medium": "Email",
-				"sent_or_received": "Sent",
-				"subject": "Follow up",
-				"sender": "agent@example.com",
-				"recipients": '"Doe, Jane" <customer@example.com>, other@example.com',
-				"content": "Your order is delayed",
-			}
-		).insert(ignore_permissions=True)
-
-		issue = frappe.get_doc("Issue", make_issue_from_communication(communication.name))
-		self.assertEqual(issue.raised_by, "customer@example.com")
-		self.assertIn("Your order is delayed", issue.description)
-
-	def test_closing_issue_closes_its_assignments(self):
-		from frappe.desk.form.assign_to import add as add_assignment
-
-		create_user("test@admin.com")
-		issue = make_issue(index=1)
-		add_assignment({"doctype": "Issue", "name": issue.name, "assign_to": ["test@admin.com"]})
-
-		issue.reload()
-		issue.status = "Closed"
-		issue.save()
-
-		self.assertEqual(
-			frappe.db.get_value("ToDo", {"reference_type": "Issue", "reference_name": issue.name}, "status"),
-			"Closed",
-		)
-
-	def test_closed_assignments_stay_closed_with_assignment_rule(self):
-		from frappe.cache_manager import clear_doctype_map
-
-		create_user("test@admin.com")
-		frappe.get_doc(
-			{
-				"doctype": "Assignment Rule",
-				"name": "_Test Issue Assignment Rule",
-				"document_type": "Issue",
-				"assign_condition": "status == 'Open'",
-				"rule": "Round Robin",
-				"users": [{"user": "test@admin.com"}],
-				"assignment_days": [{"day": day} for day in calendar.day_name],
-			}
-		).insert(ignore_permissions=True)
-		self.addCleanup(clear_doctype_map, "Assignment Rule", "Issue")
-
-		issue = make_issue(index=1)
-		issue.reload()
-		issue.status = "Closed"
-		issue.save()
-
-		self.assertEqual(
-			frappe.get_all("ToDo", {"reference_type": "Issue", "reference_name": issue.name}, pluck="status"),
-			["Closed"],
-		)
-
-	def test_portal_user_changes_only_own_issues(self):
-		from erpnext.tests.permission_test_utils import as_user, make_fenced_user
-
-		user = make_fenced_user("_test_issue_portal_customer@example.com", ["Customer"])
-		customer = frappe.get_doc("Customer", "_Test Customer")
-		if user not in [row.user for row in customer.portal_users]:
-			customer.append("portal_users", {"user": user})
-			customer.save()
-		staff_issue = make_issue(customer="_Test Customer", index=1).name
-		own_issue = make_issue(customer="_Test Customer", index=2).name
-		frappe.db.set_value("Issue", own_issue, "raised_by", user)
-		staff_issue, own_issue = frappe.get_doc("Issue", staff_issue), frappe.get_doc("Issue", own_issue)
-
-		with as_user(user):
-			self.assertTrue(frappe.has_website_permission(staff_issue, "read"))
-			self.assertFalse(frappe.has_website_permission(staff_issue, "write"))
-			self.assertFalse(frappe.has_website_permission(staff_issue, "delete"))
-			self.assertTrue(frappe.has_website_permission(own_issue, "write"))
-
-	def test_sla_whitelisted_methods_use_session_permissions(self):
-		from erpnext.support.doctype.service_level_agreement.service_level_agreement import (
-			get_service_level_agreement_filters,
-			reset_service_level_agreement,
-		)
-
-		frappe.db.set_single_value("Support Settings", "allow_resetting_service_level_agreement", 1)
-		issue = make_issue(get_datetime("2019-03-04 12:00"), "_Test Customer", 1)
-		reset_service_level_agreement("Issue", issue.name, "customer asked", "someone@example.com")
-		self.assertEqual(
-			frappe.db.get_value(
-				"Comment", {"reference_name": issue.name, "comment_type": "Info"}, "comment_email"
-			),
-			"Administrator",
-		)
-
-		website_user = create_user("test_sla_website_user@example.com")
-		website_user.db_set("user_type", "Website User")
-		frappe.set_user(website_user.name)
-		try:
-			self.assertRaises(
-				frappe.PermissionError,
-				get_service_level_agreement_filters,
-				"Issue",
-				issue.service_level_agreement,
-				"_Test Customer",
-			)
-			self.assertRaises(
-				frappe.PermissionError, reset_service_level_agreement, "Issue", issue.name, "not mine"
-			)
-		finally:
-			frappe.set_user("Administrator")
-		self.assertFalse(
-			frappe.db.exists("Comment", {"reference_name": issue.name, "content": ["like", "%not mine%"]})
-		)
-
-	def test_update_agreement_status_on_custom_status(self):
-		from erpnext.support.doctype.service_level_agreement.service_level_agreement import (
-			update_agreement_status_on_custom_status,
-		)
-
-		issue = make_issue(get_datetime("2019-03-04 12:00"), index=1)
-		frappe.flags.current_time = get_datetime("2019-03-04 13:00")
-		issue.first_responded_on = frappe.flags.current_time
-		update_agreement_status_on_custom_status(issue)
-		self.assertEqual(issue.agreement_status, "Resolution Due")
-
-	def test_resetting_sla_of_resolved_issue_recalculates_deadlines(self):
-		from erpnext.support.doctype.service_level_agreement.service_level_agreement import (
-			reset_service_level_agreement,
-		)
-
-		frappe.db.set_single_value("Support Settings", "allow_resetting_service_level_agreement", 1)
-		issue = make_issue(get_datetime("2019-03-04 12:00"), index=1)
-		frappe.flags.current_time = get_datetime("2019-03-04 13:00")
-		issue.status = "Closed"
-		issue.save()
-		old_response_by = issue.response_by
-
-		reset_service_level_agreement("Issue", issue.name, "customer asked")
-		issue.reload()
-		self.assertGreater(get_datetime(issue.response_by), get_datetime(old_response_by))
-
-	def test_recording_of_assignment_on_first_reponse_failure(self):
-		from frappe.desk.form.assign_to import add as add_assignment
-
-		frappe.flags.current_time = get_datetime("2021-11-01 19:00")
-
-		issue = make_issue(frappe.flags.current_time, index=1)
-		create_user("test@admin.com")
-		create_communication(issue.name, "test@example.com", "Received", frappe.flags.current_time)
-		add_assignment({"doctype": issue.doctype, "name": issue.name, "assign_to": ["test@admin.com"]})
-		issue.reload()
-
-		# send a reply failing response SLA
-		frappe.flags.current_time = get_datetime("2021-11-02 15:00")
-		create_communication(issue.name, "test@admin.com", "Sent", frappe.flags.current_time)
-
-		# assert if a new timeline item has been added
-		# to record the assignment
-		comment = frappe.db.exists(
-			"Comment",
-			{
-				"reference_doctype": "Issue",
-				"reference_name": issue.name,
-				"comment_type": "Assigned",
-				"content": _("First Response SLA Failed by {}").format("test"),
-			},
-		)
-		self.assertTrue(comment)
-
-	def test_agreement_status_on_response(self):
-		frappe.flags.current_time = get_datetime("2021-11-01 19:00")
-
-		issue = make_issue(frappe.flags.current_time, index=1)
-		create_communication(issue.name, "test@example.com", "Received", frappe.flags.current_time)
-		self.assertEqual(issue.status, "Open")
-
-		# send a reply within response SLA
-		frappe.flags.current_time = get_datetime("2021-11-02 11:00")
-		create_communication(issue.name, "test@admin.com", "Sent", frappe.flags.current_time)
-
-		issue.reload()
-		self.assertEqual(issue.first_responded_on, frappe.flags.current_time)
-		self.assertEqual(issue.agreement_status, "Resolution Due")
 
 
 class TestFirstResponseTime(TestSetUp):
@@ -1235,8 +1303,8 @@ class TestSplitIssue(ERPNextTestSuite):
 			}
 		).insert(ignore_permissions=True)
 
-		# split_issue() deepcopies self, so it has to start from a document loaded off the
-		# database the way the desk caller hands it one, not from the freshly inserted object
+		# split_issue() deepcopies self, so start from a document loaded off the database the way the
+		# desk caller hands it one, not from the freshly inserted object.
 		return frappe.get_doc("Issue", issue.name)
 
 	def make_communication(self, subject, communication_date, reference=None, link_to=None, creation=None):
@@ -1261,16 +1329,16 @@ class TestSplitIssue(ERPNextTestSuite):
 			communication.add_link("Issue", link_to, autosave=True)
 
 		if not communication_date:
-			# the field defaults to Now whenever it is unset, so leaving it genuinely empty --
-			# as an import or an API caller can -- means blanking it after the insert
+			# the field defaults to Now whenever unset, so leaving it genuinely empty means blanking it
+			# after the insert.
 			frappe.db.set_value(
 				"Communication", communication.name, "communication_date", None, update_modified=False
 			)
 			communication.reload()
 
 		if creation:
-			# insert() always stamps creation with the current time, so a test that needs it to
-			# disagree with communication_date has to write it afterwards
+			# insert() always stamps creation with the current time, so a test needing it to disagree with
+			# communication_date has to write it afterwards.
 			frappe.db.set_value(
 				"Communication",
 				communication.name,
@@ -1338,8 +1406,8 @@ class TestSplitIssue(ERPNextTestSuite):
 		self.assertEqual(frappe.db.get_value("Communication", first.name, "reference_name"), split)
 		self.assertEqual(frappe.db.get_value("Communication", second.name, "reference_name"), split)
 
-		# Split from the undated item itself: a null split point drops the date filter, so the
-		# whole timeline above it -- which is everything -- moves.
+		# Split from the undated item itself: a null split point drops the date filter, so the whole
+		# timeline above it moves.
 		source = self.make_issue("Undated split source")
 		from_undated = self.make_communication("Undated", None, reference=source.name)
 		dated = self.make_communication("Dated", "2024-01-01 10:00:00", reference=source.name)

@@ -429,7 +429,7 @@ frappe.ui.form.on("Shipment", {
 	remove_email_row: function (frm, table, fieldname) {
 		$.each(frm.doc[table] || [], function (i, detail) {
 			if (detail.email === fieldname) {
-				frm.get_field(table).grid.grid_rows[i].remove();
+				cur_frm.get_field(table).grid.grid_rows[i].remove();
 			}
 		});
 	},
@@ -442,10 +442,9 @@ frappe.ui.form.on("Shipment Delivery Note", {
 			let row_index = row.idx - 1;
 			if (validate_duplicate(frm, "shipment_delivery_note", row.delivery_note, row_index)) {
 				frappe.throw(
-					__(
-						"You have entered a duplicate Delivery Note on row {0}. Please rectify and try again.",
-						[row.idx]
-					)
+					__("You have entered a duplicate Delivery Note on Row") +
+						` ${row.idx}. ` +
+						__("Please rectify and try again.")
 				);
 			}
 		}

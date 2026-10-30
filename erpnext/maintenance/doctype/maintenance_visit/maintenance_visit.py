@@ -58,16 +58,10 @@ class MaintenanceVisit(TransactionBase):
 			if not d.serial_no:
 				continue
 			serial = frappe.db.get_value(
-				"Serial No", d.serial_no, ["serial_no", "item_code", "warehouse", "customer"], as_dict=True
+				"Serial No", d.serial_no, ["serial_no", "warehouse", "customer"], as_dict=True
 			)
 			if not serial:
-				frappe.throw(_("Row #{0}: Selected Serial No no longer exists.").format(d.idx))
-			if serial.item_code != d.item_code:
-				frappe.throw(
-					_("Serial No {0} does not belong to Item {1}").format(
-						escape_html(serial.serial_no), escape_html(d.item_code)
-					)
-				)
+				frappe.throw(_("Serial No {0} does not exist").format(d.serial_no))
 			if serial.warehouse and was_delivered_to(d.serial_no, d.item_code, self.customer):
 				continue
 			validate_serial_no_for_customer(serial, self.customer)
@@ -284,27 +278,14 @@ class MaintenanceVisit(TransactionBase):
 				check_for_docname = d.prevdoc_docname
 
 		if check_for_docname:
-			mv = frappe.qb.DocType("Maintenance Visit")
-			mvp = frappe.qb.DocType("Maintenance Visit Purpose")
-			check = (
-				frappe.qb.from_(mv)
-				.inner_join(mvp)
-				.on(mvp.parent == mv.name)
-				.select(mv.name)
-				.where(
-					(mv.name != self.name)
-					& (mvp.prevdoc_docname == check_for_docname)
-					& (mv.docstatus == 1)
-					& (
-						(mv.mntc_date > self.mntc_date)
-						| ((mv.mntc_date == self.mntc_date) & (mv.mntc_time > self.mntc_time))
-					)
-				)
-				.run(pluck=True)
+			check = frappe.db.sql(
+				"select t1.name from `tabMaintenance Visit` t1, `tabMaintenance Visit Purpose` t2 where t2.parent = t1.name and t1.name!=%s and t2.prevdoc_docname=%s and t1.docstatus = 1 and (t1.mntc_date > %s or (t1.mntc_date = %s and t1.mntc_time > %s))",
+				(self.name, check_for_docname, self.mntc_date, self.mntc_date, self.mntc_time),
 			)
 
 			if check:
-				check_lst = ",".join(check)
+				check_lst = [x[0] for x in check]
+				check_lst = ",".join(check_lst)
 				frappe.throw(
 					_("Cancel Maintenance Visits {0} before cancelling this Maintenance Visit").format(
 						check_lst

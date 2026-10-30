@@ -8,8 +8,6 @@
  "engine": "InnoDB",
  "field_order": [
   "item_code",
-  "is_product_bundle",
-  "product_bundle",
   "item_name",
   "customer_item_code",
   "col_break1",
@@ -103,22 +101,6 @@
    "print_width": "150px",
    "search_index": 1,
    "width": "150px"
-  },
-  {
-   "default": "0",
-   "fieldname": "is_product_bundle",
-   "fieldtype": "Check",
-   "hidden": 1,
-   "label": "Is Product Bundle",
-   "print_hide": 1,
-   "read_only": 1
-  },
-  {
-   "depends_on": "eval:doc.is_product_bundle",
-   "fieldname": "product_bundle",
-   "fieldtype": "Link",
-   "label": "Product Bundle",
-   "options": "Product Bundle"
   },
   {
    "fieldname": "customer_item_code",
@@ -744,7 +726,7 @@
  "idx": 1,
  "istable": 1,
  "links": [],
- "modified": "2026-10-15 18:00:00.000000",
+ "modified": "2026-09-30 23:24:44.044604",
  "modified_by": "Administrator",
  "module": "Selling",
  "name": "Quotation Item",

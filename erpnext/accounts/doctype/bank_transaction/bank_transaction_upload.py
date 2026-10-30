@@ -11,9 +11,8 @@ from frappe.utils.dateutils import parse_date
 
 @frappe.whitelist()
 def upload_bank_statement():
-	# Parsing a statement is the first step of creating Bank Transactions from it, so that is the
-	# right to require. Both functions in this file are reached only over HTTP — nothing in the tree
-	# calls either — so there is no caller to break.
+	# Parsing a statement is the first step of creating Bank Transactions from it. Both functions here
+	# are reached only over HTTP, so there is no in-process caller to break.
 	frappe.has_permission("Bank Transaction", "create", throw=True)
 
 	if getattr(frappe, "uploaded_file", None):
@@ -40,10 +39,9 @@ def upload_bank_statement():
 
 
 @frappe.whitelist(methods=["POST"])
-def create_bank_entries(columns: str, data: str | list, bank_account: str):
-	# insert()/submit() below already enforce this per document, but only after the per-row loop has
-	# read the Bank Account and its Bank mapping and written an Error Log for every rejected row —
-	# so check once up front rather than failing row by row.
+def create_bank_entries(columns, data, bank_account):
+	# insert()/submit() enforce this per document, but only after the loop has read each Bank Account
+	# and written an Error Log per rejected row. Check once up front.
 	frappe.has_permission("Bank Transaction", "create", throw=True)
 	frappe.has_permission("Bank Account", doc=bank_account, throw=True)
 
@@ -51,14 +49,13 @@ def create_bank_entries(columns: str, data: str | list, bank_account: str):
 
 	success = 0
 	errors = 0
-	for d in frappe.parse_json(data):
+	for d in json.loads(data):
 		if all(item is None for item in d) is True:
 			continue
 		fields = {}
 		for key, value in header_map.items():
 			fields.update({key: d[int(value) - 1]})
 
-		frappe.db.savepoint("bank_entry")
 		try:
 			bank_transaction = frappe.get_doc({"doctype": "Bank Transaction"})
 			bank_transaction.update(fields)
@@ -68,8 +65,7 @@ def create_bank_entries(columns: str, data: str | list, bank_account: str):
 			bank_transaction.submit()
 			success += 1
 		except Exception:
-			frappe.db.rollback(save_point="bank_entry")
-			frappe.log_error(title="Bank entry creation failed")
+			bank_transaction.log_error("Bank entry creation failed")
 			errors += 1
 
 	return {"success": success, "errors": errors}
@@ -79,7 +75,7 @@ def get_header_mapping(columns, bank_account):
 	mapping = get_bank_mapping(bank_account)
 
 	header_map = {}
-	for column in frappe.parse_json(columns):
+	for column in json.loads(columns):
 		if column["content"] in mapping:
 			header_map.update({mapping[column["content"]]: column["colIndex"]})
 

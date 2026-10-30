@@ -25,10 +25,9 @@ PRICING_TRANSACTION_DOCTYPES = frozenset(
 		"Purchase Receipt",
 		"Purchase Invoice",
 		"Material Request",
-		# these three also extend a controller that calls the pricing engine: BOM and BOM Creator
-		# through TransactionController, Request for Quotation through BuyingController
+		# these two also extend a controller that calls the pricing engine: BOM through
+		# TransactionController, Request for Quotation through BuyingController
 		"BOM",
-		"BOM Creator",
 		"Request for Quotation",
 		# no client sends this one, but set_transaction_type below still branches on it
 		"Opportunity",
@@ -210,10 +209,7 @@ class PricingRule(Document):
 
 		tocheck = frappe.scrub(self.get("applicable_for", ""))
 		if tocheck and not self.get(tocheck):
-			throw(
-				_("{0} is required").format(self.meta.get_translated_label(tocheck)),
-				frappe.MandatoryError,
-			)
+			throw(_("{0} is required").format(_(self.meta.get_label(tocheck))), frappe.MandatoryError)
 
 		if self.apply_rule_on_other:
 			o_field = "other_" + frappe.scrub(self.apply_rule_on_other)
@@ -364,7 +360,7 @@ class PricingRule(Document):
 
 
 @frappe.whitelist()
-def apply_pricing_rule(args: str | dict, doc: str | dict | Document | None = None):
+def apply_pricing_rule(args, doc=None):
 	"""
 	args = {
 	        "items": [{"doctype": "", "name": "", "item_code": "", "brand": "", "item_group": ""}, ...],
@@ -385,7 +381,10 @@ def apply_pricing_rule(args: str | dict, doc: str | dict | Document | None = Non
 	}
 	"""
 
-	args = frappe._dict(frappe.parse_json(args))
+	if isinstance(args, str):
+		args = json.loads(args)
+
+	args = frappe._dict(args)
 	validate_pricing_context(args)
 
 	set_transaction_type(args)
@@ -440,7 +439,8 @@ def get_pricing_rule_for_item(args, doc=None, for_validate=False):
 		get_product_discount_rule,
 	)
 
-	doc = frappe.parse_json(doc)
+	if isinstance(doc, str):
+		doc = json.loads(doc)
 
 	if doc:
 		doc = frappe.get_doc(doc)
@@ -562,7 +562,8 @@ def get_pricing_rule_for_item(args, doc=None, for_validate=False):
 		if not doc:
 			return item_details
 
-	elif args.get("pricing_rules"):
+	# "[]" means no rule was applied, so there is none to remove and the rate typed in stays
+	elif get_applied_pricing_rules(args.get("pricing_rules")):
 		item_details = remove_pricing_rule_for_item(
 			args.get("pricing_rules"),
 			item_details,
@@ -696,18 +697,15 @@ def apply_pricing_rule_margin(pricing_rule, item_details, args):
 
 
 @frappe.whitelist()
-def remove_pricing_rule_for_item(
-	pricing_rules: str | None,
-	item_details: str | dict,
-	item_code: str | None = None,
-	rate: float | None = None,
-):
+def remove_pricing_rule_for_item(pricing_rules, item_details, item_code=None, rate=None):
 	from erpnext.accounts.doctype.pricing_rule.utils import (
 		get_applied_pricing_rules,
 		get_pricing_rule_items,
 	)
 
-	item_details = frappe._dict(frappe.parse_json(item_details))
+	if isinstance(item_details, str):
+		item_details = json.loads(item_details)
+		item_details = frappe._dict(item_details)
 
 	for d in get_applied_pricing_rules(pricing_rules):
 		if not d or not frappe.db.exists("Pricing Rule", d):
@@ -747,8 +745,9 @@ def remove_pricing_rule_for_item(
 
 
 @frappe.whitelist()
-def remove_pricing_rules(item_list: str | list):
-	item_list = frappe.parse_json(item_list)
+def remove_pricing_rules(item_list):
+	if isinstance(item_list, str):
+		item_list = json.loads(item_list)
 
 	out = []
 	for item in item_list:
@@ -764,12 +763,9 @@ def remove_pricing_rules(item_list: str | list):
 
 
 def validate_pricing_context(ctx: frappe._dict) -> None:
-	"""Authorise the transaction, company, parties and price lists that a client-supplied pricing context names."""
-	# `ctx` is caller supplied, and what comes back is pricing: matched Pricing Rules, discounts
-	# and rates. The transaction being priced is what decides who may price it, so authorise that
-	# — and the document itself where the caller named an existing one, so User Permissions apply.
-	# an allow-list, not just a type check: `doctype` is caller-chosen, and any doctype the caller can
-	# read would otherwise satisfy has_permission below while the pricing engine still ran
+	"""Authorise the transaction, parties and price lists that a client-supplied pricing context names."""
+	# The transaction being priced decides who may price it; doc= where the caller named one.
+	# An allow-list, not a type check: any readable doctype would otherwise satisfy has_permission.
 	transaction_doctype = ctx.get("doctype")
 	if transaction_doctype not in PRICING_TRANSACTION_DOCTYPES:
 		frappe.throw(_("Invalid doctype"), frappe.PermissionError)
@@ -779,15 +775,6 @@ def validate_pricing_context(ctx: frappe._dict) -> None:
 		transaction_name = None
 
 	frappe.has_permission(transaction_doctype, doc=transaction_name, throw=True)
-
-	# scope by the caller's own Company restrictions, not a Company read: several roles that fill these forms hold none
-	company = ctx.get("company")
-	if company:
-		from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_companies
-
-		allowed_companies = get_allowed_companies(frappe.session.user, transaction_doctype)
-		if allowed_companies and company not in allowed_companies:
-			frappe.throw(_("Not permitted for {0}").format(company), frappe.PermissionError)
 
 	ctx.transaction_type = None
 	validate_pricing_parties(ctx)
@@ -802,7 +789,7 @@ def validate_pricing_parties(ctx: frappe._dict) -> None:
 
 
 def validate_pricing_price_lists(ctx: frappe._dict, doctype: str) -> None:
-	if doctype in ("BOM", "BOM Creator"):
+	if doctype == "BOM":
 		return
 
 	meta = frappe.get_meta(doctype)
@@ -881,7 +868,7 @@ def set_transaction_type(pricing_ctx: frappe._dict) -> None:
 
 @frappe.whitelist()
 @frappe.validate_and_sanitize_search_inputs
-def get_item_uoms(doctype: str, txt: str, searchfield: str, start: int, page_len: int, filters: dict):
+def get_item_uoms(doctype, txt, searchfield, start, page_len, filters):
 	if filters.get("apply_on") == "Item Code":
 		item_filters = [["name", "=", filters.get("value")]]
 	else:

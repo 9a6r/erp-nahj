@@ -1,15 +1,11 @@
 # Copyright (c) 2017, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
+import unittest
 
 import frappe
-from frappe.utils import add_days, getdate
+from frappe.utils import add_days, get_datetime, getdate
 
-from erpnext.controllers.accounts_controller import get_payment_term_details
-from erpnext.tests.permission_test_utils import (
-	as_user,
-	assert_refused_for_names,
-	make_fenced_user,
-)
+from erpnext.controllers.accounts_controller import get_payment_term_details, get_payment_terms
 from erpnext.tests.utils import ERPNextTestSuite
 
 
@@ -108,6 +104,49 @@ class TestPaymentTermsTemplate(ERPNextTestSuite):
 		self.assertEqual(getdate(details.due_date), getdate(add_days(posting_date, 30)))
 		self.assertEqual(getdate(details.discount_date), getdate(add_days(posting_date, 10)))
 
+	def test_payment_term_details_accept_date_objects(self):
+		term = frappe._dict(
+			payment_term="_Test N30",
+			invoice_portion=50,
+			due_date_based_on="Day(s) after invoice date",
+			credit_days=30,
+			discount_type="Percentage",
+			discount=5,
+			discount_validity_based_on="Day(s) after invoice date",
+			discount_validity=10,
+		)
+
+		for convert_date in (str, getdate, get_datetime):
+			posting_date = convert_date("2026-10-17")
+			for bill_date in (None, convert_date("2026-10-20")):
+				with self.subTest(posting_date=posting_date, bill_date=bill_date):
+					details = get_payment_term_details(term, posting_date, 1000, 2000, bill_date)
+					self.assertEqual(
+						getdate(details.due_date), getdate("2026-11-19" if bill_date else "2026-11-16")
+					)
+					self.assertEqual(
+						getdate(details.discount_date), getdate("2026-10-30" if bill_date else "2026-10-27")
+					)
+					self.assertEqual(details.payment_amount, 500)
+					self.assertEqual(details.base_payment_amount, 1000)
+
+	def test_payment_terms_accept_date_objects(self):
+		for convert_date in (str, getdate, get_datetime):
+			posting_date = convert_date("2026-10-17")
+			for bill_date in (None, convert_date("2026-10-20")):
+				with self.subTest(posting_date=posting_date, bill_date=bill_date):
+					schedule = get_payment_terms(
+						"_Test Payment Term Template", posting_date, 1000, 2000, bill_date
+					)
+					self.assertEqual(len(schedule), 2)
+					self.assertEqual(getdate(schedule[0].due_date), getdate(bill_date or posting_date))
+					self.assertEqual(
+						getdate(schedule[1].due_date), getdate("2026-11-19" if bill_date else "2026-11-16")
+					)
+					for details in schedule:
+						self.assertEqual(details.payment_amount, 500)
+						self.assertEqual(details.base_payment_amount, 1000)
+
 	def test_duplicate_terms(self):
 		template = frappe.get_doc(
 			{
@@ -131,59 +170,3 @@ class TestPaymentTermsTemplate(ERPNextTestSuite):
 		)
 
 		self.assertRaises(frappe.ValidationError, template.insert)
-
-	def test_get_payment_terms_fences_the_template(self):
-		from erpnext.accounts.services.payment_schedule import get_payment_terms
-
-		template = "_Test Payment Term Template"
-		other = frappe.db.get_value("Payment Terms Template", {"name": ["!=", template]})
-
-		def payment_terms_kwargs(name):
-			return {"terms_template": name, "grand_total": 100}
-
-		outside = make_fenced_user(
-			"ptt-fenced@example.com", ["Accounts User"], [("Payment Terms Template", other)]
-		)
-		with as_user(outside):
-			assert_refused_for_names(
-				self,
-				get_payment_terms,
-				payment_terms_kwargs,
-				[template],
-				type_gated=True,
-				caller_supplied=True,
-			)
-		inside = make_fenced_user(
-			"ptt-fenced@example.com", ["Accounts User"], [("Payment Terms Template", template)]
-		)
-		with as_user(inside):
-			schedule = get_payment_terms(template, grand_total=100)
-		total = 0
-		for row in schedule:
-			total += row.payment_amount
-		self.assertEqual(total, 100)
-
-	def test_get_payment_term_details_fences_the_term(self):
-		from erpnext.accounts.services.payment_schedule import get_payment_term_details
-
-		def term_kwargs(name):
-			return {"term": name, "grand_total": 100}
-
-		outside = make_fenced_user(
-			"pt-fenced@example.com", ["Accounts User"], [("Payment Term", "_Test COD")]
-		)
-		with as_user(outside):
-			assert_refused_for_names(
-				self,
-				get_payment_term_details,
-				term_kwargs,
-				["_Test N30"],
-				type_gated=True,
-				caller_supplied=True,
-			)
-		inside = make_fenced_user("pt-fenced@example.com", ["Accounts User"], [("Payment Term", "_Test N30")])
-		with as_user(inside):
-			details = get_payment_term_details("_Test N30", grand_total=100)
-		self.assertEqual(
-			details.payment_amount, frappe.db.get_value("Payment Term", "_Test N30", "invoice_portion")
-		)

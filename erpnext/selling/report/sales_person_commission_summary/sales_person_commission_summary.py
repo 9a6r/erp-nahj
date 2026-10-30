@@ -1,11 +1,10 @@
 # Copyright (c) 2013, Frappe Technologies Pvt. Ltd. and contributors
 # For license information, please see license.txt
 
+
 import frappe
 from frappe import _, msgprint, qb
 from frappe.query_builder import Criterion
-
-from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_companies_condition
 
 
 def execute(filters=None):
@@ -144,9 +143,6 @@ def get_conditions(dt, st, filters, date_field):
 	for field in ["company", "customer", "territory"]:
 		if filters.get(field):
 			conditions.append(dt[field].eq(filters.get(field)))
-
-	if condition := get_allowed_companies_condition(dt.company, filters["doc_type"]):
-		conditions.append(condition)
 
 	if filters.get("sales_person"):
 		lft, rgt = frappe.db.get_value("Sales Person", filters.get("sales_person"), ["lft", "rgt"])

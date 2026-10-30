@@ -7,7 +7,7 @@ frappe.ui.form.on("Supplier Group", {
 			return {
 				filters: {
 					is_group: 1,
-					name: ["!=", doc.supplier_group_name],
+					name: ["!=", cur_frm.doc.supplier_group_name],
 				},
 			};
 		});

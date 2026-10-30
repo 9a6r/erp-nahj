@@ -7,7 +7,6 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt, get_link_to_form, parse_json
 
-from erpnext.stock.report.utils import prepare_serial_batch_report
 from erpnext.stock.utils import get_valuation_method
 
 SLE_FIELDS = (
@@ -36,7 +35,7 @@ SLE_FIELDS = (
 def execute(filters=None):
 	columns = get_columns()
 	data = get_data(filters)
-	return prepare_serial_batch_report(columns, data)
+	return columns, data
 
 
 def get_data(filters):
@@ -323,8 +322,8 @@ def get_columns():
 	]
 
 
-@frappe.whitelist(methods=["POST"])
-def create_reposting_entries(rows: str | list, item_code: str | None = None, warehouse: str | None = None):
+@frappe.whitelist()
+def create_reposting_entries(rows, item_code=None, warehouse=None):
 	if isinstance(rows, str):
 		rows = parse_json(rows)
 
@@ -332,7 +331,6 @@ def create_reposting_entries(rows: str | list, item_code: str | None = None, war
 	for row in rows:
 		row = frappe._dict(row)
 
-		frappe.db.savepoint("repost_invariant_check")
 		try:
 			doc = frappe.get_doc(
 				{
@@ -349,7 +347,6 @@ def create_reposting_entries(rows: str | list, item_code: str | None = None, war
 
 			entries.append(get_link_to_form("Repost Item Valuation", doc.name))
 		except frappe.DuplicateEntryError:
-			frappe.db.rollback(save_point="repost_invariant_check")
 			continue
 
 	if entries:

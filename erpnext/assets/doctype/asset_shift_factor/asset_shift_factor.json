@@ -38,7 +38,7 @@
  "icon": "gauge",
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-21 23:11:39.003078",
+ "modified": "2026-09-16 11:42:07.000000",
  "modified_by": "Administrator",
  "module": "Assets",
  "name": "Asset Shift Factor",
@@ -74,7 +74,6 @@
    "select": 1
   }
  ],
- "row_format": "Dynamic",
  "sort_field": "creation",
  "sort_order": "DESC",
  "states": []

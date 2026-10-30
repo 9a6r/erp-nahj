@@ -137,12 +137,6 @@ erpnext.PointOfSale.Payment = class {
 		this.numpad_value = "";
 	}
 
-	get_payment_precision() {
-		const format = get_number_format(this.events.get_frm().doc.currency);
-		const info = get_number_format_info(format);
-		return info.decimal_str ? frappe.sys_defaults.currency_precision || info.precision : 0;
-	}
-
 	on_numpad_clicked($btn, from_numpad = true) {
 		const button_value = from_numpad ? $btn.attr("data-button-value") : $btn;
 
@@ -155,7 +149,8 @@ erpnext.PointOfSale.Payment = class {
 			return;
 		}
 
-		const precision = this.get_payment_precision();
+		const number_format_details = get_number_format_info(frappe.sys_defaults.number_format);
+		const precision = frappe.sys_defaults.currency_precision || number_format_details.precision;
 		this.numpad_value = "0";
 		if (this.selected_mode.get_value()) {
 			this.numpad_value = (this.selected_mode.get_value() * 10 ** precision).toFixed(0).toString();
@@ -283,7 +278,7 @@ erpnext.PointOfSale.Payment = class {
 			) {
 				const message = items.length
 					? __("You cannot submit the order without payment.")
-					: __("You cannot submit an empty order.");
+					: __("You cannot submit empty order.");
 				frappe.show_alert({ message, indicator: "orange" });
 				frappe.utils.play_sound("error");
 				return;
@@ -371,7 +366,7 @@ erpnext.PointOfSale.Payment = class {
 						format_currency(amount, doc.currency, 0),
 					]);
 					this.events.submit_invoice();
-					this.events.get_frm().reload_doc();
+					cur_frm.reload_doc();
 				} else {
 					message = __(
 						"Payment of {0} received successfully. Waiting for other requests to complete...",
@@ -541,7 +536,6 @@ erpnext.PointOfSale.Payment = class {
 				df: {
 					label: p.mode_of_payment,
 					fieldtype: "Currency",
-					options: "currency",
 					placeholder: __("Enter {0} amount.", [__(p.mode_of_payment)]),
 					onchange: function () {
 						const current_value = frappe.model.get_value(p.doctype, p.name, "amount");
@@ -598,7 +592,7 @@ erpnext.PointOfSale.Payment = class {
 				flt(loyalty_points) * flt(conversion_factor),
 				precision("loyalty_amount", doc)
 			);
-			description = __("You can redeem up to {0}.", [format_currency(max_redeemable_amount)]);
+			description = __("You can redeem upto {0}.", [format_currency(max_redeemable_amount)]);
 			read_only = false;
 		}
 

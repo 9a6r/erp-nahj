@@ -5,8 +5,8 @@ import math
 
 import frappe
 from frappe import _
-from frappe.query_builder.functions import IfNull, Max, Min, Sum
-from frappe.utils import flt
+from frappe.query_builder.functions import IfNull, Max, Sum
+from frappe.utils import flt, fmt_money
 from frappe.utils.data import comma_and
 from pypika.terms import ExistsCriterion
 
@@ -197,7 +197,6 @@ def batch_fetch_purchase_rates(bom_data):
 
 
 def get_stock_qty_by_item(filters):
-	"""One row per item_code, so joining it to BOM Item cannot multiply either side's sum."""
 	bin = frappe.qb.DocType("Bin")
 
 	query = (
@@ -252,54 +251,25 @@ def get_bom_data(filters):
 		.on(bom_item.item_code == stock_qty.item_code)
 		.select(
 			bom_item.item_code,
-			# non-grouped columns are constant per grouped item_code -> Max() keeps the GROUP BY valid
-			Max(bom_item.parent).as_("from_bom_no"),
+			bom_item.description,
+			bom_item.parent.as_("from_bom_no"),
 			Sum(bom_item.stock_qty).as_("bom_stock_qty"),
 			IfNull(Max(stock_qty.actual_qty), 0).as_("actual_qty"),
 		)
 		.where((bom_item.parent == filters.get("bom")) & (bom_item.parenttype == "BOM"))
 		.groupby(bom_item.item_code)
-		.orderby(Min(bom_item.idx))
+		.orderby(bom_item.idx)
 	)
+
+	if bom_item_table == "BOM Item":
+		query = query.select(bom_item.bom_no, bom_item.is_phantom_item)
 
 	data = query.run(as_dict=True)
 	bom_quantity = flt(frappe.db.get_value("BOM", filters.get("bom"), "quantity")) or 1.0
 	for row in data:
 		row.qty_per_unit = flt(row.pop("bom_stock_qty")) / bom_quantity
 
-	# description belongs to a BOM line, not to the item, so a component listed more than once holds
-	# several values per group. Max() over text is a sort and the engines sort text differently
-	# (MariaDB folds case, PostgreSQL orders by byte value), so read it off one real line instead.
-	# For BOM Item that same line also supplies bom_no + is_phantom_item, which drive whether and
-	# which sub-BOM explode_phantom_boms recurses into and so must stay coherent with each other:
-	# the first line, upgraded to the first phantom line if any exists, so a phantom sub-BOM is never
-	# dropped just because a non-phantom line happens to be listed first.
-	fields = ["item_code", "description"]
-	if bom_item_table == "BOM Item":
-		fields += ["bom_no", "is_phantom_item"]
-
-	representative = {}
-	for line in frappe.get_all(
-		bom_item_table,
-		filters={"parent": filters.get("bom"), "parenttype": "BOM"},
-		fields=fields,
-		order_by="idx",
-	):
-		existing = representative.get(line.item_code)
-		if existing is None or (line.get("is_phantom_item") and not existing.get("is_phantom_item")):
-			representative[line.item_code] = line
-
-	for row in data:
-		line = representative.get(row.item_code)
-		row.description = line.description if line else None
-		if bom_item_table == "BOM Item":
-			row.bom_no = line.bom_no if line else None
-			row.is_phantom_item = line.is_phantom_item if line else None
-
-	if bom_item_table == "BOM Item":
-		return explode_phantom_boms(data, filters)
-
-	return data
+	return explode_phantom_boms(data, filters) if bom_item_table == "BOM Item" else data
 
 
 def explode_phantom_boms(data, filters):

@@ -39,7 +39,7 @@ frappeuser=${FRAPPE_USER:-"frappe"}
 frappecommitish=${FRAPPE_BRANCH:-}
 
 # A stacked pull request targets another erpnext branch, which has no counterpart in frappe.
-# Fall back to develop so the bench is still installed. An explicit FRAPPE_BRANCH is trusted as
+# Fall back to version-16-hotfix so the bench is still installed. An explicit FRAPPE_BRANCH is trusted as
 # given, since it can be a commit sha rather than a branch.
 if [ -z "$frappecommitish" ]; then
     frappecommitish=$githubbranch
@@ -51,8 +51,8 @@ if [ -z "$frappecommitish" ]; then
     git ls-remote --exit-code --heads "https://github.com/${frappeuser}/frappe" "$frappecommitish" >/dev/null 2>&1 || probe=$?
 
     if [ "$probe" -eq 2 ]; then
-        echo "frappe has no branch ${frappecommitish}, falling back to develop"
-        frappecommitish=develop
+        echo "frappe has no branch ${frappecommitish}, falling back to version-16-hotfix"
+        frappecommitish=version-16-hotfix
     elif [ "$probe" -ne 0 ]; then
         echo "could not reach frappe to check for branch ${frappecommitish} (git ls-remote exited ${probe}), keeping it"
     fi
@@ -299,8 +299,6 @@ fi
 
 if [ -n "$wkpid" ]; then wait $wkpid; fi
 
-(cd ~/frappe-bench && bench setup-chrome)
-
 mkdir -p ~/frappe-bench/sites/test_site
 
 if [ "$DB" == "mariadb" ];then
@@ -349,10 +347,14 @@ if [ "$DB" == "postgres" ];then
     echo "travis" | psql -h 127.0.0.1 -p 5432 -c "CREATE DATABASE test_frappe" -U postgres;
     echo "travis" | psql -h 127.0.0.1 -p 5432 -c "CREATE USER test_frappe WITH PASSWORD 'test_frappe'" -U postgres;
 
-    # Durability-off for speed (no fsync/synchronous_commit/full_page_writes) is applied by
-    # start-db.sh's postgres `-o` flags on every start — setup job AND each test shard — so it is
-    # NOT repeated here. The postgres workflow runs in-runner via start-db.sh, not a service
-    # container.
+    # Disposable CI DB: durability off for speed (postgres fsyncs every commit by default, which
+    # dominates a commit-heavy suite). All reloadable, no restart. The postgres workflow runs a
+    # service-container DB and never calls start-db.sh, so the flags must be applied here.
+    echo "travis" | psql -h 127.0.0.1 -p 5432 -U postgres \
+        -c "ALTER SYSTEM SET synchronous_commit = 'off'" \
+        -c "ALTER SYSTEM SET fsync = 'off'" \
+        -c "ALTER SYSTEM SET full_page_writes = 'off'" \
+        -c "SELECT pg_reload_conf()";
 fi
 
 cd ~/frappe-bench || exit

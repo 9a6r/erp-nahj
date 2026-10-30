@@ -1,6 +1,6 @@
 # Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
-
+import unittest
 from unittest.mock import patch
 
 import frappe
@@ -110,9 +110,7 @@ class TestCostCenter(ERPNextTestSuite):
 
 		for number in ("300", "1.1", "4100-01", "A100"):
 			with self.subTest(number=number):
-				frappe.db.set_value(
-					"Cost Center", name, {"cost_center_name": "Projects", "cost_center_number": number}
-				)
+				name = update_cost_center(name, "Projects", number, "_Test Company", False)
 				name = frappe.rename_doc("Cost Center", name, "Sales - East", force=True)
 				cost_center = frappe.get_doc("Cost Center", name)
 				self.assertEqual(cost_center.name, f"{number} - Sales - East - _TC")

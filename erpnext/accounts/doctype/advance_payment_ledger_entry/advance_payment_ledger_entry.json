@@ -5,7 +5,6 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "icon": "book-open",
- "is_submittable": 1,
  "field_order": [
   "company",
   "voucher_type",

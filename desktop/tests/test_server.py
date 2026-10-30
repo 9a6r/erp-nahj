@@ -15,8 +15,9 @@ class ServerTests(unittest.TestCase):
         self.root = Path(self.directory.name)
         self.server = Server(self.root / 'state')
         self.profile = dict(mode='local', site='nahj.localhost', port=8088,
-                            project='nahj-test', image='sha256:123', initialized=True)
+                            project='nahj-test', image=IMAGE_ID, initialized=True)
         private_write(self.server.root / 'profile.json', json.dumps(self.profile))
+        private_write(self.server.root / 'compose.json', json.dumps(compose_spec(self.profile, self.server.root)))
 
     def test_stop_retains_volumes(self):
         with patch.object(self.server, 'compose') as command:
@@ -89,7 +90,9 @@ class ServerTests(unittest.TestCase):
         with patch.object(self.server, 'backend', return_value='backend-id'), patch.object(self.server, 'run', side_effect=execute):
             result = self.server.backup(self.root)
         manifest = json.loads((result / 'manifest.json').read_text())
-        self.assertEqual(len(manifest['sha256']), 5)
+        self.assertEqual(len(manifest['sha256']), 7)
+        self.assertEqual(manifest['image'], IMAGE_ID)
+        self.assertEqual(manifest['format'], 1)
         for file in result.iterdir():
             self.assertEqual(file.stat().st_mode & 0o777, 0o600)
 
@@ -137,6 +140,14 @@ class ServerTests(unittest.TestCase):
         with patch.object(self.server, 'run', return_value='running-container'), patch.object(self.server, 'compose') as command:
             with self.assertRaisesRegex(ServerError, 'still running'):
                 self.server.resume()
+        command.assert_not_called()
+
+    def test_another_image_is_never_resumed_or_automatically_downgraded(self):
+        private_write(self.server.root / 'profile.json', json.dumps({**self.profile, 'image': 'sha256:old-dev-image', 'initialized': False}))
+        with patch.object(self.server, 'run') as command:
+            for action in (self.server.start, self.server.resume):
+                with self.assertRaisesRegex(ServerError, 'upgrades or downgrades'):
+                    action()
         command.assert_not_called()
 
 

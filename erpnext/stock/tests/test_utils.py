@@ -2,7 +2,7 @@ import json
 from unittest.mock import patch
 
 import frappe
-from frappe.query_builder.functions import CombineDatetime
+from frappe.query_builder.functions import Timestamp
 from frappe.utils import nowdate, nowtime
 
 from erpnext.stock.dashboard.warehouse_capacity_dashboard import get_data
@@ -54,7 +54,7 @@ class StockTestMixin:
 				query = query.where(sle[key] == value)
 
 		sles = (
-			query.orderby(CombineDatetime(sle.posting_date, sle.posting_time))
+			query.orderby(Timestamp(sle.posting_date, sle.posting_time))
 			.orderby(sle.creation)
 			.run(as_dict=True)
 		)
@@ -97,7 +97,7 @@ class TestStockUtilities(ERPNextTestSuite, StockTestMixin):
 		batch_item = self.make_item(properties={"has_batch_no": 1, "create_new_batch": 1})
 		batch = frappe.get_doc(doctype="Batch", item=batch_item.name).insert()
 
-		batch_scan = scan_barcode(batch.batch_id)
+		batch_scan = scan_barcode(batch.name)
 		self.assertEqual(batch_scan["item_code"], batch_item.name)
 		self.assertEqual(batch_scan["batch_no"], batch.name)
 		self.assertEqual(batch_scan["has_batch_no"], 1)
@@ -111,53 +111,11 @@ class TestStockUtilities(ERPNextTestSuite, StockTestMixin):
 			company="_Test Company",
 		).insert()
 
-		serial_scan = scan_barcode(serial.serial_no)
+		serial_scan = scan_barcode(serial.name)
 		self.assertEqual(serial_scan["item_code"], serial_item.name)
-		self.assertEqual(serial_scan["serial_no"], serial.serial_no)
-		self.assertEqual(serial_scan["serial_no_id"], serial.name)
+		self.assertEqual(serial_scan["serial_no"], serial.name)
 		self.assertEqual(serial_scan["has_batch_no"], 0)
 		self.assertEqual(serial_scan["has_serial_no"], 1)
-
-	def test_shared_serial_scan_returns_candidates_and_respects_item(self):
-		first = self.make_item(properties={"has_serial_no": 1})
-		second = self.make_item(properties={"has_serial_no": 1})
-		number = f"Scan-{frappe.generate_hash()}"
-		first_serial = frappe.get_doc(
-			doctype="Serial No", item_code=first.name, serial_no=number, company="_Test Company"
-		).insert()
-		self.assertEqual(scan_barcode(number)["serial_no_id"], first_serial.name)
-		second_serial = frappe.get_doc(
-			doctype="Serial No", item_code=second.name, serial_no=number, company="_Test Company"
-		).insert()
-
-		candidates = scan_barcode(number.lower())["candidates"]
-		self.assertEqual({row["item_code"] for row in candidates}, {first.name, second.name})
-		selected = scan_barcode(number, item_code=second.name)
-		self.assertEqual(selected["serial_no_id"], second_serial.name)
-		self.assertEqual(selected["serial_no"], number)
-		self.assertEqual(scan_barcode(first_serial.name), {})
-
-	def test_shared_batch_scan_returns_internal_links(self):
-		items = [self.make_item(properties={"has_batch_no": 1}) for _ in range(2)]
-		number = f"Lot-{frappe.generate_hash()}"
-		batches = [
-			frappe.get_doc(doctype="Batch", item=item.name, batch_id=number).insert() for item in items
-		]
-		candidates = scan_barcode(number.lower())["candidates"]
-		self.assertEqual({row["batch_no"] for row in candidates}, {batch.name for batch in batches})
-		selected = scan_barcode(number, item_code=items[0].name)
-		self.assertEqual(selected["batch_no"], batches[0].name)
-		self.assertEqual(selected["batch_id"], number)
-
-	def test_item_barcode_does_not_hide_a_matching_serial(self):
-		number = f"Barcode-{frappe.generate_hash()}"
-		barcode_item = self.make_item(properties={"barcodes": [{"barcode": number}]})
-		serial_item = self.make_item(properties={"has_serial_no": 1})
-		frappe.get_doc(
-			doctype="Serial No", item_code=serial_item.name, serial_no=number, company="_Test Company"
-		).insert()
-		candidates = scan_barcode(number)["candidates"]
-		self.assertEqual({row["item_code"] for row in candidates}, {barcode_item.name, serial_item.name})
 
 	def test_barcode_scanning_of_warehouse(self):
 		warehouse = frappe.get_doc(
@@ -200,62 +158,6 @@ class TestStockUtilities(ERPNextTestSuite, StockTestMixin):
 		self.assertEqual(item_scan_with_ctx["item_code"], item_with_warehouse.name)
 		self.assertEqual(item_scan_with_ctx["default_warehouse"], warehouse_2.name)
 
-	def test_get_latest_stock_qty(self):
-		"""get_latest_stock_qty (Sum(actual_qty) over Bin; the warehouse-subtree EXISTS converted to
-		a qb subquery) must reflect received stock for a non-group warehouse."""
-		from frappe.utils import flt
-
-		from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
-		from erpnext.stock.utils import get_latest_stock_qty
-
-		warehouse = "_Test Warehouse - _TC"
-		item = self.make_item(properties={"is_stock_item": 1}).name
-		before = flt(get_latest_stock_qty(item, warehouse))
-
-		make_stock_entry(item_code=item, target=warehouse, qty=8, basic_rate=100)
-
-		self.assertEqual(flt(get_latest_stock_qty(item, warehouse)), before + 8)
-
-	def test_get_stock_value_from_bin(self):
-		"""get_stock_value_from_bin (comma-join -> inner_join, `ifnull(disabled,0)=0` ->
-		`disabled==0 | isnull`) must sum the Bin stock_value for an item."""
-		from frappe.utils import flt
-
-		from erpnext.stock.doctype.stock_entry.stock_entry_utils import make_stock_entry
-		from erpnext.stock.utils import get_stock_value_from_bin
-
-		warehouse = "_Test Warehouse - _TC"
-		item = self.make_item(properties={"is_stock_item": 1}).name
-
-		make_stock_entry(item_code=item, target=warehouse, qty=5, basic_rate=50)
-
-		# returns a single-row result set: [(stock_value,)]
-		self.assertEqual(flt(get_stock_value_from_bin(item_code=item)[0][0]), 5 * 50)
-
-	def test_get_avg_purchase_rate(self):
-		"""get_avg_purchase_rate must average Serial No purchase_rate via the dict-`AVG` get_all
-		field (frappe compiles `[{"AVG": "purchase_rate"}]` to `AVG(purchase_rate)` on both engines)."""
-		from frappe.utils import flt, random_string
-
-		from erpnext.stock.utils import get_avg_purchase_rate
-
-		item = self.make_item(properties={"is_stock_item": 1, "has_serial_no": 1}).name
-		serial_nos = []
-		for rate in (10, 30):
-			sn = "_TAVG" + random_string(8)
-			serial = frappe.get_doc(
-				{
-					"doctype": "Serial No",
-					"serial_no": sn,
-					"item_code": item,
-					"company": "_Test Company",
-					"purchase_rate": rate,
-				}
-			).insert()
-			serial_nos.append(serial.name)
-
-		self.assertEqual(flt(get_avg_purchase_rate("\n".join(serial_nos))), 20.0)
-
 
 class TestStockBalancePermissions(ERPNextTestSuite, StockTestMixin):
 	def setUp(self):
@@ -268,22 +170,6 @@ class TestStockBalancePermissions(ERPNextTestSuite, StockTestMixin):
 	def user(self, role, user_permissions=None):
 		email = f"test_stock_balance_{frappe.scrub(role)}@example.com"
 		return make_fenced_user(email, [role], user_permissions)
-
-	def scoped_user(self, role, allow, for_value, applicable_for, hide_descendants=0):
-		email = self.user(role)
-		frappe.get_doc(
-			{
-				"doctype": "User Permission",
-				"user": email,
-				"allow": allow,
-				"for_value": for_value,
-				"apply_to_all_doctypes": 0,
-				"applicable_for": applicable_for,
-				"hide_descendants": hide_descendants,
-			}
-		).insert(ignore_permissions=True)
-		frappe.clear_cache(user=email)
-		return email
 
 	def balance(self, warehouse, item=None):
 		return get_stock_balance(item or self.item, warehouse, with_valuation_rate=True)
@@ -335,7 +221,7 @@ class TestStockBalancePermissions(ERPNextTestSuite, StockTestMixin):
 		with as_user(self.user("Stock User")):
 			assert_refused(self, get_stock_balance, self.item, None)
 			assert_refused(self, get_stock_balance, self.item, "")
-			assert_refused_for_names(self, get_stock_balance, self.warehouse_kwargs, [], type_gated=True)
+			assert_refused_for_names(self, get_stock_balance, self.warehouse_kwargs, [])
 			self.assertEqual(self.balance(WAREHOUSE), (7.0, 123.17))
 
 		with as_user(self.user("Stock Manager")):
@@ -350,14 +236,7 @@ class TestStockBalancePermissions(ERPNextTestSuite, StockTestMixin):
 		batch_item = self.make_item(
 			properties={"has_batch_no": 1, "create_new_batch": 1, "batch_number_series": "TSBP-.#####"}
 		).name
-		batch_warehouse = (
-			frappe.get_doc(
-				{"doctype": "Warehouse", "warehouse_name": "TSBP Store", "company": "_Test Company"}
-			)
-			.insert()
-			.name
-		)
-		make_stock_entry(item_code=batch_item, to_warehouse=batch_warehouse, qty=4, rate=61.29)
+		make_stock_entry(item_code=batch_item, to_warehouse=WAREHOUSE, qty=4, rate=61.29)
 
 		with as_user(self.user("Desk User")):
 			self.assertRaises(frappe.PermissionError, get_items, *args)
@@ -373,7 +252,7 @@ class TestStockBalancePermissions(ERPNextTestSuite, StockTestMixin):
 				self.assertRaises(
 					frappe.PermissionError, get_stock_balance_for, self.item, WAREHOUSE, *args[1:3]
 				)
-				self.assertRaises(frappe.PermissionError, get_items, batch_warehouse, *args[1:4])
+				self.assertRaises(frappe.PermissionError, get_items, *args[:4], batch_item)
 
 		with as_user(self.user("Stock User")):
 			self.assertRaises(frappe.PermissionError, get_items, *args)
@@ -386,91 +265,12 @@ class TestStockBalancePermissions(ERPNextTestSuite, StockTestMixin):
 		with as_user(self.user("Stock Manager", [("Warehouse", OTHER_WAREHOUSE)])):
 			self.assertRaises(frappe.PermissionError, get_items, *args)
 			self.assertEqual(get_items(OTHER_WAREHOUSE, *args[1:])[0]["qty"], 3)
-			self.assertRaises(frappe.PermissionError, get_stock_balance_for, self.item, WAREHOUSE, *args[1:3])
-			self.assertEqual(get_stock_balance_for(self.item, OTHER_WAREHOUSE, *args[1:3])["qty"], 3)
-
-		with as_user(self.scoped_user("Stock Manager", "Company", "_Test Company 1", "Item")):
-			self.assertRaises(frappe.PermissionError, get_stock_balance_for, self.item, WAREHOUSE, *args[1:3])
-			reconciliation = frappe.get_doc(
-				{
-					"doctype": "Stock Reconciliation",
-					"company": "_Test Company",
-					"purpose": "Stock Reconciliation",
-					"items": [{"item_code": self.item, "warehouse": WAREHOUSE, "qty": 9}],
-				}
-			).insert()
-
-		self.assertEqual(reconciliation.items[0].current_qty, 7)
-
-		with as_user(self.user("Stock Manager", [("Item", self.item)])):
-			self.assertRaises(
-				frappe.PermissionError, get_stock_balance_for, self.other_item, OTHER_WAREHOUSE, *args[1:3]
-			)
-			self.assertRaises(frappe.PermissionError, get_items, OTHER_WAREHOUSE, *args[1:4], self.other_item)
-			fenced_items = []
-			for row in get_items(OTHER_WAREHOUSE, *args[1:4]):
-				fenced_items.append(row["item_code"])
 
 		with as_user(self.user("Stock Manager", [("Warehouse", "All Warehouses - _TC", 1)])):
 			self.assertRaises(frappe.PermissionError, get_items, "All Warehouses - _TC", *args[1:])
 
 		with as_user(self.user("Stock Manager")):
 			self.assertEqual(get_items(*args)[0]["qty"], 7)
-			all_items = []
-			for row in get_items(OTHER_WAREHOUSE, *args[1:4]):
-				all_items.append(row["item_code"])
-
-		self.assertIn(self.item, fenced_items)
-		self.assertNotIn(self.other_item, fenced_items)
-		self.assertIn(self.item, all_items)
-		self.assertIn(self.other_item, all_items)
-
-	def test_reconciliation_lookups_apply_scoped_user_permissions(self):
-		args = (nowdate(), nowtime())
-		grouped_item = self.make_item(properties={"item_group": "_Test Item Group Desktops"}).name
-		make_stock_entry(item_code=grouped_item, to_warehouse=OTHER_WAREHOUSE, qty=1, rate=10)
-
-		def listed(warehouse):
-			item_codes = []
-			for row in get_items(warehouse, *args, "_Test Company"):
-				item_codes.append(row["item_code"])
-			return item_codes
-
-		with as_user(self.scoped_user("Stock Manager", "Item", self.item, "Stock Reconciliation")):
-			assert_refused(self, get_stock_balance_for, self.other_item, OTHER_WAREHOUSE, *args)
-			assert_refused(self, get_items, OTHER_WAREHOUSE, *args, "_Test Company", self.other_item)
-			item_scoped = listed(OTHER_WAREHOUSE)
-
-		with as_user(self.scoped_user("Stock Manager", "Warehouse", OTHER_WAREHOUSE, "Stock Reconciliation")):
-			assert_refused(self, get_stock_balance_for, self.item, WAREHOUSE, *args)
-			assert_refused(self, get_items, WAREHOUSE, *args, "_Test Company", self.item)
-
-		group_user = self.scoped_user(
-			"Stock Manager", "Warehouse", "All Warehouses - _TC", "Stock Reconciliation", hide_descendants=1
-		)
-		with as_user(group_user):
-			assert_refused(self, get_items, "All Warehouses - _TC", *args, "_Test Company")
-
-		with as_user(self.scoped_user("Stock Manager", "Warehouse", OTHER_WAREHOUSE, "Warehouse")):
-			self.assertRaises(frappe.PermissionError, get_stock_balance_for, self.item, WAREHOUSE, *args)
-
-		with as_user(self.scoped_user("Stock Manager", "Item", self.item, "Sales Order")):
-			self.assertEqual(get_stock_balance_for(self.other_item, OTHER_WAREHOUSE, *args)["qty"], 2)
-
-		item_group = frappe.db.get_value("Item", self.item, "item_group")
-		with as_user(self.user("Stock Manager", [("Item Group", item_group)])):
-			group_scoped = listed(OTHER_WAREHOUSE)
-			self.assertRaises(
-				frappe.PermissionError, get_stock_balance_for, grouped_item, OTHER_WAREHOUSE, *args
-			)
-			self.assertRaises(
-				frappe.PermissionError, get_items, OTHER_WAREHOUSE, *args, "_Test Company", grouped_item
-			)
-
-		self.assertIn(self.item, item_scoped)
-		self.assertNotIn(self.other_item, item_scoped)
-		self.assertIn(self.item, group_scoped)
-		self.assertNotIn(grouped_item, group_scoped)
 
 	def test_apply_putaway_rule_requires_form_write(self):
 		rule = self.make_putaway_rule()

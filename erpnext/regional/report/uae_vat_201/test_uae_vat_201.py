@@ -1,3 +1,5 @@
+from unittest import TestCase
+
 import frappe
 from frappe.utils import add_days, nowdate
 

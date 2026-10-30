@@ -5,7 +5,7 @@ import frappe
 from frappe.utils import nowdate
 
 from erpnext.controllers.status_updater import OverAllowanceError
-from erpnext.stock.doctype.delivery_note.mapper import make_installation_note, make_sales_return
+from erpnext.stock.doctype.delivery_note.delivery_note import make_installation_note, make_sales_return
 from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
 from erpnext.stock.doctype.item.test_item import make_item
 from erpnext.tests.utils import ERPNextTestSuite

@@ -111,7 +111,7 @@ def assert_refused_for_names(test, fn, build_kwargs, names, type_gated=False, ca
 	for name in cases:
 		if type_gated and not isinstance(name, str | int):
 			assert_type_gated(test, fn, **build_kwargs(name))
-		elif caller_supplied and name in malformed_names():
+		elif caller_supplied and (name == MISSING_NAME or not isinstance(name, str | int)):
 			assert_not_found(test, fn, **build_kwargs(name))
 		else:
 			assert_refused(test, fn, **build_kwargs(name))

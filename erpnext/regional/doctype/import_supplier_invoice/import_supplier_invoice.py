@@ -143,7 +143,7 @@ class ImportSupplierInvoice(Document):
 		}
 
 		if not invoices_args.get("bill_no", ""):
-			frappe.throw(_("Numero has not been set in the XML file"))
+			frappe.throw(_("Numero has not set in the XML file"))
 
 		supp_dict = get_supplier_details(file_content)
 		invoices_args["destination_code"] = get_destination_code_from_file(file_content)
@@ -469,7 +469,7 @@ def create_purchase_invoice(supplier_name, file_name, args, name):
 
 
 def get_country(code):
-	existing_country_name = frappe.db.get_value("Country", filters={"code": code.lower()}, fieldname="name")
+	existing_country_name = frappe.db.get_value("Country", filters={"code": code}, fieldname="name")
 	if existing_country_name:
 		return existing_country_name
 	else:

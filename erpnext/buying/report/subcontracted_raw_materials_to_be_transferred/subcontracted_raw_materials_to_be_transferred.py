@@ -5,8 +5,6 @@
 import frappe
 from frappe import _
 
-from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_companies_condition
-
 
 def execute(filters=None):
 	if filters.from_date > filters.to_date:
@@ -24,7 +22,7 @@ def get_columns(filters):
 			"label": _("Subcontract Order"),
 			"fieldtype": "Link",
 			"fieldname": "subcontract_order",
-			"options": "Subcontracting Order",
+			"options": filters.order_type,
 			"width": 200,
 		},
 		{"label": _("Date"), "fieldtype": "Date", "fieldname": "date", "width": 150},
@@ -63,23 +61,26 @@ def get_data(filters):
 
 
 def get_order_items_to_supply(filters):
-	supplied_items_table = "Subcontracting Order Supplied Item"
+	supplied_items_table = (
+		"Purchase Order Item Supplied"
+		if filters.order_type == "Purchase Order"
+		else "Subcontracting Order Supplied Item"
+	)
 
 	record_filters = [
-		["Subcontracting Order", "per_received", "<", "100"],
-		["Subcontracting Order", "supplier", "=", filters.supplier],
-		["Subcontracting Order", "transaction_date", "<=", filters.to_date],
-		["Subcontracting Order", "transaction_date", ">=", filters.from_date],
-		["Subcontracting Order", "docstatus", "=", 1],
-		["Subcontracting Order", "status", "!=", "Closed"],
+		[filters.order_type, "per_received", "<", "100"],
+		[filters.order_type, "supplier", "=", filters.supplier],
+		[filters.order_type, "transaction_date", "<=", filters.to_date],
+		[filters.order_type, "transaction_date", ">=", filters.from_date],
+		[filters.order_type, "docstatus", "=", 1],
+		[filters.order_type, "status", "!=", "Closed"],
 	]
 
-	order = frappe.qb.DocType("Subcontracting Order")
-	if condition := get_allowed_companies_condition(order.company, "Subcontracting Order"):
-		record_filters.append(condition)
+	if filters.order_type == "Purchase Order":
+		record_filters.append([filters.order_type, "is_old_subcontracting_flow", "=", 1])
 
 	return frappe.db.get_all(
-		"Subcontracting Order",
+		filters.order_type,
 		fields=[
 			"name as subcontract_order",
 			"transaction_date as date",

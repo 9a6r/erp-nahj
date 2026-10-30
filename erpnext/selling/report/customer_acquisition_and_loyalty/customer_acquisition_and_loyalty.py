@@ -111,8 +111,8 @@ def get_data_by_territory(filters, common_columns):
 	customers_in = get_customer_stats(filters, tree_view=True)
 
 	territory_dict = {}
-	for t in frappe.get_all(
-		"Territory", fields=["name", "lft", "parent_territory", "is_group"], order_by="lft"
+	for t in frappe.db.sql(
+		"""SELECT name, lft, parent_territory, is_group FROM `tabTerritory` ORDER BY lft""", as_dict=1
 	):
 		territory_dict.update({t.name: {"parent": t.parent_territory, "is_group": t.is_group}})
 
@@ -154,51 +154,54 @@ def get_data_by_territory(filters, common_columns):
 
 def get_customer_stats(filters, tree_view=False):
 	"""Count distinct new and repeat customers and their revenue per period."""
-	si_filters = {"docstatus": 1, "posting_date": ["<=", filters.get("to_date")]}
+	si = frappe.qb.DocType("Sales Invoice")
+	query = (
+		frappe.qb.from_(si)
+		.select(si.territory, si.posting_date, si.customer, si.base_grand_total, si.is_return)
+		.where((si.docstatus == 1) & (si.posting_date <= filters.get("to_date")))
+		# name tie-break makes the first-seen-per-customer classification deterministic across engines
+		.orderby(si.posting_date)
+		.orderby(si.name)
+	)
 	if filters.get("company"):
-		si_filters["company"] = filters.get("company")
+		query = query.where(si.company == filters.get("company"))
 
 	# scope to the user's permitted customers; the report serves roles without Sales
 	# Invoice read, so apply the Customer restriction directly instead of via get_list
 	permitted_customers = get_permitted_customers()
 	if permitted_customers is not None:
-		si_filters["customer"] = ["in", permitted_customers]
+		query = query.where(si.customer.isin(permitted_customers))
 
-	invoices = frappe.get_all(
-		"Sales Invoice",
-		filters=si_filters,
-		fields=["territory", "posting_date", "customer", "base_grand_total", "is_return"],
-		order_by="posting_date, name",
-	)
+	invoices = query.run(as_dict=True)
 
 	# resolve each customer's acquisition (first sale) before assigning revenue, so a same-day
 	# return is matched to its acquisition period regardless of row order; returns never acquire
 	acquisition = {}
-	for si in invoices:
-		if not si.is_return and si.customer not in acquisition:
-			key = si.territory if tree_view else getdate(si.posting_date).strftime("%Y-%m")
-			acquisition[si.customer] = (key, getdate(si.posting_date))
+	for row in invoices:
+		if not row.is_return and row.customer not in acquisition:
+			key = row.territory if tree_view else getdate(row.posting_date).strftime("%Y-%m")
+			acquisition[row.customer] = (key, getdate(row.posting_date))
 
 	from_date = getdate(filters.get("from_date"))
 	counted = {}  # key -> {"new": set of customers, "repeat": set of customers}
 	customers_in = {}
-	for si in invoices:
-		posting_date = getdate(si.posting_date)
+	for row in invoices:
+		posting_date = getdate(row.posting_date)
 		if posting_date < from_date:
 			continue
 
-		key = si.territory if tree_view else posting_date.strftime("%Y-%m")
-		acq = acquisition.get(si.customer)
+		key = row.territory if tree_view else posting_date.strftime("%Y-%m")
+		acq = acquisition.get(row.customer)
 		new_or_repeat = "new" if acq and key == acq[0] and acq[1] >= from_date else "repeat"
 
 		customers_in.setdefault(key, {"new": [0, 0.0], "repeat": [0, 0.0]})
 		counted.setdefault(key, {"new": set(), "repeat": set()})
 
 		# count each customer once per period; returns net revenue but not the headcount
-		if not si.is_return and si.customer not in counted[key][new_or_repeat]:
-			counted[key][new_or_repeat].add(si.customer)
+		if not row.is_return and row.customer not in counted[key][new_or_repeat]:
+			counted[key][new_or_repeat].add(row.customer)
 			customers_in[key][new_or_repeat][0] += 1
-		customers_in[key][new_or_repeat][1] += si.base_grand_total
+		customers_in[key][new_or_repeat][1] += row.base_grand_total
 
 	return customers_in
 

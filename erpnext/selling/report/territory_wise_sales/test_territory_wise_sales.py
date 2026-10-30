@@ -76,12 +76,13 @@ class TestTerritoryWiseSales(ERPNextTestSuite):
 		).insert()
 
 		after = self.amount_for(TERRITORY, "opportunity_amount")
-		self.assertEqual(opp.base_opportunity_amount, 7000)
+		# 100 in the opportunity's currency must show as 7000 in company currency
+		self.assertEqual(opp.conversion_rate, 70)
 		self.assertEqual(after - before, 7000)
 
 	def test_order_and_billing_amount_counted_once(self):
-		from erpnext.selling.doctype.quotation.mapper import make_sales_order
-		from erpnext.selling.doctype.sales_order.mapper import make_sales_invoice
+		from erpnext.selling.doctype.quotation.quotation import make_sales_order
+		from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
 
 		order_before = self.amount_for(TERRITORY, "order_amount")
 		billing_before = self.amount_for(TERRITORY, "billing_amount")
@@ -115,7 +116,7 @@ class TestTerritoryWiseSales(ERPNextTestSuite):
 		self.assertEqual(billing_after - billing_before, si.base_grand_total)
 
 	def test_order_from_merged_quotations_counted_once(self):
-		from erpnext.selling.doctype.quotation.mapper import make_sales_order
+		from erpnext.selling.doctype.quotation.quotation import make_sales_order
 
 		before = self.amount_for(TERRITORY, "order_amount")
 

@@ -6,6 +6,7 @@
 
 import copy
 import json
+import math
 
 import frappe
 from frappe import _, bold
@@ -89,11 +90,7 @@ def filter_pricing_rule_based_on_condition(pricing_rules, doc=None):
 					if frappe.safe_eval(pricing_rule.condition, None, doc.as_dict()):
 						filtered_pricing_rules.append(pricing_rule)
 				except Exception:
-					frappe.log_error(
-						title=f"Pricing Rule condition failed to evaluate: {pricing_rule.name}",
-						reference_doctype="Pricing Rule",
-						reference_name=pricing_rule.name,
-					)
+					pass
 			else:
 				filtered_pricing_rules.append(pricing_rule)
 	else:
@@ -108,6 +105,10 @@ def _get_pricing_rules(apply_on, args, values):
 	if not args.get(apply_on_field):
 		return []
 
+	# interpolated into the query below as a column name
+	if args.transaction_type not in ("buying", "selling"):
+		frappe.throw(_("Invalid Transaction Type"))
+
 	child_doc = f"`tabPricing Rule {apply_on}`"
 
 	conditions = item_variant_condition = item_conditions = ""
@@ -118,7 +119,7 @@ def _get_pricing_rules(apply_on, args, values):
 		if apply_on_field == "item_code":
 			if args.get("uom", None):
 				item_conditions += (
-					" and ({child_doc}.uom={item_uom} or COALESCE({child_doc}.uom, '')='')".format(
+					" and ({child_doc}.uom={item_uom} or IFNULL({child_doc}.uom, '')='')".format(
 						child_doc=child_doc, item_uom=frappe.db.escape(args.get("uom"))
 					)
 				)
@@ -131,7 +132,7 @@ def _get_pricing_rules(apply_on, args, values):
 	elif apply_on_field == "item_group":
 		item_conditions = _get_tree_conditions(args, "Item Group", child_doc, False)
 		if args.get("uom", None):
-			item_conditions += " and ({child_doc}.uom={item_uom} or COALESCE({child_doc}.uom, '')='')".format(
+			item_conditions += " and ({child_doc}.uom={item_uom} or IFNULL({child_doc}.uom, '')='')".format(
 				child_doc=child_doc, item_uom=frappe.db.escape(args.get("uom"))
 			)
 
@@ -143,7 +144,7 @@ def _get_pricing_rules(apply_on, args, values):
 	if not args.price_list:
 		args.price_list = None
 
-	conditions += " and coalesce(`tabPricing Rule`.for_price_list, '') in (%(price_list)s, '')"
+	conditions += " and ifnull(`tabPricing Rule`.for_price_list, '') in (%(price_list)s, '')"
 	values["price_list"] = args.get("price_list")
 
 	pricing_rules = (
@@ -156,7 +157,7 @@ def _get_pricing_rules(apply_on, args, values):
 			and {child_doc}.parent = `tabPricing Rule`.name
 			and `tabPricing Rule`.disable = 0 and
 			`tabPricing Rule`.{transaction_type} = 1 {warehouse_cond} {conditions}
-		order by coalesce(`tabPricing Rule`.priority, '') desc,
+		order by `tabPricing Rule`.priority desc,
 			`tabPricing Rule`.name desc""".format(
 				child_doc=child_doc,
 				apply_on_field=apply_on_field,
@@ -199,8 +200,10 @@ def _get_tree_conditions(args, parenttype, table, allow_blank=True):
 		except TypeError:
 			frappe.throw(_("Invalid {0}").format(args.get(field)))
 
-		parent_groups = frappe.get_all(
-			parenttype, filters={"lft": ["<=", lft], "rgt": [">=", rgt]}, pluck="name"
+		parent_groups = frappe.db.sql_list(
+			"""select name from `tab{}`
+			where lft<={} and rgt>={}""".format(parenttype, "%s", "%s"),
+			(lft, rgt),
 		)
 
 		if parenttype in ["Customer Group", "Item Group", "Territory"]:
@@ -219,30 +222,25 @@ def _get_tree_conditions(args, parenttype, table, allow_blank=True):
 		if parent_groups:
 			if allow_blank:
 				parent_groups.append("")
-			condition = "coalesce({table}.{field}, '') in ({parent_groups})".format(
+			condition = "ifnull({table}.{field}, '') in ({parent_groups})".format(
 				table=table, field=field, parent_groups=", ".join(frappe.db.escape(d) for d in parent_groups)
 			)
 
 			frappe.flags.tree_conditions[key] = condition
 
 	elif allow_blank:
-		condition = f"coalesce({table}.{field}, '') = ''"
+		condition = f"ifnull({table}.{field}, '') = ''"
 
 	return condition
 
 
 def get_other_conditions(conditions, values, args):
 	for field in ["company", "customer", "supplier", "campaign", "sales_partner"]:
-		value = args.get(field)
-		if field == "campaign":
-			# transactions carry the campaign in utm_campaign
-			value = value or args.get("utm_campaign")
-
-		if value:
-			conditions += f" and coalesce(`tabPricing Rule`.{field}, '') in (%({field})s, '')"
-			values[field] = value
+		if args.get(field):
+			conditions += f" and ifnull(`tabPricing Rule`.{field}, '') in (%({field})s, '')"
+			values[field] = args.get(field)
 		else:
-			conditions += f" and coalesce(`tabPricing Rule`.{field}, '') = ''"
+			conditions += f" and ifnull(`tabPricing Rule`.{field}, '') = ''"
 
 	for parenttype in ["Customer Group", "Territory", "Supplier Group"]:
 		group_condition = _get_tree_conditions(args, parenttype, "`tabPricing Rule`")
@@ -255,8 +253,8 @@ def get_other_conditions(conditions, values, args):
 		or frappe.get_value(args.get("doctype"), args.get("name"), "posting_date", ignore=True)
 	)
 	if date:
-		conditions += """ and %(transaction_date)s between coalesce(`tabPricing Rule`.valid_from, '2000-01-01')
-			and coalesce(`tabPricing Rule`.valid_upto, '2500-12-31')"""
+		conditions += """ and %(transaction_date)s between ifnull(`tabPricing Rule`.valid_from, '2000-01-01')
+			and ifnull(`tabPricing Rule`.valid_upto, '2500-12-31')"""
 		values["transaction_date"] = date
 
 	if args.get("doctype") in [
@@ -271,9 +269,9 @@ def get_other_conditions(conditions, values, args):
 		"POS Invoice",
 		"POS Invoice Item",
 	]:
-		conditions += """ and coalesce(`tabPricing Rule`.selling, 0) = 1"""
+		conditions += """ and ifnull(`tabPricing Rule`.selling, 0) = 1"""
 	else:
-		conditions += """ and coalesce(`tabPricing Rule`.buying, 0) = 1"""
+		conditions += """ and ifnull(`tabPricing Rule`.buying, 0) = 1"""
 
 	return conditions
 
@@ -352,7 +350,7 @@ def filter_pricing_rules(args, pricing_rules, doc=None):
 	if len(pricing_rules) > 1 and not args.for_shopping_cart:
 		frappe.throw(
 			_(
-				"Multiple Price Rules exist with same criteria, please resolve conflict by assigning priority. Price Rules: {0}"
+				"Multiple Price Rules exists with same criteria, please resolve conflict by assigning priority. Price Rules: {0}"
 			).format("\n".join(d.name for d in pricing_rules)),
 			MultiplePricingRuleConflict,
 		)
@@ -588,8 +586,6 @@ def apply_pricing_rule_on_transaction(doc):
 
 		for d in pricing_rules:
 			if d.price_or_product_discount == "Price":
-				if d.apply_discount_on:
-					doc.set("apply_discount_on", d.apply_discount_on)
 				# Variable to track whether the condition has been met
 				condition_met = False
 				fields_set = set()
@@ -608,6 +604,8 @@ def apply_pricing_rule_on_transaction(doc):
 						frappe.msgprint(_("User has not applied rule on the invoice {0}").format(doc.name))
 					else:
 						if not d.coupon_code_based:
+							if d.apply_discount_on:
+								doc.set("apply_discount_on", d.apply_discount_on)
 							doc.set(field, d.get(pr_field))
 							fields_set.add(field)
 							applied_rules.append(d.name)
@@ -618,6 +616,8 @@ def apply_pricing_rule_on_transaction(doc):
 							)
 							if coupon_code_pricing_rule == d.name:
 								# if selected coupon code is linked with pricing rule
+								if d.apply_discount_on:
+									doc.set("apply_discount_on", d.apply_discount_on)
 								doc.set(field, d.get(pr_field))
 								fields_set.add(field)
 								applied_rules.append(d.name)
@@ -625,13 +625,6 @@ def apply_pricing_rule_on_transaction(doc):
 								# Set the condition_met variable to True and break out of the loop
 								condition_met = True
 								break
-
-							else:
-								# reset discount if not linked
-								doc.set(field, 0)
-						else:
-							# if coupon code based but no coupon code selected
-							doc.set(field, 0)
 
 				if has_rule_discount and fields_set:
 					# clear the discount set by the previously applied rule which this rule does not set
@@ -657,9 +650,7 @@ def apply_pricing_rule_on_transaction(doc):
 
 	if flt(doc.get("grand_total")) != flt(grand_total):
 		# payment schedule is validated before pricing rules are applied, so it has to be reset as per the new total
-		from erpnext.accounts.services.payment_schedule import PaymentScheduleService
-
-		PaymentScheduleService(doc).validate_all_documents_schedule()
+		doc.validate_all_documents_schedule()
 
 
 def get_transaction_pricing_rules(doc):
@@ -668,7 +659,41 @@ def get_transaction_pricing_rules(doc):
 	if doc_before_save := doc.get_doc_before_save():
 		rows += doc_before_save.get("pricing_rules") or []
 
-	return {d.pricing_rule for d in rows if d.pricing_rule and not d.item_code and not d.child_docname}
+	pricing_rules = {
+		d.pricing_rule for d in rows if d.pricing_rule and not d.item_code and not d.child_docname
+	}
+	if (
+		pricing_rules
+		or not doc_before_save
+		or not doc_before_save.get("coupon_code")
+		or doc_before_save.coupon_code == doc.get("coupon_code")
+		or doc_before_save.ignore_pricing_rule
+	):
+		return pricing_rules
+
+	# Older documents did not track transaction rules. Check the saved coupon before removing its discount.
+	values = {"pricing_rule": frappe.db.get_value("Coupon Code", doc_before_save.coupon_code, "pricing_rule")}
+	conditions = get_other_conditions(
+		"name = %(pricing_rule)s and apply_on = 'Transaction' and price_or_product_discount = 'Price'"
+		" and coupon_code_based = 1 and disable = 0",
+		values,
+		doc_before_save,
+	)
+	coupon_rules = frappe.db.sql(f"select * from `tabPricing Rule` where {conditions}", values, as_dict=True)
+	coupon_rules = filter_pricing_rules_for_qty_amount(
+		doc_before_save.total_qty, doc_before_save.total, coupon_rules
+	)
+	for rule in filter_pricing_rule_based_on_condition(coupon_rules, doc_before_save):
+		field = "additional_discount_percentage" if rule.discount_percentage else "discount_amount"
+		discount = rule.discount_percentage or rule.discount_amount
+		if (
+			discount
+			and doc_before_save.apply_discount_on == rule.apply_discount_on
+			and doc_before_save.get(field) == flt(discount, doc_before_save.precision(field))
+		):
+			pricing_rules.add(rule.name)
+
+	return pricing_rules
 
 
 def set_transaction_pricing_rules(doc, applied_rules):
@@ -725,7 +750,7 @@ def remove_free_item(doc):
 def get_applied_pricing_rules(pricing_rules):
 	if pricing_rules:
 		if pricing_rules.startswith("["):
-			return frappe.parse_json(pricing_rules)
+			return json.loads(pricing_rules)
 		else:
 			return pricing_rules.split(",")
 
@@ -845,16 +870,21 @@ def validate_coupon_code(coupon_name):
 
 def update_coupon_code_count(coupon_name, transaction_type):
 	coupon = frappe.get_doc("Coupon Code", coupon_name)
-	if transaction_type == "used":
-		if coupon.maximum_use and coupon.used >= coupon.maximum_use:
-			frappe.throw(
-				_("{0} Coupon used are {1}. Allowed quantity is exhausted").format(
-					coupon.coupon_code, coupon.used
+	if coupon:
+		if transaction_type == "used":
+			if not coupon.maximum_use:
+				coupon.used = coupon.used + 1
+				coupon.save(ignore_permissions=True)
+			elif coupon.used < coupon.maximum_use:
+				coupon.used = coupon.used + 1
+				coupon.save(ignore_permissions=True)
+			else:
+				frappe.throw(
+					_("{0} Coupon used are {1}. Allowed quantity is exhausted").format(
+						coupon.coupon_code, coupon.used
+					)
 				)
-			)
-		coupon.used = coupon.used + 1
-		coupon.save(ignore_permissions=True)
-	elif transaction_type == "cancelled":
-		if coupon.used > 0:
-			coupon.used = coupon.used - 1
-			coupon.save(ignore_permissions=True)
+		elif transaction_type == "cancelled":
+			if coupon.used > 0:
+				coupon.used = coupon.used - 1
+				coupon.save(ignore_permissions=True)

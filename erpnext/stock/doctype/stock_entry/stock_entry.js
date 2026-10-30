@@ -268,7 +268,6 @@ frappe.ui.form.on("Stock Entry", {
 	refresh: function (frm) {
 		frm.trigger("get_items_from_transit_entry");
 		frm.trigger("toggle_warehouse_fields");
-		frm.trigger("toggle_weight_per_piece");
 
 		// only BOM-less rows are editable, and they cannot allocate a BOM percentage;
 		// read-only rows from a BOM still display their stored % of Component Cost
@@ -385,7 +384,7 @@ frappe.ui.form.on("Stock Entry", {
 							async (data) => {
 								if (frm.doc.work_order) {
 									let stock_entry = await frappe.xcall(
-										"erpnext.manufacturing.doctype.work_order.mapper.make_stock_entry",
+										"erpnext.manufacturing.doctype.work_order.work_order.make_stock_entry",
 										{
 											work_order_id: frm.doc.work_order,
 											purpose: "Disassemble",
@@ -434,7 +433,7 @@ frappe.ui.form.on("Stock Entry", {
 				__("Purchase Invoice"),
 				function () {
 					erpnext.utils.map_current_doc({
-						method: "erpnext.accounts.doctype.purchase_invoice.mapper.make_stock_entry",
+						method: "erpnext.accounts.doctype.purchase_invoice.purchase_invoice.make_stock_entry",
 						source_doctype: "Purchase Invoice",
 						target: frm,
 						date_field: "posting_date",
@@ -459,7 +458,7 @@ frappe.ui.form.on("Stock Entry", {
 					];
 					const depends_on_condition = "eval:doc.material_request_type==='Customer Provided'";
 					const d = erpnext.utils.map_current_doc({
-						method: "erpnext.stock.doctype.material_request.mapper.make_stock_entry",
+						method: "erpnext.stock.doctype.material_request.material_request.make_stock_entry",
 						source_doctype: "Material Request",
 						target: frm,
 						date_field: "schedule_date",
@@ -506,7 +505,7 @@ frappe.ui.form.on("Stock Entry", {
 				__("Expired Batches"),
 				function () {
 					frappe.call({
-						method: "erpnext.stock.doctype.stock_entry.services.serial_batch.get_expired_batch_items",
+						method: "erpnext.stock.doctype.stock_entry.stock_entry.get_expired_batch_items",
 						freeze: true,
 						callback: function (r) {
 							if (!r.exc && r.message) {
@@ -609,7 +608,6 @@ frappe.ui.form.on("Stock Entry", {
 		frm.events.show_bom_custom_button(frm);
 		frm.trigger("add_to_transit");
 		frm.trigger("toggle_warehouse_fields");
-		frm.trigger("toggle_weight_per_piece");
 
 		frm.fields_dict.items.grid.update_docfield_property(
 			"basic_rate",
@@ -618,25 +616,13 @@ frappe.ui.form.on("Stock Entry", {
 		);
 	},
 
-	toggle_weight_per_piece(frm) {
-		if (!frm.doc.stock_entry_type || frm.doc.purpose !== "Repack") {
-			frm.toggle_display("weight_per_piece", false);
-			return;
-		}
-
-		frappe.db.get_value("Stock Entry Type", frm.doc.stock_entry_type, "batch_split", (r) => {
-			frm.toggle_display("weight_per_piece", cint(r.batch_split));
-			frm.toggle_reqd("weight_per_piece", cint(r.batch_split));
-		});
-	},
-
 	async map_raw_materials_to_finished_goods(frm) {
 		const is_submitted = frm.doc.docstatus === 1;
 		if (!is_submitted && frm.is_dirty()) {
 			await frm.save();
 		}
 
-		const method = "erpnext.stock.doctype.stock_entry.services.serial_batch";
+		const method = "erpnext.stock.doctype.stock_entry.stock_entry";
 		const mapping = await frappe.xcall(`${method}.get_fg_mapping`, {
 			stock_entry: frm.doc.name,
 		});
@@ -645,20 +631,19 @@ frappe.ui.form.on("Stock Entry", {
 		const raw_materials = is_submitted
 			? mapping.raw_materials.filter((row) => !row.fg_serial_no && !row.fg_batch_no)
 			: mapping.raw_materials;
-		// one unique label per finished good serial / batch, shown by its physical number as the name can
-		// be a hash; a serial no and a batch no, or serial nos of different items, can share a number
+		// one unique label per finished good serial / batch; a serial no and a batch no can share a name
 		const type_label = (fg_field) => (fg_field === "fg_serial_no" ? __("Serial No") : __("Batch No"));
-		const is_taken = (label) => label in targets || fg_rows.some((row) => row.label === label);
+		const is_taken = (label) => label in targets || fg_rows.some((row) => row.value === label);
 		const targets = {};
 		const labels = {};
 		fg_rows.forEach((row) => {
-			const shared = fg_rows.some((other) => other !== row && other.label === row.label);
-			let label = row.label;
+			const shared = fg_rows.some((other) => other !== row && other.value === row.value);
+			let label = row.value;
 			if (shared || label in targets) {
-				// a suffixed label must not match another label or another finished good's physical number
-				label = `${row.label} (${type_label(row.fg_field)})`;
+				// a suffixed label must not match another label or another finished good's real name
+				label = `${row.value} (${type_label(row.fg_field)})`;
 				for (let n = 2; is_taken(label); n++) {
-					label = `${row.label} (${type_label(row.fg_field)} ${n})`;
+					label = `${row.value} (${type_label(row.fg_field)} ${n})`;
 				}
 			}
 
@@ -678,7 +663,7 @@ frappe.ui.form.on("Stock Entry", {
 				is_submitted
 					? __("There are no serial / batch tracked raw materials or finished goods to map")
 					: __(
-							"Link the Serial and Batch Bundles of the raw materials and finished goods first. If you skip this, they are mapped automatically on submit."
+							"Link the Serial and Batch Bundles of the raw materials and finished goods first. Serial / batch nos picked on submit can be mapped after the entry is submitted."
 					  )
 			);
 			return;
@@ -808,15 +793,13 @@ frappe.ui.form.on("Stock Entry", {
 		frm.fields_dict["items"].grid.update_docfield_property(
 			"s_warehouse",
 			"in_list_view",
-			!["Material Receipt", "Receive from Customer", "Subcontracting Return"].includes(frm.doc.purpose)
+			!["Material Receipt", "Receive from Customer"].includes(frm.doc.purpose)
 		);
 
 		frm.fields_dict["items"].grid.update_docfield_property(
 			"t_warehouse",
 			"in_list_view",
-			!["Material Issue", "Return Raw Material to Customer", "Subcontracting Delivery"].includes(
-				frm.doc.purpose
-			)
+			!["Material Issue"].includes(frm.doc.purpose)
 		);
 
 		frm.fields_dict["items"].grid.reset_grid();
@@ -845,7 +828,7 @@ frappe.ui.form.on("Stock Entry", {
 
 	make_retention_stock_entry: function (frm) {
 		frappe.call({
-			method: "erpnext.stock.doctype.stock_entry.services.manufacturing.move_sample_to_retention_warehouse",
+			method: "erpnext.stock.doctype.stock_entry.stock_entry.move_sample_to_retention_warehouse",
 			args: {
 				company: frm.doc.company,
 				items: frm.doc.items,
@@ -1021,7 +1004,7 @@ frappe.ui.form.on("Stock Entry", {
 					} else {
 						erpnext.utils.remove_empty_first_row(frm, "items");
 						$.each(r.message, function (i, item) {
-							let d = frappe.model.add_child(frm.doc, "Stock Entry Detail", "items");
+							let d = frappe.model.add_child(cur_frm.doc, "Stock Entry Detail", "items");
 							d.item_code = item.item_code;
 							d.item_name = item.item_name;
 							d.item_group = item.item_group;
@@ -1117,9 +1100,9 @@ frappe.ui.form.on("Stock Entry", {
 		if (frm.doc.purchase_order) {
 			frm.set_value("subcontracting_order", "");
 			erpnext.utils.map_current_doc({
-				method: "erpnext.stock.doctype.stock_entry.services.subcontracting.get_items_from_subcontract_order",
+				method: "erpnext.stock.doctype.stock_entry.stock_entry.get_items_from_subcontract_order",
 				source_name: frm.doc.purchase_order,
-				target: frm,
+				target_doc: frm,
 				freeze: true,
 			});
 		}
@@ -1129,11 +1112,31 @@ frappe.ui.form.on("Stock Entry", {
 		if (frm.doc.subcontracting_order) {
 			frm.set_value("purchase_order", "");
 			erpnext.utils.map_current_doc({
-				method: "erpnext.stock.doctype.stock_entry.services.subcontracting.get_items_from_subcontract_order",
+				method: "erpnext.stock.doctype.stock_entry.stock_entry.get_items_from_subcontract_order",
 				source_name: frm.doc.subcontracting_order,
-				target: frm,
+				target_doc: frm,
 				freeze: true,
 			});
+		}
+	},
+
+	process_loss_qty(frm) {
+		if (frm.doc.process_loss_qty) {
+			frm.doc.process_loss_percentage = flt(
+				(frm.doc.process_loss_qty / frm.doc.fg_completed_qty) * 100,
+				precision("process_loss_qty", frm.doc)
+			);
+			refresh_field("process_loss_percentage");
+		}
+	},
+
+	process_loss_percentage(frm) {
+		if (frm.doc.process_loss_percentage) {
+			frm.doc.process_loss_qty = flt(
+				(frm.doc.fg_completed_qty * frm.doc.process_loss_percentage) / 100,
+				precision("process_loss_qty", frm.doc)
+			);
+			refresh_field("process_loss_qty");
 		}
 	},
 
@@ -1361,7 +1364,7 @@ var validate_sample_quantity = function (frm, cdt, cdn) {
 	var d = locals[cdt][cdn];
 	if (d.sample_quantity && d.transfer_qty && frm.doc.purpose == "Material Receipt") {
 		frappe.call({
-			method: "erpnext.stock.doctype.stock_entry.services.manufacturing.validate_sample_quantity",
+			method: "erpnext.stock.doctype.stock_entry.stock_entry.validate_sample_quantity",
 			args: {
 				batch_no: d.batch_no,
 				item_code: d.item_code,
@@ -1452,8 +1455,18 @@ erpnext.stock.StockEntry = class StockEntry extends erpnext.stock.StockControlle
 		};
 
 		this.frm.fields_dict.items.grid.get_field("item_code").get_query = function () {
-			return erpnext.queries.item({ is_stock_item: 1, company: me.frm.doc.company });
+			return erpnext.queries.item({ is_stock_item: 1 });
 		};
+
+		this.frm.set_query("purchase_order", function () {
+			return {
+				filters: {
+					docstatus: 1,
+					is_old_subcontracting_flow: 1,
+					company: me.frm.doc.company,
+				},
+			};
+		});
 
 		this.frm.set_query("subcontracting_order", function () {
 			return {
@@ -1530,7 +1543,7 @@ erpnext.stock.StockEntry = class StockEntry extends erpnext.stock.StockControlle
 	}
 
 	refresh() {
-		erpnext.toggle_naming_series(this.frm);
+		erpnext.toggle_naming_series();
 		this.toggle_related_fields(this.frm.doc);
 		this.toggle_enable_bom();
 		this.show_stock_ledger();
@@ -1890,4 +1903,4 @@ function check_should_not_attach_bom_items(bom_no) {
 	return bom_no === undefined || (erpnext.stock.bom && erpnext.stock.bom.name === bom_no);
 }
 
-frappe.ui.form.set_controller("Stock Entry", erpnext.stock.StockEntry);
+extend_cscript(cur_frm.cscript, new erpnext.stock.StockEntry({ frm: cur_frm }));

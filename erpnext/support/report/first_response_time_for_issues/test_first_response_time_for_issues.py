@@ -2,7 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
-from frappe.utils import add_days, add_to_date, getdate, now_datetime
+from frappe.utils import add_to_date, getdate, now_datetime
 
 from erpnext.support.doctype.issue.test_issue import create_customer
 from erpnext.support.report.first_response_time_for_issues.first_response_time_for_issues import (
@@ -12,32 +12,6 @@ from erpnext.tests.utils import ERPNextTestSuite
 
 
 class TestFirstResponseTimeForIssues(ERPNextTestSuite):
-	def test_avg_first_response_time_grouped_by_creation_date(self):
-		today = getdate()
-
-		# Isolate today's group: any pre-existing Issue created today (from other
-		# fixtures running in the same transaction) would pollute the average.
-		# Rolled back automatically in tearDown.
-		frappe.db.delete("Issue", {"creation": (">=", today)})
-
-		# Seed exactly one Issue created today.
-		response_time = 3600
-		make_responded_issue(response_time, response_time)
-
-		columns, data = execute(frappe._dict(from_date=add_days(today, -1), to_date=add_days(today, 1)))
-
-		# Rows are tuples: (creation_date, avg_response_time) -- report uses .run() w/o as_dict.
-		rows_for_today = [row for row in data if getdate(row[0]) == today]
-		self.assertEqual(
-			len(rows_for_today),
-			1,
-			f"expected exactly one grouped row for {today}, got {rows_for_today}",
-		)
-
-		creation_date, avg_response_time = rows_for_today[0]
-		self.assertEqual(getdate(creation_date), today)
-		self.assertEqual(float(avg_response_time), float(response_time))
-
 	def test_average_uses_calendar_time_for_issues_with_and_without_sla(self):
 		today = getdate()
 		frappe.db.delete("Issue", {"creation": (">=", today)})

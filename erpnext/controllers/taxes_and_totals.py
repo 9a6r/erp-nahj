@@ -14,11 +14,9 @@ import erpnext
 from erpnext.accounts.doctype.journal_entry.journal_entry import get_exchange_rate
 from erpnext.accounts.doctype.pricing_rule.pricing_rule import apply_pricing_rule_margin
 from erpnext.accounts.doctype.pricing_rule.utils import get_applied_pricing_rules
-from erpnext.buying.doctype.buying_settings.buying_settings import (
-	get_billed_qty,
-	get_billed_stock_qty,
-)
+from erpnext.accounts.utils import get_zero_cutoff
 from erpnext.controllers.accounts_controller import (
+	get_qty_in_stock_uom,
 	validate_conversion_rate,
 	validate_inclusive_tax,
 	validate_taxes_and_charges,
@@ -26,6 +24,7 @@ from erpnext.controllers.accounts_controller import (
 from erpnext.deprecation_dumpster import deprecated
 from erpnext.stock.get_item_details import (
 	NOT_APPLICABLE_TAX,
+	ItemDetailsCtx,
 	_get_item_tax_template,
 	get_item_tax_map,
 )
@@ -104,7 +103,7 @@ class calculate_taxes_and_totals:
 		for item in self.doc.items:
 			if item.item_code and item.get("item_tax_template"):
 				item_doc = frappe.get_cached_doc("Item", item.item_code)
-				ctx = frappe._dict(
+				ctx = ItemDetailsCtx(
 					{
 						"net_rate": item.net_rate or item.rate,
 						"base_net_rate": item.base_net_rate or item.base_rate,
@@ -136,9 +135,9 @@ class calculate_taxes_and_totals:
 					if item.item_tax_template not in taxes:
 						item.item_tax_template = taxes[0]
 						frappe.msgprint(
-							_(
-								"Row {0}: Item Tax template for {1} updated as per validity and rate applied"
-							).format(item.idx, frappe.bold(item.item_code))
+							_("Row {0}: Item Tax template updated as per validity and rate applied").format(
+								item.idx, frappe.bold(item.item_code)
+							)
 						)
 
 						# For correct tax_amount calculation re-computation is required
@@ -163,7 +162,7 @@ class calculate_taxes_and_totals:
 			validate_conversion_rate(
 				self.doc.currency,
 				self.doc.conversion_rate,
-				self.doc.meta.get_translated_label("conversion_rate"),
+				self.doc.meta.get_label("conversion_rate"),
 				self.doc.company,
 			)
 
@@ -176,11 +175,13 @@ class calculate_taxes_and_totals:
 			item.rate_with_margin = 0
 			return
 
-		has_pricing_rules = item.pricing_rules and not self.doc.ignore_pricing_rule
+		# An item no rule applied to may still hold "[]", which must not override the rate typed in
+		applied_rules = get_applied_pricing_rules(item.pricing_rules)
+		has_pricing_rules = bool(applied_rules) and not self.doc.ignore_pricing_rule
 		if has_pricing_rules:
 			remove_margin(item)
 
-			for d in get_applied_pricing_rules(item.pricing_rules):
+			for d in applied_rules:
 				pricing_rule = frappe.get_cached_doc("Pricing Rule", d)
 				apply_pricing_rule_margin(pricing_rule, item, self.doc)
 
@@ -237,18 +238,12 @@ class calculate_taxes_and_totals:
 			elif not item.qty and self.doc.get("is_debit_note"):
 				item.amount = flt(item.rate, item.precision("amount"))
 			else:
-				item.amount = flt(item.rate * self.get_billed_qty(item), item.precision("amount"))
+				item.amount = flt(item.rate * item.qty, item.precision("amount"))
 			item.net_amount = item.amount
 			self._set_in_company_currency(
 				item, ["price_list_rate", "rate_with_margin", "rate", "net_rate", "amount", "net_amount"]
 			)
 			item.item_tax_amount = 0.0
-
-	def get_billed_qty(self, item):
-		return get_billed_qty(self.doc, item)
-
-	def get_billed_stock_qty(self, item):
-		return get_billed_stock_qty(self.doc, item)
 
 	@property
 	def has_mapped_discount(self):
@@ -281,7 +276,7 @@ class calculate_taxes_and_totals:
 
 	def apply_mapped_discount_to_item(self, item):
 		item.distributed_discount_amount = flt(
-			flt(item.mapped_additional_discount_amount) * self.get_billed_stock_qty(item),
+			flt(item.mapped_additional_discount_amount) * get_qty_in_stock_uom(item),
 			item.precision("distributed_discount_amount"),
 		)
 		if not item.distributed_discount_amount:
@@ -290,7 +285,7 @@ class calculate_taxes_and_totals:
 		item.net_amount = flt(
 			item.net_amount - item.distributed_discount_amount, item.precision("net_amount")
 		)
-		item.net_rate = flt(item.net_amount / self.get_billed_qty(item), item.precision("net_rate"))
+		item.net_rate = flt(item.net_amount / item.qty, item.precision("net_rate"))
 		item._unrounded_net_amount = None
 		self._set_in_company_currency(item, ["net_rate", "net_amount"])
 
@@ -382,7 +377,7 @@ class calculate_taxes_and_totals:
 
 			item._mapped_discount_inclusive_amount = (
 				flt(item.get("mapped_additional_discount_amount"))
-				* self.get_billed_stock_qty(item)
+				* get_qty_in_stock_uom(item)
 				* (1 + total_tax_slope)
 			)
 
@@ -391,7 +386,7 @@ class calculate_taxes_and_totals:
 
 				item._unrounded_net_amount = amount / (1 + total_tax_slope)
 				item.net_amount = flt(item._unrounded_net_amount, item.precision("net_amount"))
-				item.net_rate = flt(item.net_amount / self.get_billed_qty(item), item.precision("net_rate"))
+				item.net_rate = flt(item.net_amount / item.qty, item.precision("net_rate"))
 				item.discount_percentage = flt(
 					item.discount_percentage, item.precision("discount_percentage")
 				)
@@ -399,7 +394,7 @@ class calculate_taxes_and_totals:
 				self._set_in_company_currency(item, ["net_rate", "net_amount"])
 
 	def _load_item_tax_rate(self, item_tax_rate):
-		return frappe.parse_json(item_tax_rate) if item_tax_rate else {}
+		return json.loads(item_tax_rate) if item_tax_rate else {}
 
 	def get_current_tax_fraction(self, tax, item_tax_map, item):
 		"""
@@ -626,7 +621,7 @@ class calculate_taxes_and_totals:
 				+ "<br>".join(invalid_rows)
 			)
 
-			frappe.throw(message)
+			frappe.throw(_(message))
 
 	def get_tax_amount_if_for_valuation_or_deduction(self, tax_amount, tax):
 		# if just for valuation, do not add the tax amount in total
@@ -998,9 +993,8 @@ class calculate_taxes_and_totals:
 						)
 						net_total += rounding_difference
 
-					billed_qty = self.get_billed_qty(item)
 					item.net_rate = (
-						flt(item.net_amount / billed_qty, item.precision("net_rate")) if billed_qty else 0
+						flt(item.net_amount / item.qty, item.precision("net_rate")) if item.qty else 0
 					)
 
 					self._set_in_company_currency(item, ["net_rate", "net_amount"])
@@ -1389,6 +1383,11 @@ def get_itemised_tax(doc, with_tax_account=False):
 			tax_info.tax_account = tax.account_head
 
 	return itemised_tax
+
+
+from erpnext.deprecation_dumpster import (
+	taxes_and_totals_get_itemised_taxable_amount as get_itemised_taxable_amount,
+)
 
 
 def get_rounded_tax_amount(itemised_tax, precision):

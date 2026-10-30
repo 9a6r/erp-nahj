@@ -52,8 +52,5 @@ class TestCustomersWithoutAnySalesTransactions(ERPNextTestSuite):
 			restricted.insert()
 		frappe.permissions.add_user_permission("Company", "_Test Company", user)
 
-		frappe.set_user(user)
-		try:
+		with self.set_user(user):
 			self.assertRaises(frappe.PermissionError, execute, frappe._dict({"company": "_Test Company 1"}))
-		finally:
-			frappe.set_user("Administrator")

@@ -22,12 +22,6 @@ def boot_session(bootinfo):
 			frappe.get_single_value("Selling Settings", "use_legacy_js_reactivity")
 		)
 		bootinfo.sysdefaults.allow_stale = cint(frappe.get_single_value("Accounts Settings", "allow_stale"))
-		bootinfo.sysdefaults.bill_for_rejected_quantity_in_purchase_invoice = cint(
-			frappe.get_single_value("Buying Settings", "bill_for_rejected_quantity_in_purchase_invoice")
-		)
-		bootinfo.sysdefaults.set_valuation_rate_for_rejected_materials = cint(
-			frappe.get_single_value("Buying Settings", "set_valuation_rate_for_rejected_materials")
-		)
 		bootinfo.sysdefaults.over_billing_allowance = frappe.get_single_value(
 			"Accounts Settings", "over_billing_allowance"
 		)
@@ -37,8 +31,8 @@ def boot_session(bootinfo):
 
 		remove_disabled_price_list_defaults(bootinfo)
 
-		bootinfo.sysdefaults.quotation_valid_till = max(
-			cint(frappe.db.get_single_value("CRM Settings", "default_valid_till")), 0
+		bootinfo.sysdefaults.quotation_valid_till = cint(
+			frappe.db.get_single_value("CRM Settings", "default_valid_till")
 		)
 
 		bootinfo.sysdefaults.allow_sales_order_creation_for_expired_quotation = cint(
@@ -46,37 +40,28 @@ def boot_session(bootinfo):
 		)
 
 		# if no company, show a dialog box to create a new company
-		bootinfo.customer_count = frappe.db.count("Customer")
+		bootinfo.customer_count = frappe.db.sql("""SELECT count(*) FROM `tabCustomer`""")[0][0]
 
 		if not bootinfo.customer_count:
-			bootinfo.setup_complete = "Yes" if frappe.db.get_all("Company", limit=1) else "No"
+			bootinfo.setup_complete = (
+				frappe.db.sql(
+					"""SELECT `name`
+				FROM `tabCompany`
+				LIMIT 1"""
+				)
+				and "Yes"
+				or "No"
+			)
 
-		companies = frappe.get_all(
-			"Company",
-			fields=[
-				"name",
-				"default_currency",
-				"cost_center",
-				"default_selling_terms",
-				"default_buying_terms",
-				"default_letter_head",
-				"default_letter_head_report",
-				"default_bank_account",
-				"enable_perpetual_inventory",
-				"country",
-				"exchange_gain_loss_account",
-				"bank_charges_account",
-			],
-			limit_page_length=0,  # intentionally unbounded: all companies are needed for boot
+		bootinfo.docs += frappe.db.sql(
+			"""select name, default_currency, cost_center, default_selling_terms, default_buying_terms,
+			default_letter_head, default_bank_account, enable_perpetual_inventory, country, exchange_gain_loss_account from `tabCompany`""",
+			as_dict=1,
+			update={"doctype": ":Company"},
 		)
-		for company in companies:
-			company.doctype = ":Company"
-		bootinfo.docs += companies
 
-		party_account_types = frappe.get_all("Party Type", fields=["name", "account_type"], as_list=True)
-		bootinfo.party_account_types = frappe._dict(
-			(name, account_type or "") for name, account_type in party_account_types
-		)
+		party_account_types = frappe.db.sql(""" select name, ifnull(account_type, '') from `tabParty Type`""")
+		bootinfo.party_account_types = frappe._dict(party_account_types)
 		fiscal_year = erpnext.accounts.utils.get_fiscal_years(
 			frappe.utils.nowdate(), company=get_user_default("company"), raise_on_missing=False
 		)

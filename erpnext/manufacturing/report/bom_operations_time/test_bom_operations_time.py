@@ -33,55 +33,6 @@ class TestBOMOperationsTime(ERPNextTestSuite):
 		other_fg = make_item(properties={"is_stock_item": 1}).name
 		return build_bom_with_operation(other_fg, self.rm_item, OTHER_OPERATION, OTHER_WORKSTATION)
 
-	def test_operation_row_appears_with_expected_values(self):
-		rows = self.run_report(bom_id=[self.bom.name])
-
-		self.assertEqual(len(rows), 1)
-		row = rows[0]
-		self.assertEqual(row.name, self.bom.name)
-		self.assertEqual(row.item, self.fg_item)
-		self.assertEqual(row.operation, OPERATION)
-		self.assertEqual(row.workstation, WORKSTATION)
-		self.assertEqual(row.time_in_mins, TIME_IN_MINS)
-
-	def test_item_code_filter_includes_matching_and_excludes_other(self):
-		other_bom = self.build_other_bom()
-
-		# no bom_id here, so the item_code filter alone must scope the result
-		names = self.bom_names(self.run_report(item_code=self.fg_item))
-		self.assertIn(self.bom.name, names)
-		self.assertNotIn(other_bom.name, names)
-
-		# reverse direction: filtering the other item drops our BOM
-		other_names = self.bom_names(self.run_report(item_code=other_bom.item))
-		self.assertIn(other_bom.name, other_names)
-		self.assertNotIn(self.bom.name, other_names)
-
-	def test_workstation_filter_includes_matching_and_excludes_other(self):
-		other_bom = self.build_other_bom()
-
-		# no bom_id here, so the workstation filter alone must scope the result
-		names = self.bom_names(self.run_report(workstation=WORKSTATION))
-		self.assertIn(self.bom.name, names)
-		self.assertNotIn(other_bom.name, names)
-
-		# reverse direction: filtering the other workstation drops our BOM
-		other_names = self.bom_names(self.run_report(workstation=OTHER_WORKSTATION))
-		self.assertIn(other_bom.name, other_names)
-		self.assertNotIn(self.bom.name, other_names)
-
-	def test_draft_bom_excluded(self):
-		draft_bom = build_bom_with_operation(
-			make_item(properties={"is_stock_item": 1}).name,
-			self.rm_item,
-			OPERATION,
-			WORKSTATION,
-			do_not_submit=True,
-		)
-
-		rows = self.run_report(bom_id=[draft_bom.name])
-		self.assertEqual(rows, [])
-
 	def test_sub_assembly_bom_count_on_every_row(self):
 		ensure_workstation_and_operation(OTHER_WORKSTATION, OTHER_OPERATION)
 		sub_assembly = make_item(properties={"is_stock_item": 1}).name

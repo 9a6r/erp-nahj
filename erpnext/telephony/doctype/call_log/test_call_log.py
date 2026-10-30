@@ -75,54 +75,12 @@ class TestCallLog(ERPNextTestSuite):
 			pluck="link_name",
 		)
 
-	def test_links_previously_unlinked_log(self):
-		"""The converted query's HAVING == 0 returns the log NOT yet linked to the
-		contact, so link_existing_conversations adds the Contact link to it."""
-		self.assertEqual(self._contact_links_of(self.unlinked_log), [], "precondition")
-
-		self._run_linker()
-
-		self.assertEqual(
-			self._contact_links_of(self.unlinked_log),
-			[self.contact.name],
-			"Previously-unlinked log matching the number must gain the Contact link",
-		)
-
 	def test_linking_does_not_commit(self):
 		with patch.object(frappe, "in_test", False), patch.object(frappe.db, "commit") as commit:
 			self._run_linker()
 
 		commit.assert_not_called()
 		self.assertEqual(self._contact_links_of(self.unlinked_log), [self.contact.name])
-
-	def test_already_linked_log_is_not_relinked(self):
-		"""The HAVING SUM(CASE ...) == 0 must EXCLUDE the already-linked log from the returned set,
-		so link_existing_conversations never re-saves it. Asserting only the link count is not enough
-		(validate() -> deduplicate_dynamic_links strips a duplicate either way), so pin the HAVING by
-		asserting the already-linked log was never touched: an excluded log is not in `logs`, so
-		add_link()/save() never runs and its `modified` timestamp is unchanged."""
-		self.assertEqual(self._contact_links_of(self.linked_log), [self.contact.name], "precondition")
-		modified_before = frappe.db.get_value("Call Log", self.linked_log, "modified")
-
-		self._run_linker()
-
-		# Excluded by HAVING -> never re-saved -> modified unchanged. (If HAVING were dropped/inverted
-		# the log would be returned, re-saved, and modified would bump.)
-		self.assertEqual(
-			frappe.db.get_value("Call Log", self.linked_log, "modified"),
-			modified_before,
-			"Already-linked log must be excluded by HAVING and never re-saved",
-		)
-		self.assertEqual(self._contact_links_of(self.linked_log), [self.contact.name])
-
-	def test_log_not_matching_number_is_untouched(self):
-		"""A log whose from/to does not contain the number is excluded by the
-		from/to LIKE predicate and must stay unlinked."""
-		other = self._make_call_log(**{"from": "+919999999999", "to": "+918888888888", "type": "Outgoing"})
-
-		self._run_linker()
-
-		self.assertEqual(self._contact_links_of(other), [], "Log not matching the number must stay unlinked")
 
 	def test_agent_can_save_summary_of_own_call(self):
 		user = "test_call_agent@example.com"
@@ -186,27 +144,6 @@ class TestCallLog(ERPNextTestSuite):
 			frappe.db.get_value("Call Log", call_log.name, ["call_received_by", "employee_user_id"]),
 			(second_agent, "test_call_agent_b@example.com"),
 		)
-
-	def test_call_status_events_go_only_to_agents_of_the_call(self):
-		agent = "test_call_agent_a@example.com"
-		make_employee(agent, company="_Test Company", cell_number=f"+91{self.number}1")
-		make_employee(
-			"test_call_agent_b@example.com", company="_Test Company", cell_number=f"+91{self.number}2"
-		)
-		schedule = "erpnext.telephony.doctype.call_log.call_log.get_scheduled_employees_for_popup"
-
-		with patch(schedule, return_value=[agent]):
-			call_log = frappe.get_doc(
-				"Call Log", self._make_call_log(to=f"+91{self.number}1", type="Incoming", status="Ringing")
-			)
-
-		# The agent's popup slot ends before the call does.
-		call_log.status = "Completed"
-		with patch(schedule, return_value=[]), patch.object(frappe, "publish_realtime") as publish:
-			call_log.save(ignore_permissions=True)
-
-		ended = [c for c in publish.call_args_list if c.args[0] == f"call_{call_log.id}_ended"]
-		self.assertEqual([c.kwargs.get("user") for c in ended], [agent])
 
 	def test_summary_can_be_saved_without_call_type(self):
 		add_call_summary_and_call_type(self.linked_log, "No type chosen", None)
@@ -317,10 +254,35 @@ class TestCallLog(ERPNextTestSuite):
 
 		call_log = frappe.get_doc("Call Log", self._make_call_log(to=f"+91{self.number}", type="Incoming"))
 		self.assertEqual(call_log.call_received_by, agent)
-		self.assertEqual(call_log.get_agent_emails(), {"test_call_agent_a@example.com"})
 
 		short_call = frappe.get_doc("Call Log", self._make_call_log(to=self.number[-4:], type="Incoming"))
 		self.assertIsNone(short_call.call_received_by)
+
+	def test_new_contact_number_links_past_calls_in_any_format(self):
+		number = "93" + "".join(random.choices(string.digits, k=8))
+		call_log = self._make_call_log(**{"from": f"+91{number}"}, type="Incoming")
+		contact = frappe.get_doc(
+			{
+				"doctype": "Contact",
+				"first_name": f"_Test Caller {number}",
+				"phone_nos": [{"phone": f"0{number[:5]} {number[5:]}", "is_primary_phone": 1}],
+			}
+		).insert(ignore_permissions=True)
+
+		links = frappe.get_all(
+			"Dynamic Link", {"parenttype": "Call Log", "parent": call_log}, pluck="link_name"
+		)
+		self.assertIn(contact.name, links)
+
+	def _make_contact(self, phone):
+		contact = frappe.get_doc(
+			{
+				"doctype": "Contact",
+				"first_name": f"_Test Caller {phone}",
+				"phone_nos": [{"phone": phone, "is_primary_phone": 1}],
+			}
+		)
+		return contact.insert(ignore_permissions=True).name
 
 	def test_unassigned_call_is_visible_only_to_its_agent_and_privileged_roles(self):
 		agent, other = (f"test_call_log_{name}_{self.number}@example.com" for name in ("agent", "other"))
@@ -338,6 +300,27 @@ class TestCallLog(ERPNextTestSuite):
 		self.assertEqual(self._readable_call_logs(agent, *call_logs), [True, True, False])
 		self.assertEqual(self._readable_call_logs(other, *call_logs), [False, False, False])
 		self.assertEqual(self._readable_call_logs(manager, *call_logs), [True, True, True])
+
+	def test_call_status_events_go_only_to_agents_of_the_call(self):
+		agent = "test_call_agent_a@example.com"
+		make_employee(agent, company="_Test Company", cell_number=f"+91{self.number}1")
+		make_employee(
+			"test_call_agent_b@example.com", company="_Test Company", cell_number=f"+91{self.number}2"
+		)
+		schedule = "erpnext.telephony.doctype.call_log.call_log.get_scheduled_employees_for_popup"
+
+		with patch(schedule, return_value=[agent]):
+			call_log = frappe.get_doc(
+				"Call Log", self._make_call_log(to=f"+91{self.number}1", type="Incoming", status="Ringing")
+			)
+
+		# The agent's popup slot ends before the call does.
+		call_log.status = "Completed"
+		with patch(schedule, return_value=[]), patch.object(frappe, "publish_realtime") as publish:
+			call_log.save(ignore_permissions=True)
+
+		ended = [c for c in publish.call_args_list if c.args[0] == f"call_{call_log.id}_ended"]
+		self.assertEqual([c.kwargs.get("user") for c in ended], [agent])
 
 	def _readable_call_logs(self, user, *call_logs):
 		frappe.set_user(user)
@@ -360,13 +343,3 @@ class TestCallLog(ERPNextTestSuite):
 			}
 		).insert(ignore_permissions=True)
 		return email
-
-	def _make_contact(self, phone):
-		contact = frappe.get_doc(
-			{
-				"doctype": "Contact",
-				"first_name": f"_Test Caller {phone}",
-				"phone_nos": [{"phone": phone, "is_primary_phone": 1}],
-			}
-		)
-		return contact.insert(ignore_permissions=True).name

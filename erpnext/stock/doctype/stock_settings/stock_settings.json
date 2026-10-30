@@ -45,7 +45,6 @@
   "pick_serial_and_batch_based_on",
   "allow_existing_serial_no",
   "use_serial_batch_fields",
-  "use_inline_serial_batch_editor",
   "disable_serial_no_and_batch_selector",
   "section_break_gnhq",
   "allow_negative_stock_for_batch",
@@ -121,7 +120,7 @@
    "fieldname": "valuation_method",
    "fieldtype": "Select",
    "label": "Default Valuation Method",
-   "options": "FIFO\nMoving Average\nLIFO\nStandard Cost"
+   "options": "FIFO\nMoving Average\nLIFO"
   },
   {
    "description": "The percentage you are allowed to receive or deliver more against the quantity ordered. For example, if you have ordered 100 units, and your Allowance is 10%, then you are allowed to receive 110 units.",
@@ -584,14 +583,6 @@
    "fieldtype": "Section Break"
   },
   {
-   "default": "1",
-   "depends_on": "eval:!doc.use_serial_batch_fields",
-   "description": "Show an inline editable table for serial numbers / batches on the item row instead of the dialog",
-   "fieldname": "use_inline_serial_batch_editor",
-   "fieldtype": "Check",
-   "label": "Use Inline Serial / Batch Editor"
-  },
-  {
    "default": "0",
    "depends_on": "enable_serial_and_batch_no_for_item",
    "description": "On submit of a Manufacture / Repack entry, map the raw material serial / batch nos that were not mapped in draft to the finished goods, in order",
@@ -606,7 +597,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-10-08 12:00:00.000000",
+ "modified": "2026-10-19 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Stock",
  "name": "Stock Settings",

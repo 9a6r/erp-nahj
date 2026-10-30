@@ -6,11 +6,6 @@ from frappe import _
 from frappe.query_builder.functions import Abs, Sum
 from frappe.utils import flt, getdate
 
-from erpnext.stock.doctype.company_restriction.company_restriction import (
-	get_allowed_companies_condition,
-	get_allowed_masters_condition,
-)
-
 
 def execute(filters=None):
 	if not filters:
@@ -94,9 +89,6 @@ def get_item_info(filters):
 	if conditions := get_item_group_condition(filters.get("item_group"), item):
 		query = query.where(conditions)
 
-	if condition := get_allowed_masters_condition(item.name, "Item"):
-		query = query.where(condition)
-
 	return query.run(as_dict=True)
 
 
@@ -132,7 +124,7 @@ def get_consumed_items(filters):
 		)
 		.groupby(sle.item_code)
 	)
-	query = get_filtered_query(filters, sle, query, "Stock Ledger Entry")
+	query = get_filtered_query(filters, sle, query)
 
 	consumed_items = query.run(as_dict=True)
 
@@ -148,18 +140,15 @@ def get_delivered_items(filters):
 		.where((sle.is_cancelled == 0) & (sle.voucher_type.isin(["Delivery Note", "Sales Invoice"])))
 		.groupby(sle.item_code)
 	)
-	query = get_filtered_query(filters, sle, query, "Stock Ledger Entry")
+	query = get_filtered_query(filters, sle, query)
 
 	return {item.item_code: -flt(item.delivered_qty) for item in query.run(as_dict=True)}
 
 
-def get_filtered_query(filters, table, query, doctype):
+def get_filtered_query(filters, table, query):
 	if filters.get("from_date") and filters.get("to_date"):
 		query = query.where(table.posting_date.between(filters["from_date"], filters["to_date"]))
 	else:
 		frappe.throw(_("From and To dates are required"))
-
-	if condition := get_allowed_companies_condition(table.company, doctype):
-		query = query.where(condition)
 
 	return query

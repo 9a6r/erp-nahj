@@ -6,7 +6,7 @@ from datetime import date, timedelta
 import frappe
 from frappe.utils import add_days, today
 
-from erpnext.stock.doctype.delivery_note.mapper import make_shipment
+from erpnext.stock.doctype.delivery_note.delivery_note import make_shipment
 from erpnext.tests.utils import ERPNextTestSuite
 
 
@@ -71,7 +71,7 @@ class TestShipment(ERPNextTestSuite):
 		self.assertNotIn("gender", get_company_contact("Administrator"))
 
 	def test_return_delivery_note_cannot_be_shipped(self):
-		from erpnext.stock.doctype.delivery_note.mapper import make_sales_return
+		from erpnext.stock.doctype.delivery_note.delivery_note import make_sales_return
 
 		delivery_note = create_test_delivery_note()
 		delivery_note.submit()

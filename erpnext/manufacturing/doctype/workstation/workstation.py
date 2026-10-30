@@ -167,28 +167,23 @@ class Workstation(Document):
 
 			if existing:
 				frappe.throw(
-					_("Row #{0}: Timings conflict with row {1}").format(d.idx, comma_and(existing)),
+					_("Row #{0}: Timings conflicts with row {1}").format(d.idx, comma_and(existing)),
 					OverlapError,
 				)
 
 	def update_bom_operation(self):
-		bom_list = frappe.get_all(
-			"BOM Operation",
-			# DocType is "Routing"; the original raw SQL used 'routing', which matched only via
-			# MariaDB's case-insensitive collation and silently matched nothing on Postgres.
-			filters={"workstation": self.name, "parenttype": "Routing"},
-			pluck="parent",
-			distinct=True,
+		bom_list = frappe.db.sql(
+			"""select DISTINCT parent from `tabBOM Operation`
+			where workstation = %s and parenttype = 'routing' """,
+			self.name,
 		)
 
-		if bom_list:
-			bom_op = frappe.qb.DocType("BOM Operation")
-			(
-				frappe.qb.update(bom_op)
-				.set(bom_op.hour_rate, self.hour_rate)
-				.set(bom_op.operating_cost, self.hour_rate * bom_op.time_in_mins / 60)
-				.where(bom_op.parent.isin(bom_list) & (bom_op.workstation == self.name))
-				.run()
+		for bom_no in bom_list:
+			frappe.db.sql(
+				"""update `tabBOM Operation`
+				set hour_rate = %s, operating_cost = %s * time_in_mins / 60
+				where parent = %s and workstation = %s""",
+				(self.hour_rate, self.hour_rate, bom_no[0], self.name),
 			)
 
 	def validate_workstation_holiday(self, schedule_date, skip_holiday_list_check=False):
@@ -204,7 +199,7 @@ class Workstation(Document):
 
 		return schedule_date
 
-	@frappe.whitelist(methods=["POST"])
+	@frappe.whitelist()
 	def start_job(self, job_card: str, from_time: DateTimeLikeObject, employee: str):
 		doc = self.get_open_job_card(job_card, "write")
 		doc.append("time_logs", {"from_time": from_time, "employee": employee})
@@ -212,7 +207,7 @@ class Workstation(Document):
 
 		return doc
 
-	@frappe.whitelist(methods=["POST"])
+	@frappe.whitelist()
 	def complete_job(self, job_card: str, qty: float, to_time: DateTimeLikeObject):
 		doc = self.get_open_job_card(job_card, "submit")
 		pending_qty = flt(qty)
@@ -244,6 +239,77 @@ class Workstation(Document):
 		return doc
 
 
+@frappe.whitelist()
+def get_job_cards(workstation: str):
+	if frappe.has_permission("Job Card", "read"):
+		jc_data = frappe.get_list(
+			"Job Card",
+			fields=[
+				"name",
+				"production_item",
+				"work_order",
+				"operation",
+				"total_completed_qty",
+				"for_quantity",
+				"process_loss_qty",
+				"finished_good",
+				"transferred_qty",
+				"status",
+				"expected_start_date",
+				"expected_end_date",
+				"time_required",
+				"wip_warehouse",
+				"skip_material_transfer",
+				"backflush_from_wip_warehouse",
+				"is_paused",
+				"manufactured_qty",
+			],
+			filters={
+				"workstation": workstation,
+				"is_subcontracted": 0,
+				"docstatus": ("<", 2),
+				"status": ["not in", ["Completed", "Stopped"]],
+			},
+			order_by="expected_start_date, expected_end_date",
+			limit=10,
+		)
+
+		job_cards = [row.name for row in jc_data]
+		time_logs = get_time_logs(job_cards)
+
+		allow_excess_transfer = frappe.db.get_single_value(
+			"Manufacturing Settings", "job_card_excess_transfer"
+		)
+
+		user_employee = frappe.db.get_value("Employee", {"user_id": frappe.session.user}, "name")
+
+		for row in jc_data:
+			if row.status == "Open":
+				row.status = "Not Started"
+
+			item_code = row.finished_good or row.production_item
+			row.fg_uom = frappe.get_cached_value("Item", item_code, "stock_uom")
+
+			row.status_colour = get_status_color(row.status)
+			row.job_card_link = f"""
+					<a class="ellipsis" data-doctype="Job Card" data-name="{row.name}" href="/app/job-card/{row.name}" title="" data-original-title="{row.name}">{row.name}</a>
+				"""
+
+			row.operation_link = f"""
+					<a class="ellipsis" data-doctype="Operation" data-name="{row.operation}" href="/app/operation/{row.operation}" title="" data-original-title="{row.operation}">{row.operation}</a>
+				"""
+			row.work_order_link = get_link_to_form("Work Order", row.work_order)
+
+			row.time_logs = time_logs.get(row.name, [])
+			row.make_material_request = False
+			if row.for_quantity > row.transferred_qty or allow_excess_transfer:
+				row.make_material_request = True
+
+			row.user_employee = user_employee
+
+		return jc_data
+
+
 def get_status_color(status):
 	color_map = {
 		"Pending": "blue",
@@ -251,9 +317,7 @@ def get_status_color(status):
 		"Submitted": "blue",
 		"Open": "gray",
 		"Closed": "green",
-		"Completed": "green",
 		"Work In Progress": "orange",
-		"To Manufacture": "purple",
 	}
 
 	return color_map.get(status, "blue")
@@ -336,7 +400,7 @@ def get_time_logs(job_cards):
 
 
 @frappe.whitelist()
-def get_default_holiday_list(company: str | None = None):
+def get_default_holiday_list(company=None):
 	if company:
 		if not frappe.has_permission("Company", "read"):
 			return []
@@ -376,7 +440,7 @@ def is_within_operating_hours(workstation, operation, from_datetime, to_datetime
 
 	frappe.throw(
 		_(
-			"Operation {0} is longer than any available working hours in workstation {1}, break down the operation into multiple operations"
+			"Operation {0} longer than any available working hours in workstation {1}, break down the operation into multiple operations"
 		).format(operation, workstation.name),
 		NotInWorkingHoursError,
 	)
@@ -386,15 +450,12 @@ def check_workstation_for_holiday(workstation, from_datetime, to_datetime):
 	holiday_list = frappe.db.get_value("Workstation", workstation, "holiday_list")
 	if holiday_list and from_datetime and to_datetime:
 		applicable_holidays = []
-		for holiday_date in frappe.get_all(
-			"Holiday",
-			filters={
-				"parent": holiday_list,
-				"holiday_date": ["between", [getdate(from_datetime), getdate(to_datetime)]],
-			},
-			pluck="holiday_date",
+		for d in frappe.db.sql(
+			"""select holiday_date from `tabHoliday` where parent = %s
+			and holiday_date between %s and %s """,
+			(holiday_list, getdate(from_datetime), getdate(to_datetime)),
 		):
-			applicable_holidays.append(formatdate(holiday_date))
+			applicable_holidays.append(formatdate(d[0]))
 
 		if applicable_holidays:
 			frappe.throw(
@@ -414,13 +475,12 @@ def get_workstations(**kwargs):
 	kwargs = frappe._dict(kwargs)
 
 	if not kwargs.plant_floor:
-		# The query this replaced compared `plant_floor` against the argument with `=`, which no
-		# row satisfies when it is empty; `get_list` would read the same filter as `IS NULL` and
-		# start returning floor-less workstations. Keep the original contract.
+		# The original compared `plant_floor` with `=`, which no row satisfies when it is empty; get_list
+		# would read that as IS NULL and start returning floor-less workstations. Keep the contract.
 		return []
 
-	# A list of filters, not a dict: `workstation` and `workstation_name` both constrain `name`
-	# and a dict would silently drop the first of them.
+	# A list, not a dict: `workstation` and `workstation_name` both constrain `name` and a dict would
+	# silently drop the first.
 	filters = [["plant_floor", "=", kwargs.plant_floor], ["disabled", "=", 0]]
 
 	if kwargs.workstation:
@@ -519,7 +579,7 @@ def validate_job_card(job_card: str, status: str):
 			)
 		else:
 			frappe.throw(
-				_("The job card {0} is in {1} state and you cannot complete it.").format(
+				_("The job card {0} is in {1} state and you cannot complete.").format(
 					job_card, current_status
 				)
 			)

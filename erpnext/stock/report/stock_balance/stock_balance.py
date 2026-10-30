@@ -49,12 +49,6 @@ def execute(filters: StockBalanceFilter | None = None):
 	return StockBalanceReport(filters).run()
 
 
-def execute_snapshot_report(filters: StockBalanceFilter | None = None):
-	from erpnext.stock.report.stock_balance.stock_balance_snapshot import execute as execute_from_snapshot
-
-	return execute_from_snapshot(filters)
-
-
 class StockBalanceReport:
 	def __init__(self, filters: StockBalanceFilter | None) -> None:
 		self.filters = filters
@@ -66,7 +60,6 @@ class StockBalanceReport:
 		self.columns = []
 		self.sle_entries: list[SLEntry] = []
 		self.item_warehouse_balances = {}
-		self.latest_valuation_rates = {}
 		self.set_company_currency()
 
 	def set_company_currency(self) -> None:
@@ -214,9 +207,6 @@ class StockBalanceReport:
 			.orderby(sle.creation)
 		)
 
-		self.sle_query = self.apply_filters(query, sle, item_table)
-
-	def apply_filters(self, query, sle, item_table):
 		query = self.apply_inventory_dimensions_filters(query, sle)
 		query = self.apply_warehouse_filters(query, sle)
 		query = self.apply_items_filters(query, item_table)
@@ -225,7 +215,7 @@ class StockBalanceReport:
 		if self.filters.get("company"):
 			query = query.where(sle.company == self.filters.get("company"))
 
-		return query
+		self.sle_query = query
 
 	def prepare_item_warehouse_map_for_current_period(self):
 		self.opening_vouchers = self.get_opening_vouchers()
@@ -238,6 +228,7 @@ class StockBalanceReport:
 		# HACK: This is required to avoid causing db query in flt
 		_system_settings = frappe.get_cached_doc("System Settings")
 		self.adjustment_netting = AdjustmentNetting()
+		self.latest_valuation_rates = {}
 		track_rates = self.shows_whole_pools
 		with frappe.db.unbuffered_cursor():
 			if not self.filters.get("show_stock_ageing_data"):
@@ -460,13 +451,15 @@ class StockBalanceReport:
 				{"reserved_stock": sre_details.get((report_data.item_code, report_data.warehouse), 0.0)}
 			)
 
-			if self.is_hidden_zero_stock(report_data):
+			if (
+				not self.filters.get("include_zero_stock_items")
+				and report_data
+				and report_data.bal_qty == 0
+				and report_data.bal_val == 0
+			):
 				continue
 
 			self.data.append(report_data)
-
-	def is_hidden_zero_stock(self, row) -> bool:
-		return not self.filters.get("include_zero_stock_items") and row.bal_qty == 0 and row.bal_val == 0
 
 	def get_sre_reserved_qty_details(self) -> dict:
 		from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
@@ -505,9 +498,29 @@ class StockBalanceReport:
 			qty_diff = flt(entry.actual_qty)
 			value_diff = flt(entry.stock_value_difference)
 
+		if entry.posting_date < self.from_date or entry.voucher_no in self.opening_vouchers.get(
+			entry.voucher_type, []
+		):
+			qty_dict.opening_qty += qty_diff
+			qty_dict.opening_val += value_diff
+
+		elif entry.posting_date >= self.from_date and entry.posting_date <= self.to_date:
+			if flt(qty_diff, self.float_precision) >= 0:
+				qty_dict.in_qty += qty_diff
+			else:
+				qty_dict.out_qty += abs(qty_diff)
+
+			if flt(value_diff, self.float_precision) >= 0:
+				qty_dict.in_val += value_diff
+			else:
+				qty_dict.out_val += abs(value_diff)
+
 		qty_dict.val_rate = entry.valuation_rate
-		self.add_to_balance(qty_dict, entry, qty_diff, value_diff)
-		self.add_to_item_warehouse_balance(balance, qty_dict, qty_diff, value_diff)
+		qty_dict.bal_qty += qty_diff
+		qty_dict.bal_val += value_diff
+		if balance is not qty_dict:
+			balance.bal_qty += qty_diff
+			balance.bal_val += value_diff
 
 	def is_reconciled_balance(self, entry) -> bool:
 		"""A write-off of stranded value moves nothing, so it is a plain delta. An Adjustment Entry
@@ -529,37 +542,8 @@ class StockBalanceReport:
 
 		return self.item_warehouse_balances[key]
 
-	def add_to_item_warehouse_balance(self, balance, qty_dict, qty_diff, value_diff):
-		if balance is not qty_dict:
-			balance.bal_qty += qty_diff
-			balance.bal_val += value_diff
-
-	def add_to_balance(self, qty_dict, entry, qty_diff, value_diff):
-		if entry.posting_date < self.from_date or entry.voucher_no in self.opening_vouchers.get(
-			entry.voucher_type, []
-		):
-			qty_dict.opening_qty += qty_diff
-			qty_dict.opening_val += value_diff
-
-		elif entry.posting_date >= self.from_date and entry.posting_date <= self.to_date:
-			if flt(qty_diff, self.float_precision) >= 0:
-				qty_dict.in_qty += qty_diff
-			else:
-				qty_dict.out_qty += abs(qty_diff)
-
-			if flt(value_diff, self.float_precision) >= 0:
-				qty_dict.in_val += value_diff
-			else:
-				qty_dict.out_val += abs(value_diff)
-
-		qty_dict.bal_qty += qty_diff
-		qty_dict.bal_val += value_diff
-
 	def initialize_data(self, group_by_key, entry):
-		self.item_warehouse_map[group_by_key] = self.get_initial_data(entry)
-
-	def get_initial_data(self, entry):
-		return frappe._dict(
+		self.item_warehouse_map[group_by_key] = frappe._dict(
 			{
 				"item_code": entry.item_code,
 				"warehouse": entry.warehouse,
@@ -649,7 +633,6 @@ class StockBalanceReport:
 				"fieldtype": "Link",
 				"options": "Item",
 				"width": 100,
-				"sticky": "True",
 			},
 			{"label": _("Item Name"), "fieldname": "item_name", "width": 150},
 			{
@@ -665,7 +648,6 @@ class StockBalanceReport:
 				"fieldtype": "Link",
 				"options": "Warehouse",
 				"width": 100,
-				"sticky": "True",
 			},
 		]
 
@@ -696,7 +678,6 @@ class StockBalanceReport:
 					"fieldtype": "Float",
 					"width": 100,
 					"convertible": "qty",
-					"sticky": "True",
 				},
 				{
 					"label": _("Balance Value"),
@@ -704,7 +685,6 @@ class StockBalanceReport:
 					"fieldtype": "Currency",
 					"width": 100,
 					"options": "Company:company:default_currency",
-					"sticky": "True",
 				},
 				{
 					"label": _("Opening Qty"),

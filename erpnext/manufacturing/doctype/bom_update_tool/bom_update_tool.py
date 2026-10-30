@@ -34,29 +34,35 @@ class BOMUpdateTool(Document):
 @frappe.whitelist()
 def enqueue_replace_bom(boms: dict | str | None = None, args: dict | str | None = None) -> "BOMUpdateLog":
 	"""Returns a BOM Update Log (that queues a job) for BOM Replacement."""
-	boms = frappe.parse_json(boms or args) or {}
-	if not isinstance(boms, dict) or not boms.get("current_bom") or not boms.get("new_bom"):
-		from erpnext.manufacturing.doctype.bom_update_log.bom_update_log import BOMMissingError
+	from erpnext.manufacturing.doctype.bom_update_log.bom_update_log import BOMMissingError
 
+	boms = boms or args
+	if isinstance(boms, str):
+		boms = json.loads(boms)
+
+	requested = boms or {}
+	if not requested.get("current_bom") or not requested.get("new_bom"):
 		frappe.throw(
 			msg=_("Please mention the Current and New BOM for replacement."),
 			title=_("Mandatory"),
 			exc=BOMMissingError,
 		)
-	boms["current_bom"] = cstr(boms["current_bom"])
-	if not boms["current_bom"] or not frappe.has_permission("BOM", "write", doc=boms["current_bom"]):
+
+	boms["current_bom"] = cstr(boms.get("current_bom"))
+	boms["new_bom"] = cstr(boms.get("new_bom"))
+	if not frappe.has_permission("BOM", "write", doc=boms["current_bom"]):
 		_refuse()
-	boms["new_bom"] = cstr(boms["new_bom"])
-	if not boms["new_bom"] or not frappe.has_permission("BOM", "read", doc=boms["new_bom"]):
+	if not frappe.has_permission("BOM", "read", doc=boms["new_bom"]):
 		_refuse()
+
 	from erpnext.manufacturing.doctype.bom_update_log.bom_updation_utils import get_ancestor_boms
 
 	rewritten_boms = sorted(
 		(set(get_ancestor_boms(boms["current_bom"])) | set(get_ancestor_boms(boms["new_bom"])))
 		- {boms["current_bom"], boms["new_bom"]}
 	)
-	for rewritten_bom in rewritten_boms:
-		require_permission("BOM", rewritten_bom, "write")
+	for parent in rewritten_boms:
+		require_permission("BOM", parent, "write")
 
 	update_log = create_bom_update_log(boms=boms)
 	return update_log

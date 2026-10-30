@@ -59,10 +59,6 @@
   "col_break5",
   "add_serial_batch_for_rejected_qty",
   "rejected_serial_and_batch_bundle",
-  "serial_batch_entries_section",
-  "serial_batch_entries_html",
-  "rejected_serial_batch_entries_section",
-  "rejected_serial_batch_entries_html",
   "section_break_jshh",
   "serial_no",
   "rejected_serial_no",
@@ -555,24 +551,6 @@
    "fieldname": "use_serial_batch_fields",
    "fieldtype": "Check",
    "label": "Use Serial No / Batch Fields"
-  },
-  {
-   "fieldname": "serial_batch_entries_section",
-   "fieldtype": "Section Break",
-   "label": "Serial / Batch Entries"
-  },
-  {
-   "fieldname": "serial_batch_entries_html",
-   "fieldtype": "HTML"
-  },
-  {
-   "fieldname": "rejected_serial_batch_entries_section",
-   "fieldtype": "Section Break",
-   "label": "Rejected Serial / Batch Entries"
-  },
-  {
-   "fieldname": "rejected_serial_batch_entries_html",
-   "fieldtype": "HTML"
   },
   {
    "depends_on": "eval:doc.use_serial_batch_fields === 1",

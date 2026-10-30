@@ -2,12 +2,10 @@
 # For license information, please see license.txt
 
 import frappe
-from frappe import _
 from frappe.contacts.address_and_contact import (
 	delete_contact_and_address,
 	load_address_and_contact,
 )
-from frappe.model.document import Document
 from frappe.model.mapper import get_mapped_doc
 
 from erpnext.crm.utils import CRMNote, copy_comments, link_communications, link_open_events
@@ -44,26 +42,6 @@ class Prospect(CRMNote):
 
 	def onload(self):
 		load_address_and_contact(self)
-
-	def validate(self):
-		self.validate_leads()
-
-	def validate_leads(self):
-		leads = [row.lead for row in self.leads]
-		for lead in set(leads):
-			if leads.count(lead) > 1:
-				frappe.throw(_("Lead {0} is added more than once").format(frappe.bold(lead)))
-
-			if other := frappe.db.get_value(
-				"Prospect Lead", {"lead": lead, "parent": ["!=", self.name]}, "parent"
-			):
-				self.throw_lead_in_other_prospect(lead, other)
-
-	def throw_lead_in_other_prospect(self, lead: str, other: str):
-		message = _("Lead {0} is already in another Prospect").format(frappe.bold(lead))
-		if frappe.has_permission("Prospect", "read", other):
-			message = _("Lead {0} is already in Prospect {1}").format(frappe.bold(lead), frappe.bold(other))
-		frappe.throw(message)
 
 	def on_update(self):
 		self.link_with_lead_contact_and_address()
@@ -109,25 +87,13 @@ class Prospect(CRMNote):
 					linked_doc.append("links", {"link_doctype": self.doctype, "link_name": self.name})
 					linked_doc.save(ignore_permissions=True)
 
-	def get_notification_email(self):
-		"""Hook to return the target email address for notifications."""
-		if self.prospect_owner:
-			return frappe.db.get_value("User", self.prospect_owner, "email")
-
-		return None
-
 
 @frappe.whitelist()
-def make_customer(source_name: str, target_doc: str | dict | Document | None = None):
-	validate_not_converted(source_name)
-
+def make_customer(source_name, target_doc=None):
 	def set_missing_values(source, target):
 		target.customer_type = "Company"
 		target.company_name = source.name
 		target.customer_group = source.customer_group or frappe.db.get_default("Customer Group")
-		# a single lead is converted with the prospect
-		if len(source.leads) == 1 and not frappe.db.exists("Customer", {"lead_name": source.leads[0].lead}):
-			target.lead_name = source.leads[0].lead
 
 	doclist = get_mapped_doc(
 		"Prospect",
@@ -146,24 +112,8 @@ def make_customer(source_name: str, target_doc: str | dict | Document | None = N
 	return doclist
 
 
-def validate_not_converted(prospect: str) -> None:
-	frappe.has_permission("Prospect", "read", prospect, throw=True)
-	frappe.has_permission("Customer", "create", throw=True)
-
-	customer = frappe.db.exists("Customer", {"prospect_name": prospect})
-	if not customer:
-		return
-
-	message = _("Prospect {0} is already converted to a Customer").format(frappe.bold(prospect))
-	if frappe.has_permission("Customer", "read", customer):
-		message = _("Prospect {0} is already converted to Customer {1}").format(
-			frappe.bold(prospect), frappe.bold(customer)
-		)
-	frappe.throw(message)
-
-
 @frappe.whitelist()
-def make_opportunity(source_name: str, target_doc: str | dict | Document | None = None):
+def make_opportunity(source_name, target_doc=None):
 	def set_missing_values(source, target):
 		target.opportunity_from = "Prospect"
 		target.customer_name = source.company_name
@@ -187,7 +137,7 @@ def make_opportunity(source_name: str, target_doc: str | dict | Document | None 
 
 
 @frappe.whitelist()
-def get_opportunities(prospect: str):
+def get_opportunities(prospect):
 	return frappe.get_list(
 		"Opportunity",
 		filters={"opportunity_from": "Prospect", "party_name": prospect},

@@ -18,7 +18,7 @@ class ProductionPlanSubAssemblyItem(Document):
 		actual_qty: DF.Float
 		bom_level: DF.Int
 		bom_no: DF.Link | None
-		description: DF.TextEditor | None
+		description: DF.SmallText | None
 		fg_warehouse: DF.Link | None
 		indent: DF.Int
 		item_name: DF.Data | None

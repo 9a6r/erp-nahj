@@ -4,8 +4,7 @@
 import frappe
 from frappe import _, qb
 from frappe.desk.reportview import build_match_conditions
-from frappe.query_builder import functions
-from frappe.query_builder.custom import ConstantColumn
+from frappe.query_builder import Column, functions
 from frappe.utils import add_days, date_diff, flt, get_first_day, get_last_day, getdate, rounded
 from pypika.terms import Bracket, LiteralValue
 
@@ -307,10 +306,8 @@ class Deferred_Revenue_and_Expense_Report:
 		Get all sales and purchase invoices which has deferred revenue/expense items
 		"""
 		gle = qb.DocType("GL Entry")
-		# a literal marker: real GL rows are "posted" (dummy/simulated future entries use "not").
-		# ConstantColumn renders a single-quoted string literal, valid on both backends -- a plain
-		# Column rendered as "posted", which MySQL reads as the string but postgres as an identifier.
-		posted = ConstantColumn("posted").as_("posted")
+		# column doesn't have an alias option
+		posted = Column("posted")
 
 		if self.filters.type == "Revenue":
 			invoice_doctype = "Sales Invoice"
@@ -338,15 +335,13 @@ class Deferred_Revenue_and_Expense_Report:
 			)
 			.select(
 				inv.name.as_("doc"),
-				# non-grouped columns are constant per grouped invoice / invoice item -> Max() keeps the
-				# GROUP BY valid on postgres while returning the same value MySQL picked.
-				functions.Max(inv.posting_date).as_("posting_date"),
+				inv.posting_date,
 				inv_item.name.as_("item"),
-				functions.Max(inv_item.item_name).as_("item_name"),
-				functions.Max(inv_item.service_start_date).as_("service_start_date"),
-				functions.Max(inv_item.service_end_date).as_("service_end_date"),
-				functions.Max(inv_item.base_net_amount).as_("base_net_amount"),
-				functions.Max(deferred_account_field).as_(deferred_account_field.name),
+				inv_item.item_name,
+				inv_item.service_start_date,
+				inv_item.service_end_date,
+				inv_item.base_net_amount,
+				deferred_account_field,
 				gle.posting_date.as_("gle_posting_date"),
 				functions.Sum(gle.debit).as_("debit"),
 				functions.Sum(gle.credit).as_("credit"),

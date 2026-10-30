@@ -3,9 +3,8 @@
 
 
 import frappe
-from frappe.query_builder.functions import Lower
 from frappe.rate_limiter import rate_limit
-from frappe.utils import escape_html, strip_html, validate_email_address
+from frappe.utils import escape_html, strip_html
 
 
 # nosemgrep: frappe-semgrep-rules.rules.security.guest-whitelisted-method -- reviewed: public Contact Us form; only parses the sender and sets lead ownership
@@ -18,7 +17,6 @@ def send_message(sender: str, message: str, subject: str = "Website Query"):
 		return
 
 	website_send_message(sender, message, subject)
-	sender = validate_email_address(sender, throw=True)
 
 	message = escape_html(message)
 	subject = strip_html(subject)
@@ -31,11 +29,15 @@ def send_message(sender: str, message: str, subject: str = "Website Query"):
 		# Meant to silently fail instead of throwing error.
 		return
 
-	lead = None
+	lead = customer = None
 	# a guest's address is unverified, so only a signed-in sender is matched to a customer
-	customer = (
-		get_customer_from_contact_email(sender) if frappe.session.user.lower() == sender.lower() else None
-	)
+	if frappe.session.user.lower() == sender.lower():
+		customer = frappe.db.sql(
+			"""select distinct dl.link_name from `tabDynamic Link` dl
+			left join `tabContact` c on dl.parent=c.name where dl.link_doctype='Customer'
+			and c.email_id = %s""",
+			sender,
+		)
 
 	if not customer:
 		lead = frappe.db.get_value("Lead", dict(email_id=sender))
@@ -73,17 +75,3 @@ def send_message(sender: str, message: str, subject: str = "Website Query"):
 		}
 	)
 	comm.insert(ignore_permissions=True)
-
-
-def get_customer_from_contact_email(sender: str):
-	dl = frappe.qb.DocType("Dynamic Link")
-	contact = frappe.qb.DocType("Contact")
-	return (
-		frappe.qb.from_(dl)
-		.left_join(contact)
-		.on(dl.parent == contact.name)
-		.select(dl.link_name)
-		.distinct()
-		.where((dl.link_doctype == "Customer") & (Lower(contact.email_id) == sender.lower()))
-		.run()
-	)

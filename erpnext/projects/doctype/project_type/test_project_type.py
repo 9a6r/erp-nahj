@@ -1,9 +1,10 @@
 # Copyright (c) 2017, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
+import unittest
 
 import frappe
 
-from erpnext.selling.doctype.sales_order.mapper import make_project
+from erpnext.selling.doctype.sales_order.sales_order import make_project
 from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 from erpnext.tests.utils import ERPNextTestSuite
 

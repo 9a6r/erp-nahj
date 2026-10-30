@@ -5,7 +5,6 @@ erpnext.PointOfSale.ItemDetails = class {
 		this.hide_images = settings.hide_images;
 		this.allow_rate_change = settings.allow_rate_change;
 		this.allow_discount_change = settings.allow_discount_change;
-		this.allow_warehouse_change = settings.allow_warehouse_change;
 		this.current_item = {};
 		this.frm_doctype = settings.frm_doctype;
 
@@ -301,7 +300,6 @@ erpnext.PointOfSale.ItemDetails = class {
 					filters: { company: this.events.get_frm().doc.company, is_group: 0 },
 				};
 			};
-			this.warehouse_control.df.read_only = !this.allow_warehouse_change;
 			this.warehouse_control.refresh();
 		}
 
@@ -369,19 +367,22 @@ erpnext.PointOfSale.ItemDetails = class {
 		if (this.serial_no_control && this.batch_no_control) {
 			const selected_serial_nos = this.serial_no_control
 				.get_value()
-				.split(/[\n,]/)
-				.map((number) => number.trim())
-				.filter(Boolean);
+				.split(`\n`)
+				.filter((s) => s);
 			if (!selected_serial_nos.length) return;
 
-			const { message: batch_serial_map } = await frappe.call({
-				method: "erpnext.selling.page.point_of_sale.point_of_sale.get_serials_by_batch",
-				args: {
-					item_code: this.current_item.item_code,
-					serial_nos: selected_serial_nos.join("\n"),
-					pos_profile: this.events.get_frm().doc.pos_profile,
-				},
+			// find batch nos of the selected serial no
+			const serials_with_batch_no = await frappe.db.get_list("Serial No", {
+				filters: { name: ["in", selected_serial_nos] },
+				fields: ["batch_no", "name"],
 			});
+			const batch_serial_map = serials_with_batch_no.reduce((acc, r) => {
+				if (!acc[r.batch_no]) {
+					acc[r.batch_no] = [];
+				}
+				acc[r.batch_no] = [...acc[r.batch_no], r.name];
+				return acc;
+			}, {});
 			// set current item's batch no and serial no
 			const batch_no = Object.keys(batch_serial_map)[0];
 			const batch_serial_nos = batch_serial_map[batch_no].join(`\n`);
@@ -448,7 +449,6 @@ erpnext.PointOfSale.ItemDetails = class {
 					batch_nos: this.current_item.batch_no || "",
 					posting_date: expiry_date,
 					for_doctype: this.frm_doctype,
-					as_numbers: true,
 				},
 			});
 

@@ -3,12 +3,11 @@
 
 
 import datetime
-from itertools import pairwise
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import cint, getdate, to_timedelta
+from frappe.utils import getdate
 
 
 class AppointmentBookingSettings(Document):
@@ -41,13 +40,8 @@ class AppointmentBookingSettings(Document):
 
 	def validate(self):
 		self.number_of_agents = len(self.agent_list)
-		self.validate_appointment_duration()
 		self.validate_appointment_scheduling()
 		self.validate_portal_booking()
-
-	def validate_appointment_duration(self):
-		if cint(self.appointment_duration) <= 0:
-			frappe.throw(_("Appointment Duration must be greater than 0 minutes."))
 
 	def validate_appointment_scheduling(self):
 		if not self.enable_scheduling:
@@ -70,27 +64,12 @@ class AppointmentBookingSettings(Document):
 			self.validate_from_and_to_time(from_time, to_time, record)
 			self.duration_is_divisible(from_time, to_time)
 
-		self.validate_no_overlapping_slots()
-
-	def validate_no_overlapping_slots(self):
-		slots = sorted(
-			self.availability_of_slots, key=lambda slot: (slot.day_of_week, to_timedelta(slot.from_time))
-		)
-		for previous, current in pairwise(slots):
-			same_day = previous.day_of_week == current.day_of_week
-			if same_day and to_timedelta(current.from_time) < to_timedelta(previous.to_time):
-				frappe.throw(
-					_("Availability slots for {0} cannot overlap: rows {1} and {2}").format(
-						_(current.day_of_week), previous.idx, current.idx
-					)
-				)
-
 	def validate_from_and_to_time(self, from_time, to_time, record):
 		if from_time > to_time:
 			err_msg = _("<b>From Time</b> cannot be later than <b>To Time</b> for {0}").format(
 				record.day_of_week
 			)
-			frappe.throw(err_msg)
+			frappe.throw(_(err_msg))
 
 	def duration_is_divisible(self, from_time, to_time):
 		timedelta = to_time - from_time

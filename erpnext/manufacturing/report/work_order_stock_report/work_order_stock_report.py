@@ -7,7 +7,6 @@ from frappe import _
 from frappe.query_builder.functions import IfNull, Sum
 from frappe.utils import flt
 
-from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_companies_condition
 from erpnext.stock.doctype.warehouse.warehouse import get_child_warehouses
 
 
@@ -168,18 +167,12 @@ def get_stock(items_by_order, filters):
 
 
 def get_work_orders():
-	work_order_filters = [
-		{
-			"docstatus": 1,
-			"status": ("in", ["Not Started", "In Process", "Stock Reserved", "Stock Partially Reserved"]),
-		}
-	]
-	if condition := get_allowed_companies_condition(frappe.qb.DocType("Work Order").company, "Work Order"):
-		work_order_filters.append(condition)
-
 	out = frappe.get_all(
 		"Work Order",
-		filters=work_order_filters,
+		filters={
+			"docstatus": 1,
+			"status": ("in", ["Not Started", "In Process", "Stock Reserved", "Stock Partially Reserved"]),
+		},
 		fields=["name", "status", "bom_no", "qty", "produced_qty", "planned_start_date"],
 		order_by="planned_start_date asc, name asc",
 	)

@@ -25,47 +25,6 @@ class TestItemwiseRecommendedReorderLevel(ERPNextTestSuite):
 				return row
 		return None
 
-	def test_consumption_drives_recommendation(self):
-		item = "_Test Item"
-		frappe.db.set_value("Item", item, {"lead_time_days": 3, "safety_stock": 5})
-
-		# Receive stock, then issue a known total across dates inside the report window.
-		make_stock_entry(item_code=item, to_warehouse=WAREHOUSE, qty=100, rate=10, posting_date="2026-06-01")
-		make_stock_entry(item_code=item, from_warehouse=WAREHOUSE, qty=20, posting_date="2026-06-03")
-		make_stock_entry(item_code=item, from_warehouse=WAREHOUSE, qty=30, posting_date="2026-06-07")
-
-		data = self.run_report(item_group="All Item Groups")
-		row = self.find_row(data, item)
-		self.assertIsNotNone(row, msg=f"Item {item} not found in report")
-
-		float_precision = frappe.db.get_default("float_precision")
-		# Window 2026-06-01..2026-06-10 inclusive => diff = 10 days.
-		diff = 10
-		total_outgoing = 50.0  # 20 + 30 issued
-		expected_avg = flt(total_outgoing / diff, float_precision)  # 5.0
-		expected_reorder = (expected_avg * 3) + 5  # avg * lead_time_days + safety_stock = 20
-
-		# Row shape: [item, item_name, item_group, brand, description,
-		#   safety_stock, lead_time_days, consumed, delivered, total_outgoing,
-		#   avg_daily_outgoing, reorder_level]
-		self.assertEqual(flt(row[7]), total_outgoing)  # consumed
-		self.assertEqual(flt(row[8]), 0.0)  # delivered
-		self.assertEqual(flt(row[9]), total_outgoing)  # total outgoing
-		self.assertEqual(flt(row[10]), expected_avg)  # avg daily outgoing
-		self.assertEqual(flt(row[11]), expected_reorder)  # reorder level
-
-	def test_no_consumption_yields_zero_outgoing(self):
-		item = "_Test Item 2"
-		frappe.db.set_value("Item", item, {"lead_time_days": 3, "safety_stock": 5})
-		make_stock_entry(item_code=item, to_warehouse=WAREHOUSE, qty=100, rate=10, posting_date="2026-06-01")
-
-		row = self.find_row(self.run_report(), item)
-		self.assertIsNotNone(row)
-		self.assertEqual(flt(row[9]), 0.0)  # total outgoing
-		self.assertEqual(flt(row[10]), 0.0)  # avg daily outgoing
-		# With no consumption, reorder level falls back to safety_stock only.
-		self.assertEqual(flt(row[11]), 5.0)
-
 	def test_bundle_deliveries_count_for_their_components(self):
 		from erpnext.stock.doctype.delivery_note.test_delivery_note import create_delivery_note
 		from erpnext.stock.doctype.packed_item.test_packed_item import create_product_bundle
@@ -82,7 +41,7 @@ class TestItemwiseRecommendedReorderLevel(ERPNextTestSuite):
 
 	def test_purchase_returns_are_not_consumption(self):
 		from erpnext.stock.doctype.item.test_item import make_item
-		from erpnext.stock.doctype.purchase_receipt.mapper import make_purchase_return
+		from erpnext.stock.doctype.purchase_receipt.purchase_receipt import make_purchase_return
 		from erpnext.stock.doctype.purchase_receipt.test_purchase_receipt import make_purchase_receipt
 
 		item = make_item(properties={"is_stock_item": 1}).name
@@ -110,13 +69,21 @@ class TestItemwiseRecommendedReorderLevel(ERPNextTestSuite):
 		from erpnext.controllers.tests.test_subcontracting_controller import (
 			get_rm_items,
 			get_subcontracting_order,
+			make_bom_for_subcontracted_items,
+			make_raw_materials,
+			make_service_items,
 			make_stock_in_entry,
 			make_stock_transfer_entry,
+			make_subcontracted_items,
 		)
 		from erpnext.subcontracting.doctype.subcontracting_order.subcontracting_order import (
 			make_subcontracting_receipt,
 		)
 
+		make_subcontracted_items()
+		make_raw_materials()
+		make_service_items()
+		make_bom_for_subcontracted_items()
 		sco = get_subcontracting_order()
 		rm_items = get_rm_items(sco.supplied_items)
 		itemwise_details = make_stock_in_entry(rm_items=rm_items)

@@ -6,8 +6,6 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
-from erpnext.stock.doctype.company_restriction.company_restriction import get_allowed_companies_condition
-
 
 def execute(filters=None):
 	columns, data = [], []
@@ -103,18 +101,12 @@ def get_planned_loss_percentage(boms):
 
 
 def get_work_order_query(fields):
-	wo = frappe.qb.DocType("Work Order")
-	query = frappe.qb.get_query(
+	return frappe.qb.get_query(
 		"Work Order",
 		fields=fields,
 		filters={"docstatus": 1, "produced_qty": [">", 0]},
 		ignore_permissions=False,
 	)
-
-	if condition := get_allowed_companies_condition(wo.company, "Work Order"):
-		query = query.where(condition)
-
-	return query
 
 
 def get_materials_by_work_order(work_orders):

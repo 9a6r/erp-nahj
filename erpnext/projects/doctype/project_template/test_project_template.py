@@ -1,26 +1,23 @@
 # Copyright (c) 2019, Frappe Technologies Pvt. Ltd. and Contributors
 # See license.txt
+import unittest
 
 import frappe
+from frappe.core.doctype.user_permission.test_user_permission import create_user
 
 from erpnext.projects.doctype.task.test_task import create_task
 from erpnext.tests.utils import ERPNextTestSuite
 
 
 class TestProjectTemplate(ERPNextTestSuite):
-	def test_dependency_task_must_be_in_template(self):
-		dependency = create_task("_Test PT Dependency", is_template=1)
-		dependent = create_task("_Test PT Dependent", is_template=1, depends_on=dependency.name)
+	def test_projects_manager_maintains_and_projects_user_reads_templates(self):
+		manager = create_user("project_template_manager@example.com", "Projects Manager").name
+		user = create_user("project_template_user@example.com", "Projects User").name
 
-		template = frappe.get_doc(doctype="Project Template", name="_Test PT Missing Dependency")
-		template.append("tasks", {"task": dependent.name})
-		# the dependency task is not in the template's task list
-		self.assertRaises(frappe.ValidationError, template.insert)
-
-		# adding the dependency task makes the template valid
-		template.append("tasks", {"task": dependency.name})
-		template.insert()
-		self.assertTrue(frappe.db.exists("Project Template", template.name))
+		for ptype in ("create", "read", "write"):
+			self.assertTrue(frappe.has_permission("Project Template", ptype, user=manager))
+		self.assertTrue(frappe.has_permission("Project Template", "read", user=user))
+		self.assertFalse(frappe.has_permission("Project Template", "write", user=user))
 
 	def test_disabled_template_is_refused_for_projects(self):
 		template = make_project_template("_Test Disabled Project Template")

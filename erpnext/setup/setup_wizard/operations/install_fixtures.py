@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 import frappe
-from frappe import N_ as _
 from frappe.desk.doctype.global_search_settings.global_search_settings import (
 	update_global_search_doctypes,
 )
@@ -17,6 +16,7 @@ from frappe.utils.nestedset import get_root_of
 
 from erpnext.accounts.doctype.account.account import RootNotEditable
 from erpnext.regional.address_template.setup import set_up_address_templates
+from erpnext.setup.utils import identity as _
 
 
 def read_lines(filename: str) -> list[str]:
@@ -98,12 +98,6 @@ def get_preset_records(country=None):
 			"name": _("Repack"),
 			"purpose": "Repack",
 			"is_standard": 1,
-		},
-		{
-			"doctype": "Stock Entry Type",
-			"name": _("Batch Split"),
-			"purpose": "Repack",
-			"batch_split": 1,
 		},
 		{"doctype": "Stock Entry Type", "name": "Disassemble", "purpose": "Disassemble", "is_standard": 1},
 		{
@@ -573,7 +567,6 @@ def create_bank_account(args):
 			}
 		)
 		try:
-			frappe.db.savepoint("create_bank_account")
 			doc = bank_account.insert()
 
 			if args.get("set_default"):
@@ -590,7 +583,6 @@ def create_bank_account(args):
 		except RootNotEditable:
 			frappe.throw(frappe._("Bank account cannot be named as {0}").format(args.get("bank_account")))
 		except frappe.DuplicateEntryError:
-			frappe.db.rollback(save_point="create_bank_account")  # preserve transaction in postgres
 			# bank account same as a CoA entry
 			pass
 

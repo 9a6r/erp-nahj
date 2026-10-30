@@ -13,7 +13,6 @@ from erpnext.controllers.subcontracting_controller import SubcontractingControll
 from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
 	cancel_stock_reservation_entries,
 )
-from erpnext.subcontracting.doctype.subcontracting_bom.subcontracting_bom import get_finished_good_bom
 
 
 class SubcontractingInwardOrder(SubcontractingController):
@@ -189,6 +188,15 @@ class SubcontractingInwardOrder(SubcontractingController):
 				)
 				si.amount = available_qty * si.rate
 
+				bom = (
+					frappe.db.get_value(
+						"Subcontracting BOM",
+						{"finished_good": item.name, "is_active": 1},
+						"finished_good_bom",
+					)
+					or item.default_bom
+				)
+
 				items.append(
 					{
 						"item_code": item.name,
@@ -200,7 +208,7 @@ class SubcontractingInwardOrder(SubcontractingController):
 						"qty": si.fg_item_qty,
 						"subcontracting_conversion_factor": conversion_factor,
 						"stock_uom": item.stock_uom,
-						"bom": get_finished_good_bom(item),
+						"bom": bom,
 						"sales_order_item": si.sales_order_item,
 					}
 				)
@@ -222,7 +230,7 @@ class SubcontractingInwardOrder(SubcontractingController):
 			if not any([rm.is_customer_provided_item for rm in raw_materials]):
 				frappe.throw(
 					_(
-						"At least one raw material for Finished Good Item {0} should be customer provided."
+						"Atleast one raw material for Finished Good Item {0} should be customer provided."
 					).format(frappe.bold(item.item_code))
 				)
 
@@ -340,7 +348,7 @@ class SubcontractingInwardOrder(SubcontractingController):
 			frappe.msgprint(_("{0} created").format(comma_and(doc_list)))
 
 	@frappe.whitelist()
-	def make_rm_stock_entry_inward(self, target_doc: Document | str | None = None):
+	def make_rm_stock_entry_inward(self, target_doc=None):
 		def calculate_qty_as_per_bom(rm_item):
 			data = frappe.get_value(
 				"Subcontracting Inward Order Item",
@@ -404,7 +412,7 @@ class SubcontractingInwardOrder(SubcontractingController):
 			return stock_entry.as_dict()
 
 	@frappe.whitelist()
-	def make_rm_return(self, target_doc: Document | str | None = None):
+	def make_rm_return(self, target_doc=None):
 		if target_doc and target_doc.get("items"):
 			target_doc.items = []
 
@@ -451,7 +459,7 @@ class SubcontractingInwardOrder(SubcontractingController):
 			return stock_entry.as_dict()
 
 	@frappe.whitelist()
-	def make_subcontracting_delivery(self, target_doc: Document | str | None = None):
+	def make_subcontracting_delivery(self, target_doc=None):
 		if target_doc and target_doc.get("items"):
 			target_doc.items = []
 
@@ -528,7 +536,7 @@ class SubcontractingInwardOrder(SubcontractingController):
 			return stock_entry.as_dict()
 
 	@frappe.whitelist()
-	def make_subcontracting_return(self, target_doc: Document | str | None = None):
+	def make_subcontracting_return(self, target_doc=None):
 		if target_doc and target_doc.get("items"):
 			target_doc.items = []
 

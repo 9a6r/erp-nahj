@@ -70,7 +70,6 @@ def get_lost_quotations(company: str, from_date: str, to_date: str) -> list[str]
 		"Quotation",
 		filters={
 			"status": "Lost",
-			"is_active": 1,
 			"docstatus": DocStatus.submitted(),
 			"company": company,
 			"transaction_date": ["between", [from_date, to_date]],

@@ -87,7 +87,7 @@ class TestPartySpecificItem(ERPNextTestSuite):
 		items = item_query(
 			doctype="Item", txt="", searchfield="name", start=0, page_len=20, filters=filters, as_dict=False
 		)
-		self.assertIn(item, flatten(items))
+		self.assertTrue(item in flatten(items))
 
 	def test_item_query_for_supplier(self):
 		supplier = "_Test Supplier With Template 1"
@@ -103,7 +103,7 @@ class TestPartySpecificItem(ERPNextTestSuite):
 		items = item_query(
 			doctype="Item", txt="", searchfield="name", start=0, page_len=20, filters=filters, as_dict=False
 		)
-		self.assertIn(item, flatten(items))
+		self.assertTrue(item in flatten(items))
 
 	def test_item_query_for_supplier_with_item_restricted_to_multiple_suppliers(self):
 		item = f"Party Specific Item {frappe.generate_hash(length=8)}"
