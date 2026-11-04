@@ -27,11 +27,12 @@ with tempfile.TemporaryDirectory() as directory:
             expected = {'db_host': 'database.example.test', 'db_name': 'nahj_test',
                         'db_user': 'nahj_user', 'db_password': 'unsaved-secret',
                         'admin': 'unsaved-admin-secret', 'ca': '/chosen/ca.pem',
-                        'destination': '/chosen/backups'}
+                        'destination': '/chosen/backups', 'backup_source': '/chosen/restore'}
             for key, value in expected.items():
                 original.fields[key].set_text(value)
-            language = original.controls[0]
-            language.set_selected(1)
+            assert original.restore_button.get_visible()
+            assert not original.recovery_activation.get_visible()
+            app.toggle_language()
             current = panel()
             assert app.settings['language'] == 'en'
             assert current.mode.get_selected() == 2

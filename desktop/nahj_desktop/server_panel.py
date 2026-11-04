@@ -105,15 +105,19 @@ class ServerPanel(Gtk.Box):
             for key in self.fields:
                 if key in profile:
                     self.fields[key].set_text(str(profile[key]))
-            self.form.set_visible(not profile.get('initialized', False))
+            self.form.set_visible(not profile.get('initialized', False) and profile.get('operation') != 'restore')
             if not profile.get('initialized'):
                 self.setup_button.set_label(self.t('استكمال إعداد الموقع المحفوظ', 'Resume saved site setup'))
             self.mode.set_sensitive(False)
             self.status.set_label(self.t('الموقع المحفوظ: ', 'Saved site: ') + profile['site'])
+            if profile.get('operation') == 'restore':
+                self.status.set_label(self.t('لم تكتمل الاستعادة. البيانات محفوظة للفحص. لا تستخدم إعداد موقع جديد فوقها؛ راجع دليل الاستعادة.',
+                    'Recovery is incomplete. Data was retained for inspection. Do not create a new site over it; see the recovery guide.'))
         self.has_profile = bool(profile)
         self.restore_button.set_visible(not profile)
         self.recovery_activation.set_visible(bool(profile and profile.get('recovery_pending') and profile.get('initialized')))
-        self.management.set_visible(bool(profile and profile.get('initialized')))
+        self.management.set_visible(bool(profile))
+        self.backup_button.set_sensitive(bool(profile and profile.get('initialized')))
 
     def field(self, key, ar, en, value='', secret=False, box=None):
         box = box if box is not None else self.form
@@ -264,9 +268,10 @@ class ServerPanel(Gtk.Box):
                 self.has_profile = True
                 self.restore_button.set_visible(False)
                 self.recovery_activation.set_visible(bool(profile.get('recovery_pending') and profile.get('initialized')))
-                self.management.set_visible(bool(profile.get('initialized')))
+                self.management.set_visible(True)
+                self.backup_button.set_sensitive(bool(profile.get('initialized')))
                 self.form.set_sensitive(True)
-                self.form.set_visible(not profile.get('initialized', False))
+                self.form.set_visible(not profile.get('initialized', False) and profile.get('operation') != 'restore')
                 if not profile.get('initialized'):
                     self.setup_button.set_label(self.t('استكمال إعداد الموقع المحفوظ', 'Resume saved site setup'))
                 self.mode.set_sensitive(False)
