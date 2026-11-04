@@ -1,0 +1,30 @@
+name: Nahj native Arch and Linux Zen
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/nahj-arch.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nahj-arch-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Boot Arch, install Zen, and run native lifecycle tests
+        run: bash desktop/tests/arch-vm.sh
+      - name: Keep test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nahj-arch-zen-evidence
+          path: ${{ runner.temp }}/nahj-arch/results/

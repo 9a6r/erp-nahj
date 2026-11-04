@@ -3,7 +3,7 @@ import hashlib
 import os
 from pathlib import Path
 import threading
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 import gi
 gi.require_version('Gtk', '4.0')
@@ -98,7 +98,61 @@ class Nahj(Gtk.Application):
         button.connect('clicked', lambda *_: self.show_settings())
         self.header.pack_end(button)
         self.header_buttons.append(button)
+        language_button = Gtk.Button(label=self.t('English', 'العربية'),
+            tooltip_text=self.t('تبديل لغة التطبيق وصفحة العمل', 'Switch application and workspace language'))
+        language_button.connect('clicked', lambda *_: self.toggle_language())
+        self.header.pack_end(language_button)
+        self.header_buttons.append(language_button)
         self.error_retry.set_tooltip_text(self.t('إعادة المحاولة', 'Retry'))
+
+    def toggle_language(self):
+        if getattr(self, 'server_operation', False) or getattr(self, 'language_operation', False):
+            return
+        if self.web and self.content.get_first_child() is self.web:
+            dialog = Gtk.AlertDialog(message=self.t('تبديل لغة صفحة العمل؟', 'Switch workspace language?'),
+                detail=self.t('ستُحفظ اللغة في حسابك وتُعاد الصفحة الحالية. احفظ أي تعديلات غير محفوظة قبل المتابعة.',
+                    'Your account language will be saved and the current page reloaded. Save any unsaved changes before continuing.'),
+                buttons=[self.t('إلغاء', 'Cancel'), self.t('تبديل اللغة', 'Switch language')],
+                cancel_button=0, default_button=0)
+            view = self.web
+            def chosen(dialog, result):
+                try:
+                    if dialog.choose_finish(result) != 1 or self.web is not view:
+                        return
+                except GLib.Error:
+                    return
+                self.change_workspace_language('en' if self.settings['language'] == 'ar' else 'ar')
+            dialog.choose(self.window, None, chosen)
+        elif getattr(self, 'language_switch', None):
+            self.language_switch()
+
+    def change_workspace_language(self, language):
+        from .language import change_script
+        view, origin = self.web, self.active_server
+        self.language_operation = True
+        self.hold()
+        def changed(view, result, *_):
+            self.language_operation = False
+            self.release()
+            try:
+                chosen = view.call_async_javascript_function_finish(result).to_string()
+                if self.web is not view or self.active_server != origin:
+                    return
+                if chosen != language:
+                    raise ValueError('Unconfirmed language')
+                updated = {**self.settings, 'language': language}
+                config.save(updated)
+            except (GLib.Error, OSError, ValueError):
+                self.show_error(self.t('تعذر حفظ اللغة. تأكد من تسجيل الدخول والاتصال بالخادم ثم أعد المحاولة.',
+                    'Could not save the language. Check your login and server connection, then retry.'))
+                return
+            self.settings = updated
+            self.update_header()
+            uri = urlsplit(view.get_uri() or origin + '/desk')
+            query = [(key, value) for key, value in parse_qsl(uri.query, keep_blank_values=True) if key != '_lang']
+            query.append(('_lang', language))
+            view.load_uri(urlunsplit((uri.scheme, uri.netloc, uri.path, urlencode(query), uri.fragment)))
+        view.call_async_javascript_function(change_script(origin, language), -1, None, None, None, None, changed, None)
 
     def clear(self):
         while child := self.content.get_first_child():
@@ -138,6 +192,7 @@ class Nahj(Gtk.Application):
         self.language.update_property([Gtk.AccessibleProperty.LABEL], [self.t('لغة التطبيق', 'Application language')])
         self.language.set_selected(1 if self.settings['language'] == 'en' else 0)
         self.language.connect('notify::selected', self.change_language)
+        self.language_switch = lambda: self.language.set_selected(0 if self.language.get_selected() else 1)
         card.append(self.language)
         self.graphics = Gtk.CheckButton(label=self.t('توافق الرسوميات للأجهزة الافتراضية', 'Graphics compatibility for virtual machines'))
         self.graphics.set_active(self.settings['graphics_compatibility'])

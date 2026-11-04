@@ -22,6 +22,7 @@ class ServerPanel(Gtk.Box):
         language.set_selected(1 if app.settings['language'] == 'en' else 0)
         language.update_property([Gtk.AccessibleProperty.LABEL], [self.t('لغة التطبيق', 'Application language')])
         self.language_handler = language.connect('notify::selected', self.change_language)
+        self.language = language
         self.append(language)
         self.controls.append(language)
         self.mode = Gtk.DropDown.new_from_strings([
@@ -65,6 +66,15 @@ class ServerPanel(Gtk.Box):
         self.external.append(note)
         self.setup_button = self.button('إعداد الموقع لأول مرة', 'Set up a new site', self.setup, self.form)
         self.setup_button.add_css_class('suggested-action')
+        self.recovery = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        self.append(self.recovery)
+        self.recovery.append(Gtk.Label(wrap=True, max_width_chars=58, label=self.t(
+            'استعادة نسخة موثوقة على جهاز جديد: اختر مجلد النسخة. تُستعاد الحسابات وكلمات مرورها، ويظل البريد والمهام التلقائية متوقفين حتى المراجعة.',
+            'Recover a trusted backup on a new device: select its folder. Accounts and passwords are restored; email and automatic tasks stay paused until review.')))
+        self.field('backup_source', 'مجلد النسخة الاحتياطية للاستعادة أو الفحص', 'Backup folder to restore or verify', box=self.recovery)
+        self.choose_file('backup_source', self.recovery, folder=True)
+        self.button('فحص سلامة النسخة', 'Verify backup integrity', self.verify_backup, self.recovery)
+        self.restore_button = self.button('استعادة إلى موقع محلي جديد', 'Restore to a new local site', self.restore, self.recovery)
         self.management = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.append(self.management)
         self.actions = Gtk.Box(spacing=8)
@@ -75,6 +85,9 @@ class ServerPanel(Gtk.Box):
         self.field('destination', 'مجلد تصدير النسخة الاحتياطية', 'Backup destination folder', box=self.management)
         self.choose_file('destination', self.management, folder=True)
         self.backup_button = self.button('نسخ القاعدة والملفات وإعداد الموقع', 'Back up database, files and site configuration', self.backup, self.management)
+        self.recovery_activation = self.button('إنهاء مراجعة الاستعادة وتفعيل المهام والبريد',
+            'Finish recovery review and enable tasks and email', self.activate_recovery, self.management)
+        self.recovery_activation.set_visible(False)
         self.spinner = Gtk.Spinner()
         self.append(self.spinner)
         self.status = Gtk.Label(wrap=True, selectable=True, max_width_chars=65, xalign=0)
@@ -92,13 +105,19 @@ class ServerPanel(Gtk.Box):
             for key in self.fields:
                 if key in profile:
                     self.fields[key].set_text(str(profile[key]))
-            self.form.set_visible(not profile.get('initialized', False))
+            self.form.set_visible(not profile.get('initialized', False) and profile.get('operation') != 'restore')
             if not profile.get('initialized'):
                 self.setup_button.set_label(self.t('استكمال إعداد الموقع المحفوظ', 'Resume saved site setup'))
             self.mode.set_sensitive(False)
             self.status.set_label(self.t('الموقع المحفوظ: ', 'Saved site: ') + profile['site'])
+            if profile.get('operation') == 'restore':
+                self.status.set_label(self.t('لم تكتمل الاستعادة. البيانات محفوظة للفحص. لا تستخدم إعداد موقع جديد فوقها؛ راجع دليل الاستعادة.',
+                    'Recovery is incomplete. Data was retained for inspection. Do not create a new site over it; see the recovery guide.'))
         self.has_profile = bool(profile)
-        self.management.set_visible(bool(profile and profile.get('initialized')))
+        self.restore_button.set_visible(not profile)
+        self.recovery_activation.set_visible(bool(profile and profile.get('recovery_pending') and profile.get('initialized')))
+        self.management.set_visible(bool(profile))
+        self.backup_button.set_sensitive(bool(profile and profile.get('initialized')))
 
     def field(self, key, ar, en, value='', secret=False, box=None):
         box = box if box is not None else self.form
@@ -173,6 +192,31 @@ class ServerPanel(Gtk.Box):
         destination = self.fields['destination'].get_text()
         self.operation(lambda server: server.backup(destination))
 
+    def verify_backup(self):
+        source = self.fields['backup_source'].get_text()
+        def verify(server):
+            report = server.verify_backup(source)
+            return self.t('النسخة سليمة، والموقع: ', 'Backup integrity verified, site: ') + report['manifest']['site']
+        self.operation(verify)
+
+    def restore(self):
+        values = {key: entry.get_text() for key, entry in self.fields.items()}
+        values.update(mode='local', language=self.app.settings['language'])
+        self.operation(lambda server: server.restore(values['backup_source'], values, values['archive']), connect=True)
+
+    def activate_recovery(self):
+        dialog = Gtk.AlertDialog(message=self.t('تفعيل الموقع المستعاد؟', 'Activate the restored site?'),
+            detail=self.t('راجع الأرصدة والمرفقات والمهام المؤجلة والتكاملات أولًا، وأوقف الموقع الأصلي لتجنب التشغيل المكرر. سيُسمح بإرسال البريد وتنفيذ المهام التلقائية.',
+                'Review balances, attachments, queued tasks and integrations first, and stop the original site to avoid duplicate processing. This enables outgoing email and automatic tasks.'),
+            buttons=[self.t('إلغاء', 'Cancel'), self.t('تفعيل', 'Activate')], cancel_button=0, default_button=0)
+        def chosen(dialog, result):
+            try:
+                if dialog.choose_finish(result) == 1:
+                    self.operation(lambda server: server.complete_recovery(), connect=True)
+            except GLib.Error:
+                pass
+        dialog.choose(self.app.window, None, chosen)
+
     def operation(self, action, connect=False):
         if getattr(self.app, 'server_operation', False):
             self.status.set_label(self.t('عملية أخرى قيد التنفيذ.', 'Another operation is running.'))
@@ -198,6 +242,8 @@ class ServerPanel(Gtk.Box):
                 'Stopping services; database and files will be retained…': 'جارٍ إيقاف الخدمات مع الاحتفاظ بالقاعدة والملفات…',
                 'Services stopped. Database and files retained.': 'توقفت الخدمات وحُفظت القاعدة والملفات.',
                 'Backing up database, public/private files and site configuration…': 'جارٍ نسخ القاعدة والملفات العامة والخاصة وإعداد الموقع…',
+                'Checking backup files, checksums and attachment paths…': 'جارٍ فحص ملفات النسخة وبصماتها ومسارات المرفقات…',
+                'Restoring into a new database; existing sites are not changed…': 'جارٍ الاسترجاع إلى قاعدة جديدة؛ المواقع الموجودة محفوظة…',
             }
             if self.app.settings['language'] == 'ar':
                 message = translations.get(message, message.replace('Downloading server:', 'تنزيل الخادم:').replace('ERPNext is ready:', 'النظام جاهز:').replace('Backup exported:', 'حُفظت النسخة الاحتياطية:'))
@@ -220,9 +266,12 @@ class ServerPanel(Gtk.Box):
             try:
                 profile = Server().profile()
                 self.has_profile = True
-                self.management.set_visible(bool(profile.get('initialized')))
+                self.restore_button.set_visible(False)
+                self.recovery_activation.set_visible(bool(profile.get('recovery_pending') and profile.get('initialized')))
+                self.management.set_visible(True)
+                self.backup_button.set_sensitive(bool(profile.get('initialized')))
                 self.form.set_sensitive(True)
-                self.form.set_visible(not profile.get('initialized', False))
+                self.form.set_visible(not profile.get('initialized', False) and profile.get('operation') != 'restore')
                 if not profile.get('initialized'):
                     self.setup_button.set_label(self.t('استكمال إعداد الموقع المحفوظ', 'Resume saved site setup'))
                 self.mode.set_sensitive(False)
@@ -252,6 +301,7 @@ def show(app, draft=None, selected=None):
     app.error_banner.set_visible(False)
     scroll = Gtk.ScrolledWindow(vexpand=True, hexpand=True)
     panel = ServerPanel(app)
+    app.language_switch = lambda: panel.language.set_selected(0 if panel.language.get_selected() else 1)
     if draft is not None:
         for key, value in draft.items():
             if key in panel.fields:

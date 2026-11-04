@@ -122,6 +122,12 @@ def compose_spec(profile, root):
     services['initializer'] = service('initializer', ['true'])
     services['initializer']['profiles'] = ['setup']
     services['initializer']['volumes'] = [*common['volumes'], str(root / 'provision.py') + ':/run/nahj/provision.py:ro']
+    if profile.get('operation') == 'restore':
+        services['initializer']['volumes'] += [
+            str(root / 'recover.py') + ':/run/nahj/recover.py:ro',
+            str(root / 'backup.py') + ':/run/nahj/backup.py:ro',
+            str(root / 'recovery-input' / 'backup') + ':/run/nahj/backup:ro',
+        ]
     services['frontend']['environment'] = {
         'BACKEND': 'backend:8000', 'SOCKETIO': 'websocket:9000',
         'FRAPPE_SITE_NAME_HEADER': profile['site'], 'PROXY_READ_TIMEOUT': '300',
@@ -192,6 +198,9 @@ class Server:
         (self.root / 'provision.py').chmod(0o644)
         private_write(self.root / 'runtime.py', Path(__file__).with_name('runtime.py').read_text())
         (self.root / 'runtime.py').chmod(0o644)
+        for name in ('backup.py', 'recover.py'):
+            private_write(self.root / name, Path(__file__).with_name(name).read_text())
+            (self.root / name).chmod(0o644)
         private_write(self.root / 'compose.json', json.dumps(compose_spec(profile, self.root), indent=2))
 
     def backend(self):
@@ -286,7 +295,8 @@ class Server:
         if not p.get('initialized'):
             raise ServerError('Site initialization did not complete. Inspect the setup error; existing data has been preserved.')
         self.progress('Starting services…')
-        self.compose('up', '-d')
+        services = ('redis-cache', 'redis-queue', 'db', 'backend', 'websocket', 'frontend') if p.get('recovery_pending') else ()
+        self.compose('up', '-d', *services)
         self.progress('Waiting for ERPNext to respond…')
         origin = f"http://127.0.0.1:{p['port']}"
         deadline = time.monotonic() + 300
@@ -313,6 +323,8 @@ class Server:
         with self.locked():
             p = self.profile()
             self.require_supported_profile(p)
+            if p.get('operation') == 'restore':
+                raise ServerError('Recovery did not complete. Data was retained; do not resume it as a new installation.')
             if p.get('initialized'):
                 return self._start()
             active = self.run(['podman', 'ps', '--filter', 'label=io.nahj.project=' + p['project'],
@@ -340,6 +352,92 @@ class Server:
 
     def status(self):
         return self.compose('ps', '--all')
+
+    def verify_backup(self, source):
+        from .backup import inspect_backup, BackupError
+        self.progress('Checking backup files, checksums and attachment paths…')
+        try:
+            return inspect_backup(source, IMAGE_ID)
+        except BackupError as error:
+            raise ServerError(str(error)) from None
+
+    def restore(self, source, options, archive=''):
+        """Restore to a fresh local project only. Existing sites are never replaced."""
+        p = validate(options)
+        if p['mode'] != 'local':
+            raise ServerError('Automatic recovery requires a new local MariaDB site.')
+        with self.locked():
+            if (self.root / 'profile.json').exists():
+                raise ServerError('A site is already configured or partially initialized. Data was retained; do not overwrite it.')
+            self.verify_backup(source)
+            if self.run(['podman', 'info', '--format', '{{.Host.Security.Rootless}}']).strip() != 'true':
+                raise ServerError('Run Nahj with rootless Podman as your normal desktop user.')
+            if not archive:
+                from .server_download import download
+                archive = download(self.progress)
+            p['image'] = self.import_image(archive)
+            # Private outer directory protects the host copy; the mounted inner
+            # folder must be readable by the unprivileged Frappe container user.
+            staging = self.root / 'recovery-input'
+            staging.mkdir(mode=0o700)
+            try:
+                snapshot = staging / 'backup'
+                shutil.copytree(Path(source).expanduser(), snapshot, symlinks=True)
+                self.verify_backup(snapshot)
+                snapshot.chmod(0o755)
+                for file in snapshot.iterdir():
+                    file.chmod(0o644)
+                p.update(project='nahj-' + uuid.uuid4().hex[:12], initialized=False,
+                         operation='restore', recovery_pending=True)
+                password = secrets.token_urlsafe(32)
+                self.redactions = [password]
+                private_write(self.root / 'db-password', password)
+                private_write(self.root / 'profile.json', json.dumps(p))
+                self.write_compose(p)
+                self.progress('Restoring into a new database; existing sites are not changed…')
+                self.compose('up', '-d', 'redis-cache', 'redis-queue', 'db')
+                self.compose('--profile', 'setup', 'run', '--rm', '-T', 'initializer',
+                             'env/bin/python', '/run/nahj/recover.py',
+                             payload=json.dumps({**p, 'password': password}), timeout=3600)
+                p['initialized'] = True
+                p.pop('operation')
+                private_write(self.root / 'profile.json', json.dumps(p))
+                self.write_compose(p)
+                return self._start()
+            finally:
+                shutil.rmtree(staging)
+
+    def complete_recovery(self):
+        """Explicit operator action after reviewing records and retiring the old site."""
+        with self.locked():
+            p = self.profile()
+            self.require_supported_profile(p)
+            if not p.get('initialized') or not p.get('recovery_pending'):
+                raise ServerError('No completed recovery is waiting for activation.')
+            script = '''import json, os, sys
+from pathlib import Path
+import frappe
+site = json.load(sys.stdin)['site']
+os.chdir('/home/frappe/frappe-bench/sites')
+for path in (Path('common_site_config.json'), Path(site, 'site_config.json')):
+    config = json.loads(path.read_text())
+    config.update(pause_scheduler=False, mute_emails=False)
+    path.write_text(json.dumps(config))
+    path.chmod(0o600)
+frappe.init(site, sites_path='.')
+frappe.connect()
+frappe.db.set_single_value('System Settings', 'enable_scheduler', 1)
+frappe.db.commit()
+frappe.clear_cache()
+frappe.destroy()
+'''
+            self.run(['podman', 'exec', '-i', self.backend(), 'env/bin/python', '-c', script],
+                     payload=json.dumps({'site': p['site']}))
+            p['recovery_pending'] = False
+            private_write(self.root / 'profile.json', json.dumps(p))
+            # Existing web workers may cache site configuration.
+            self.compose('restart', 'backend', 'websocket')
+            return self._start()
 
     def backup(self, destination):
         """Export only this invocation's files from the backend selected by labels."""

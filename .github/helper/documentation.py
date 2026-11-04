@@ -1,3 +1,4 @@
+import os
 import sys
 from urllib.parse import urlparse
 
@@ -21,6 +22,12 @@ def is_valid_url(url: str) -> bool:
 
 
 def is_documentation_link(word: str) -> bool:
+	word = word.strip("()[]<>,")
+	# Nahj keeps its user and validation documentation beside the desktop source.
+	if word.startswith("desktop/") and word.endswith(".md") and ".." not in word:
+		from pathlib import Path
+
+		return Path(word).is_file()
 	if not word.startswith("http") or not is_valid_url(word):
 		return False
 
@@ -41,7 +48,9 @@ def contains_documentation_link(body: str) -> bool:
 
 
 def check_pull_request(number: str) -> "tuple[int, str]":
-	response = requests.get(f"https://api.github.com/repos/frappe/erpnext/pulls/{number}")
+	repository = os.environ.get("GITHUB_REPOSITORY", "frappe/erpnext")
+	headers = {"Authorization": "Bearer " + os.environ["GITHUB_TOKEN"]} if os.environ.get("GITHUB_TOKEN") else {}
+	response = requests.get(f"https://api.github.com/repos/{repository}/pulls/{number}", headers=headers, timeout=30)
 	if not response.ok:
 		return 1, "Pull Request Not Found! ⚠️"
 

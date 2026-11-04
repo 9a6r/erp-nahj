@@ -1,6 +1,22 @@
 """Arabic user-facing lifecycle errors; retain unknown technical diagnostics."""
 
 ARABIC = {
+    'Backup metadata is too large.': 'حجم بيانات وصف النسخة الاحتياطية أكبر من المسموح.',
+    'Invalid backup metadata.': 'بيانات وصف النسخة الاحتياطية غير صالحة.',
+    'Unsafe attachment path or file type in backup.': 'تحتوي النسخة على مسار مرفق أو نوع ملف غير آمن.',
+    'Select a backup folder containing manifest.json.': 'اختر مجلد النسخة الاحتياطية الذي يحتوي على manifest.json.',
+    'Backup must contain only ordinary files, without symbolic links.': 'يجب أن تضم النسخة ملفات عادية فقط، دون روابط رمزية.',
+    'Backup format or server image differs from this release. A tested migration is required.': 'صيغة النسخة أو صورة خادمها تختلف عن هذا الإصدار. يلزم نقل مختبر ومتوافق.',
+    'Invalid backup site name.': 'اسم الموقع المسجل في النسخة الاحتياطية غير صالح.',
+    'Invalid backup checksum manifest.': 'قائمة بصمات ملفات النسخة الاحتياطية غير صالحة.',
+    'Backup files differ from the checksum manifest.': 'ملفات النسخة لا تطابق قائمة الملفات المسجلة في البصمات.',
+    'Backup must contain exactly one public files archive.': 'يجب أن تحتوي النسخة على أرشيف واحد للملفات العامة.',
+    'Encrypted or unsupported database backup. Decrypt a trusted copy with Frappe first.': 'نسخة القاعدة مشفرة أو بصيغة غير مدعومة. فك تشفير نسخة موثوقة بأدوات Frappe أولًا.',
+    'Only MariaDB backups can be restored by this release.': 'يدعم هذا الإصدار استعادة قواعد MariaDB فقط.',
+    'Duplicate attachment path in backup.': 'تتضمن النسخة مسار مرفق مكررًا.',
+    'Automatic recovery requires a new local MariaDB site.': 'تتطلب الاستعادة التلقائية موقعًا محليًا جديدًا بقاعدة MariaDB.',
+    'Recovery did not complete. Data was retained; do not resume it as a new installation.': 'لم تكتمل الاستعادة. البيانات محفوظة؛ لا تستكملها بوصفها تثبيتًا جديدًا.',
+    'No completed recovery is waiting for activation.': 'لا يوجد موقع مستعاد مكتمل ينتظر التفعيل.',
     'Port 8000 is reserved for the application backend. Choose another local HTTP port.': 'المنفذ 8000 محجوز لخدمة التطبيق الداخلية. اختر منفذًا محليًا آخر.',
     'Select local MariaDB or external MariaDB.': 'اختر قاعدة MariaDB محلية أو خارجية.',
     'Enter a valid site hostname.': 'أدخل اسم موقع صالحًا بحروف إنجليزية صغيرة وأرقام ونقاط أو شرطات.',
@@ -45,6 +61,9 @@ def translate_error(message):
         ('Command failed (', 'فشل الأمر ('),
         ('Incomplete backup: missing ', 'النسخة الاحتياطية غير مكتملة؛ الملف المطلوب غير موجود: '),
         ('Backup contains an empty file: ', 'تحتوي النسخة الاحتياطية على ملف فارغ: '),
+        ('Backup checksum mismatch: ', 'بصمة الملف لا تطابق النسخة: '),
+        ('Backup must contain exactly one ', 'يجب أن تحتوي النسخة على ملف واحد من النوع: '),
+        ('Cannot read complete backup: ', 'تعذر قراءة النسخة كاملة: '),
     ):
         if message.startswith(prefix):
             return translated + message[len(prefix):]

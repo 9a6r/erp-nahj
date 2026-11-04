@@ -26,6 +26,24 @@ X11 captures need a window manager: without one, GTK can position an RTL window 
 
 For Wayland, run the smoke test inside a compositor session with `GDK_BACKEND=wayland`. A headless Weston session can use its `headless` backend and `pixman` renderer. This checks the Wayland path; it does not measure hardware performance or cover every compositor.
 
+`tests/smoke_language.py` executes the actual WebKit async JavaScript API against
+a local authenticated API fixture, checks Arabic/English persistence and CSRF,
+and verifies that a rejected API request preserves preferences and the page.
+Changing only `_lang` in the URL is insufficient: Frappe Desk boot loads the
+account's saved language.
+
+The `Nahj native Arch and Linux Zen` workflow runs `tests/arch-vm.sh` on a
+disposable Ubuntu CI host. It downloads an official versioned Arch cloud image,
+checks its published SHA256, installs the signed Arch packages, then explicitly
+boots the installed Zen kernel. The guest tests rootless Podman, X11 and Wayland
+WebKit with sandboxing enabled, native downloads, language changes, pacman
+install/reinstall/removal and data persistence across a full VM reboot. It keeps
+environment/package versions and test logs as CI artifacts; no claim of success
+is made until that run passes. It does not test the full ERP service topology or
+hardware acceleration, and Weston is not a substitute for testing every Vitreus,
+Hyprland, niri or pleamar-wm configuration. Never run the VM provisioning scripts
+against a production host or existing user VM.
+
 ## Package checks
 
 ```bash

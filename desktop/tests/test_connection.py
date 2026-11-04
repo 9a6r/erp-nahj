@@ -1,5 +1,11 @@
 import threading
+import shutil
+import ssl
+import subprocess
+import tempfile
+from pathlib import Path
 import unittest
+from unittest.mock import patch
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from nahj_desktop.connection import probe, ConnectionFailure
 
@@ -36,3 +42,44 @@ class ConnectionTests(unittest.TestCase):
                 with self.assertRaises(ConnectionFailure) as error:
                     probe(self.origin)
                 self.assertEqual(str(error.exception), code)
+
+
+@unittest.skipUnless(shutil.which('openssl'), 'OpenSSL is required for real TLS verification tests')
+class TLSConnectionTests(unittest.TestCase):
+    def test_trusted_tls_works_and_untrusted_or_wrong_hostname_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            certificate, key = root / 'certificate.pem', root / 'key.pem'
+            subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-sha256', '-nodes',
+                            '-days', '1', '-subj', '/CN=localhost',
+                            '-addext', 'subjectAltName=DNS:localhost',
+                            '-addext', 'basicConstraints=critical,CA:TRUE',
+                            '-addext', 'keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign',
+                            '-keyout', str(key), '-out', str(certificate)],
+                           check=True, capture_output=True)
+            server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+            tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            tls.load_cert_chain(certificate, key)
+            server.socket = tls.wrap_socket(server.socket, server_side=True)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            Handler.mode = 'ok'
+            origin = f'https://localhost:{server.server_port}'
+            try:
+                with self.assertRaises(ConnectionFailure) as error:
+                    probe(origin)
+                self.assertEqual(str(error.exception), 'tls')
+                trusted = ssl.create_default_context(cafile=str(certificate))
+                # A test-only trust root, with normal certificate and hostname
+                # verification. Production uses the operating system trust store.
+                with patch('ssl._create_default_https_context', return_value=trusted):
+                    self.assertEqual(probe(origin), origin)
+                    with self.assertRaises(ConnectionFailure) as error:
+                        probe(f'https://127.0.0.1:{server.server_port}')
+                    self.assertEqual(str(error.exception), 'tls')
+                self.assertTrue(trusted.check_hostname)
+                self.assertEqual(trusted.verify_mode, ssl.CERT_REQUIRED)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join()
