@@ -198,10 +198,41 @@ def after_reboot():
     report('PASS: original and restored full ERP stacks retain business data and secrets after a complete Zen VM reboot')
 
 
+def diagnostics():
+    """Print service state and routing only, never configs, environment or data."""
+    for name in ('original', 'restored'):
+        server = controller(name)
+        if not (server.root / 'profile.json').is_file():
+            continue
+        try:
+            project = server.profile()['project']
+            ids = server.run(['podman', 'ps', '-aq', '--filter', 'label=io.podman.compose.project=' + project]).split()
+            if not ids:
+                continue
+            containers = json.loads(server.run(['podman', 'inspect', *ids]))
+            for container in containers:
+                labels = container['Config']['Labels']
+                service = labels.get('com.docker.compose.service') or labels.get('io.podman.compose.service')
+                report(json.dumps({'project': name, 'service': service,
+                    'status': container['State']['Status'], 'exit_code': container['State']['ExitCode'],
+                    'oom_killed': container['State'].get('OOMKilled'),
+                    'addresses': [v.get('IPAddress') for v in container['NetworkSettings']['Networks'].values()]}))
+                if service == 'backend' and container['State']['Running']:
+                    output = server.run(['podman', 'exec', container['Id'], 'env/bin/python', '-c',
+                        "import urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/api/method/ping',timeout=10); print(r.status, r.read(100))"], timeout=20)
+                    report('Direct backend ping: ' + output)
+        except Exception as error:
+            report('Diagnostic unavailable: ' + type(error).__name__)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('phase', choices=('prepare', 'after-reboot'))
     args = parser.parse_args()
     if os.getuid() == 0 or 'zen' not in os.uname().release:
         raise SystemExit('Run as an ordinary user in the disposable Arch/Zen VM')
-    (prepare if args.phase == 'prepare' else after_reboot)()
+    try:
+        (prepare if args.phase == 'prepare' else after_reboot)()
+    except Exception:
+        diagnostics()
+        raise

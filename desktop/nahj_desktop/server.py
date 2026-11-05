@@ -442,6 +442,10 @@ frappe.destroy()
             private_write(self.root / 'profile.json', json.dumps(p))
             # Existing web workers may cache site configuration.
             self.compose('restart', 'backend', 'websocket')
+            # Rootless container restart can reassign service addresses. Nginx
+            # resolves its upstream names at startup, so refresh it only after
+            # both upstream containers have rejoined the private network.
+            self.compose('restart', 'frontend')
             return self._start()
 
     def backup(self, destination):
