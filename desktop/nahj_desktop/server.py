@@ -182,7 +182,12 @@ class Server:
 
     def profile(self):
         try:
-            return json.loads((self.root / 'profile.json').read_text())
+            profile = json.loads((self.root / 'profile.json').read_text())
+            # Podman can report the same verified digest without its algorithm
+            # prefix. Normalize only this exact release, never another image.
+            if profile.get('image') == IMAGE_ID.removeprefix('sha256:'):
+                profile['image'] = IMAGE_ID
+            return profile
         except (OSError, ValueError):
             raise ServerError('No managed site is configured. Set up a site first.') from None
 
@@ -234,7 +239,7 @@ class Server:
             raise ServerError('Imported image identity does not match this release.')
         if info.get('Architecture') != 'amd64':
             raise ServerError('This server release requires an amd64 machine.')
-        return info['Id']
+        return IMAGE_ID
 
     def setup(self, options, archive, admin_password, db_password=''):
         p = validate(options)

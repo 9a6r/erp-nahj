@@ -61,6 +61,12 @@ class ServerTests(unittest.TestCase):
         with patch('nahj_desktop.server.IMAGE_SHA256', digest), patch.object(self.server, 'run', side_effect=[ServerError('missing'), '', info]) as command:
             self.assertEqual(self.server.import_image(archive), IMAGE_ID)
             self.assertEqual(command.call_args_list[1].args[0], ['podman', 'load', '--input', str(archive)])
+        bare_info = json.dumps([{'Id': IMAGE_ID.removeprefix('sha256:'), 'Architecture': 'amd64'}])
+        with patch('nahj_desktop.server.IMAGE_SHA256', digest), patch.object(self.server, 'run', return_value=bare_info):
+            self.assertEqual(self.server.import_image(archive), IMAGE_ID)
+        private_write(self.server.root / 'profile.json', json.dumps({**self.profile, 'image': IMAGE_ID.removeprefix('sha256:')}))
+        self.assertEqual(self.server.profile()['image'], IMAGE_ID)
+        self.server.require_supported_profile(self.server.profile())
         with patch('nahj_desktop.server.IMAGE_SHA256', digest), patch.object(self.server, 'run', return_value=json.dumps([{'Id': 'sha256:wrong', 'Architecture': 'amd64'}])):
             with self.assertRaisesRegex(ServerError, 'identity'):
                 self.server.import_image(archive)
