@@ -12,6 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('output', type=Path)
 parser.add_argument('--language', choices=('ar', 'en'), default='ar')
 parser.add_argument('--page', choices=('connection', 'local', 'external'), default='connection')
+parser.add_argument('--scroll-bottom', action='store_true', help='Capture the lower controls of a scrollable settings page')
 args = parser.parse_args()
 args.output.parent.mkdir(parents=True, exist_ok=True)
 with tempfile.TemporaryDirectory() as root:
@@ -47,6 +48,13 @@ with tempfile.TemporaryDirectory() as root:
                 panel = panel.get_child()
             panel.mode.set_selected(2 if args.page == 'external' else 1)
     app.connect('activate', select_page)
-    app.connect('activate', lambda *_: GLib.timeout_add_seconds(5, capture))
+    def prepare_capture():
+        if args.scroll_bottom:
+            scroll = app.content.get_first_child()
+            adjustment = scroll.get_vadjustment()
+            adjustment.set_value(max(0, adjustment.get_upper() - adjustment.get_page_size()))
+        GLib.timeout_add(500, capture)
+        return False
+    app.connect('activate', lambda *_: GLib.timeout_add_seconds(5, prepare_capture))
     app.run([])
     assert result['saved'], 'Screenshot capture failed'

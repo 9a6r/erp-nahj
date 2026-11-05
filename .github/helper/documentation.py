@@ -22,7 +22,7 @@ def is_valid_url(url: str) -> bool:
 
 
 def is_documentation_link(word: str) -> bool:
-	word = word.strip("()[]<>,")
+	word = word.strip("()[]<>,`")
 	# Nahj keeps its user and validation documentation beside the desktop source.
 	if word.startswith("desktop/") and word.endswith(".md") and ".." not in word:
 		from pathlib import Path
@@ -57,9 +57,9 @@ def check_pull_request(number: str) -> "tuple[int, str]":
 	payload = response.json()
 	title = (payload.get("title") or "").lower().strip()
 	head_sha = (payload.get("head") or {}).get("sha")
-	body = (payload.get("body") or "").lower()
+	body = payload.get("body") or ""
 
-	if not title.startswith("feat") or not head_sha or "no-docs" in body or "backport" in body:
+	if not title.startswith("feat") or not head_sha or "no-docs" in body.lower() or "backport" in body.lower():
 		return 0, "Skipping documentation checks... 🏃"
 
 	if contains_documentation_link(body):
