@@ -82,12 +82,15 @@ remote 'sudo cat /boot/initramfs-linux-zen.img' > initramfs-linux-zen.img
 root_uuid=$(remote 'findmnt -no UUID /')
 [[ "$root_uuid" =~ ^[a-fA-F0-9-]+$ ]]
 stop_vm
-boot -kernel "$work/vmlinuz-linux-zen" -initrd "$work/initramfs-linux-zen.img" -append "root=UUID=$root_uuid rw console=ttyS0"
+# The cloud image configures eth0; retain its interface naming when bypassing
+# its bootloader, otherwise the Zen boot renames the device ens3 and loses DHCP.
+zen_cmdline="root=UUID=$root_uuid rw console=ttyS0 net.ifnames=0"
+boot -kernel "$work/vmlinuz-linux-zen" -initrd "$work/initramfs-linux-zen.img" -append "$zen_cmdline"
 remote 'uname -r | tee kernel.txt; uname -r | grep -q zen'
 tar --exclude=desktop/dist --exclude=__pycache__ --exclude=desktop/screenshots -C "$repo" -czf desktop-test.tar.gz desktop license.txt
 copy_to_guest desktop-test.tar.gz /home/nahj/desktop-test.tar.gz
 remote 'set -e; mkdir -p source; tar -xzf desktop-test.tar.gz -C source; bash source/desktop/tests/arch-guest.sh' 2>&1 | tee results/native-tests.log
 stop_vm
-boot -kernel "$work/vmlinuz-linux-zen" -initrd "$work/initramfs-linux-zen.img" -append "root=UUID=$root_uuid rw console=ttyS0"
+boot -kernel "$work/vmlinuz-linux-zen" -initrd "$work/initramfs-linux-zen.img" -append "$zen_cmdline"
 remote 'set -e; podman start nahj-arch-persistence; test "$(podman exec nahj-arch-persistence redis-cli GET nahj-persistence)" = survives-reboot; podman stop nahj-arch-persistence; echo "PASS: rootless volume data survived a full Zen VM reboot"' 2>&1 | tee results/reboot.log
 remote 'uname -a; pacman -Q linux-zen python gtk4 webkitgtk-6.0 podman podman-compose; podman info --format "rootless={{.Host.Security.Rootless}} storage={{.Store.GraphDriverName}}"' > results/environment.txt
