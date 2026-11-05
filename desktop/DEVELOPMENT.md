@@ -82,6 +82,18 @@ a disposable site with `nahj_disposable_test_site` explicitly enabled. Set
 `NAHJ_ACCEPTANCE_SITE` to that site and run it with the bench virtualenv Python
 from the bench's `sites` directory. Never run it against company data.
 
+The `Nahj full ERP on rootless Arch Zen` workflow builds the pinned server archive
+and requires its image ID, checksum and size to match the release manifest.
+It then runs `tests/full_stack.py` as an ordinary user in a disposable Zen VM.
+The real `Server` controller creates separate database, Redis, backend, frontend,
+WebSocket, worker and scheduler containers. The test posts business transactions,
+checks HTTP permissions, language, PDFs and private-network SMTP/webhooks, exports
+a backup, restores a separate site and verifies the review/activation states.
+After a full VM reboot it checks both stacks, including attachment hashes and an
+encrypted canary. Credentials, databases and backup contents stay in the VM;
+only test logs and image identity metadata are uploaded as evidence. A workflow
+definition is not a passing result; consult the verification report for outcomes.
+
 The renderer bridge in `nahj_desktop/runtime.py` is mounted by the desktop
 controller. It forwards a backend/worker container's canonical loopback HTTP
 port to the private frontend, retaining canonical URLs and cookies for PDF

@@ -1,6 +1,7 @@
 """Disposable-site checks of real SMTP delivery and signed webhook dispatch.
 
-Receivers bind container loopback only. No email or webhook leaves the machine.
+Receivers bind loopback by default, or the isolated backend test container when
+NAHJ_SERVICE_RECEIVER_HOST=backend. No email or webhook leaves the test stack.
 Requires the real Frappe worker and the explicit disposable-site configuration.
 Run from sites/ with the bench Python and NAHJ_ACCEPTANCE_SITE set.
 """
@@ -78,9 +79,13 @@ def main():
     frappe.connect()
     frappe.set_user('Administrator')
     assert not frappe.are_emails_muted(), 'Activate the disposable recovery site before this test'
-    smtp = SMTPReceiver(('127.0.0.1', 0), SMTPHandler)
+    receiver_host = os.environ.get('NAHJ_SERVICE_RECEIVER_HOST', '127.0.0.1')
+    if receiver_host not in ('127.0.0.1', 'backend'):
+        raise RuntimeError('Only loopback or the isolated backend receiver is allowed')
+    bind_host = '0.0.0.0' if receiver_host == 'backend' else receiver_host
+    smtp = SMTPReceiver((bind_host, 0), SMTPHandler)
     smtp.messages = []
-    receiver = ThreadingHTTPServer(('127.0.0.1', 0), WebhookHandler)
+    receiver = ThreadingHTTPServer((bind_host, 0), WebhookHandler)
     receiver.events = []
     for service in (smtp, receiver):
         threading.Thread(target=service.serve_forever, daemon=True).start()
@@ -89,7 +94,7 @@ def main():
     account = webhook = None
     try:
         account = frappe.get_doc(dict(doctype='Email Account', email_account_name='Nahj validation ' + suffix,
-            email_id=email, enable_outgoing=1, default_outgoing=1, smtp_server='127.0.0.1',
+            email_id=email, enable_outgoing=1, default_outgoing=1, smtp_server=receiver_host,
             smtp_port=smtp.server_address[1], use_tls=0, use_ssl_for_outgoing=0,
             no_smtp_authentication=1)).insert()
         frappe.db.commit()
@@ -102,12 +107,12 @@ def main():
         assert str(message['Subject']) == 'اختبار بريد نهج ' + suffix
         assert 'recipient@example.test' in str(message['To'])
         assert 'وصلت الرسالة العربية بنجاح' in message.get_body(preferencelist=('html', 'plain')).get_content()
-        print('PASS: real Frappe Email Account delivered an Arabic MIME message over SMTP to loopback', flush=True)
+        print('PASS: real Frappe Email Account delivered Arabic MIME to the isolated SMTP receiver', flush=True)
 
         secret = secrets.token_urlsafe(32)
         webhook = frappe.get_doc(dict(doctype='Webhook', name='Nahj validation ' + suffix,
             webhook_doctype='ToDo', webhook_docevent='after_insert', enabled=1,
-            request_url=f'http://127.0.0.1:{receiver.server_port}/hook', request_method='POST',
+            request_url=f'http://{receiver_host}:{receiver.server_port}/hook', request_method='POST',
             request_structure='JSON', webhook_json='{"name": {{ doc.name | tojson }}, "description": {{ doc.description | tojson }}}',
             enable_security=1, webhook_secret=secret)).insert()
         frappe.db.commit()

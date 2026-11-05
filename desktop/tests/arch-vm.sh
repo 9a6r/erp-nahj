@@ -50,10 +50,13 @@ stop_vm() {
 trap stop_vm EXIT
 boot() {
     boot_number=$((boot_number + 1))
+    if [[ -e /dev/kvm ]]; then sudo setfacl -m "u:$(id -un):rw" /dev/kvm; fi
     accel=(-accel tcg,thread=multi -cpu max)
     if [[ -r /dev/kvm && -w /dev/kvm ]]; then accel=(-accel kvm -cpu host); fi
     echo "Boot $boot_number using ${accel[*]}" | tee -a results/boots.log
-    qemu-system-x86_64 "${accel[@]}" -m 4096 -smp 2 -display none -monitor none \
+    memory=4096
+    if [[ ${NAHJ_FULL_STACK:-0} == 1 ]]; then memory=5632; fi
+    qemu-system-x86_64 "${accel[@]}" -m "$memory" -smp 2 -display none -monitor none \
         -serial "file:$work/results/serial-$boot_number.log" \
         -drive "file=$work/$image,if=virtio,format=qcow2" \
         -drive "file=$work/seed.img,if=virtio,format=raw" \
@@ -89,8 +92,18 @@ boot -kernel "$work/vmlinuz-linux-zen" -initrd "$work/initramfs-linux-zen.img" -
 remote 'uname -r | tee kernel.txt; uname -r | grep -q zen'
 tar --exclude=desktop/dist --exclude=__pycache__ --exclude=desktop/screenshots -C "$repo" -czf desktop-test.tar.gz desktop license.txt
 copy_to_guest desktop-test.tar.gz /home/nahj/desktop-test.tar.gz
-remote 'set -e; mkdir -p source; tar -xzf desktop-test.tar.gz -C source; bash source/desktop/tests/arch-guest.sh' 2>&1 | tee results/native-tests.log
+remote 'set -e; mkdir -p source; tar -xzf desktop-test.tar.gz -C source'
+if [[ ${NAHJ_FULL_STACK:-0} == 1 ]]; then
+    copy_to_guest "$RUNNER_TEMP/nahj-build/nahj-server-0.3.1-rc1-amd64.tar.gz" /home/nahj/server.tar.gz
+    remote 'cd source/desktop; PYTHONPATH=. python tests/full_stack.py prepare' 2>&1 | tee results/full-stack.log
+else
+    remote 'bash source/desktop/tests/arch-guest.sh' 2>&1 | tee results/native-tests.log
+fi
 stop_vm
 boot -kernel "$work/vmlinuz-linux-zen" -initrd "$work/initramfs-linux-zen.img" -append "$zen_cmdline"
-remote 'set -e; podman start nahj-arch-persistence; test "$(podman exec nahj-arch-persistence redis-cli GET nahj-persistence)" = survives-reboot; podman stop nahj-arch-persistence; echo "PASS: rootless volume data survived a full Zen VM reboot"' 2>&1 | tee results/reboot.log
+if [[ ${NAHJ_FULL_STACK:-0} == 1 ]]; then
+    remote 'cd source/desktop; PYTHONPATH=. python tests/full_stack.py after-reboot' 2>&1 | tee results/full-stack-reboot.log
+else
+    remote 'set -e; podman start nahj-arch-persistence; test "$(podman exec nahj-arch-persistence redis-cli GET nahj-persistence)" = survives-reboot; podman stop nahj-arch-persistence; echo "PASS: rootless volume data survived a full Zen VM reboot"' 2>&1 | tee results/reboot.log
+fi
 remote 'uname -a; pacman -Q linux-zen python gtk4 webkitgtk-6.0 podman podman-compose; podman info --format "rootless={{.Host.Security.Rootless}} storage={{.Store.GraphDriverName}}"' > results/environment.txt

@@ -1,0 +1,47 @@
+name: Nahj full ERP on rootless Arch Zen
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [develop]
+    paths:
+      - 'desktop/nahj_desktop/**'
+      - 'desktop/server-image/**'
+      - 'desktop/tests/**'
+      - 'banking/**'
+      - 'erpnext/www/banking.*'
+      - '.github/workflows/nahj-full-stack.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nahj-full-stack-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: npm install --global yarn@1.22.22
+      - run: yarn install --frozen-lockfile && yarn build
+        working-directory: banking
+      - name: Reproduce the pinned server archive
+        run: bash desktop/tests/build-ci-image.sh
+      - name: Provision, transact, back up, restore and reboot full ERP on Zen
+        env:
+          NAHJ_FULL_STACK: '1'
+        run: bash desktop/tests/arch-vm.sh
+      - name: Keep test evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nahj-full-stack-evidence
+          path: |
+            ${{ runner.temp }}/nahj-arch/results/
+            ${{ runner.temp }}/nahj-build/*.json
