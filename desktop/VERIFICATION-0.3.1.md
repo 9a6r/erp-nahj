@@ -1,9 +1,10 @@
 # Nahj 0.3.1-rc1 — verification, 30 October 2026
 
 **Release status: not published; not yet approved for company production use.**
-The stable server now passes real business, persistence and recovery checks. The
-current desktop package still needs native Arch/Linux Zen validation, and the
-upstream Arabic catalogues are incomplete.
+The stable server passes real business, persistence and recovery checks. The
+desktop passes the native Arch/Linux Zen checks described below. Full ERP
+deployment under rootless Podman still needs validation, and the upstream Arabic
+catalogues are incomplete.
 
 ## Follow-up validation — 5 November 2026
 
@@ -29,16 +30,53 @@ described below. They are not full rootless Podman topology validation.
 
 The native Arch/Zen workflow runs a separate Arch VM, boots an installed Zen
 kernel, and checks X11/Wayland WebKit, package lifecycle and rootless volume
-persistence across reboot. Its result is tracked in
-[the native test run](https://github.com/9a6r/erp-nahj/actions/runs/41937584475).
-At this report update it is still pending; no native success is claimed. The
-first attempt was cancelled when PR #3 merged and was rerun after that merge.
-Even a successful run of this workflow does not exercise a complete ERP service
-deployment or all native file-dialog interactions.
+persistence across reboot. The first attempt was cancelled when PR #3 merged.
+The [rerun](https://github.com/9a6r/erp-nahj/actions/runs/41937584475) installed
+the dependencies and booted **7.2.14-zen1-1-zen**, but failed before application
+tests: direct kernel boot changed the interface from `eth0` to `ens3`, leaving
+the cloud image's existing DHCP configuration unmatched. Commit `00c66b5a9098`
+preserves interface naming; its
+[replacement run](https://github.com/9a6r/erp-nahj/actions/runs/41985125581)
+**passed** for source `00c66b5a909814f0aeeb08d12e11bb525848f606`.
+
+| Native Arch/Zen check | Result |
+| --- | --- |
+| Guest environment | Linux `7.2.14-zen1-1-zen`, Python `3.14.9-1`, GTK `4.24.1-1`, WebKitGTK `2.54.2-1`, Podman `6.1.4-1`, podman-compose `1.6.0-1` |
+| Desktop regressions | **40 passed** inside the Zen guest |
+| X11/Openbox | Real WebKit window, stylesheet, navigation, connection, storage-error recovery, stale callback rejection and draft preservation passed |
+| Language | GTK settings preservation and real WebKit Arabic/English persistence with session/CSRF passed; server rejection kept the previous settings and page |
+| File download | Real WebKit download, native save destination, exact contents and cancellation passed |
+| Wayland/Weston | Headless compositor: WebKit connection/lifecycle and authenticated language tests passed |
+| Arch package | `makepkg`, pacman installation/reinstallation/removal and installed `--check` passed; removal preserved user preferences |
+| Rootless storage | `rootless=true`, `storage=overlay`; Redis data on a named volume survived a full Zen VM shutdown and boot |
+
+[Native evidence archive](https://github.com/9a6r/erp-nahj/actions/runs/41985125581/artifacts/13396505149)
+contains the checksummed cloud-image identity, package log, per-boot serial logs,
+native test output, reboot assertion and final environment versions. Wayland ran
+headlessly with software rendering; Mesa reported unavailable Vulkan/Zink before
+the UI tests passed. This does not validate hardware GPU drivers or the user's
+exact Vitreus/compositor configuration. WebKit sandboxing was not disabled.
+
+The harness now retains separate serial logs per boot, exposes SSH readiness
+progress, and uses KVM when the disposable CI runner provides it. Its reboot
+check now stops on a failed Redis value assertion. An isolated execution of
+that actual shell command confirmed that a missing/wrong value exits nonzero
+and never prints PASS. Pushes to `develop` run the native check independently
+of pull-request closure; documentation and screenshot-only changes are excluded.
+
+The 40 desktop tests, 4 real banking tests, 3 documentation tests, native GTK
+settings test, restored business/file/login checks, authenticated language
+changes, SMTP/webhook checks and invoice PDF generation were rerun successfully
+after the follow-up testing request on 5 November.
+
+This successful workflow does not exercise a complete ERP service deployment or
+every native file-dialog interaction. Its reboot persistence check uses Redis;
+it is not an ERP database recovery test. The separate real ERP recovery results
+above ran on Docker.
 
 The local extracted WebKit runtime could not launch its subprocesses within this
 managed workspace; no sandbox bypass was used. The screenshot evidence is GTK
-on Debian/X11, not a replacement for the native Arch test.
+on Debian/X11; the native Arch result comes from the independent VM run above.
 
 ## Source and artifact identity
 
@@ -134,9 +172,10 @@ labels, but **the entire ERP is not fully translated**.
 
 Before publication:
 
-1. Validate this exact desktop source on Arch/Linux Zen: rootless Podman setup,
-   service separation, Wayland/X11 WebKit sandboxing, native file dialogs,
-   pacman install/reinstall/removal and machine reboot persistence.
+1. Validate a full ERP deployment on Arch/Linux Zen using rootless Podman and
+   separate application services, including backup/recovery and reboot of that
+   complete stack. Validate the user's actual compositor/GPU and remaining file
+   dialogs. The native desktop/package/Redis-volume checks above have passed.
 2. Review the remaining Arabic catalogue entries, terminology, forms, reports,
    print layouts and mixed Arabic/English data visually.
 3. Validate the organization's chosen external providers, SMTP/OAuth/SSO flows,
