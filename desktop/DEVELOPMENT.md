@@ -89,6 +89,9 @@ The real `Server` controller creates separate database, Redis, backend, frontend
 WebSocket, worker and scheduler containers. The test posts business transactions,
 checks HTTP permissions, language, PDFs and private-network SMTP/webhooks, exports
 a backup, restores a separate site and verifies the review/activation states.
+`integration_arabic.py` exercises the actual gettext loader and Standard renderer,
+Arabic/English amount-in-words on sales/purchase/payment records, translated units
+and currency symbols, and verifies that printing did not change posted records.
 After a full VM reboot it checks both stacks, including attachment hashes and an
 encrypted canary. Credentials, databases and backup contents stay in the VM;
 only test logs and image identity metadata are uploaded as evidence. A workflow

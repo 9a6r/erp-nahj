@@ -18,6 +18,10 @@ jobs:
           python-version: '3.12'
       - name: Desktop lifecycle regressions
         run: PYTHONPATH=desktop python -m unittest discover -s desktop/tests -p 'test_*.py' -v
+      - name: Validate shipped Arabic catalogues
+        run: |
+          pip install --require-hashes -r desktop/server-image/requirements.txt
+          python desktop/server-image/localization.py
       - name: Package source and install into an isolated prefix
         run: |
           bash -n desktop/install.sh desktop/package.sh desktop/server-image/entrypoint.sh

@@ -10,6 +10,10 @@ on:
       - 'desktop/tests/**'
       - 'banking/**'
       - 'erpnext/www/banking.*'
+      - 'erpnext/locale/ar.po'
+      - 'erpnext/controllers/accounts_controller.py'
+      - 'erpnext/controllers/print_settings.py'
+      - 'erpnext/templates/print_formats/includes/**'
       - '.github/workflows/nahj-full-stack.yml'
 
 permissions:

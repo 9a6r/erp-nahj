@@ -8,6 +8,7 @@ import argparse
 import gzip
 import hashlib
 import io
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -16,6 +17,15 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
+
+
+def image_files():
+    # Build-only dependency; importing this module for archive unit tests does
+    # not require installing translation tooling on a desktop runtime.
+    spec = importlib.util.spec_from_file_location('nahj_localization', HERE / 'localization.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.image_files()
 
 
 def sha256(path):
@@ -40,6 +50,9 @@ def package(rootfs, config, destination):
         REPO / 'erpnext/www/banking.py': ('home/frappe/frappe-bench/apps/erpnext/erpnext/www/banking.py', 0o644),
         REPO / 'erpnext/www/banking.html': ('home/frappe/frappe-bench/apps/erpnext/erpnext/www/banking.html', 0o644),
         REPO / 'erpnext/tests/test_banking_language.py': ('home/frappe/frappe-bench/apps/erpnext/erpnext/tests/test_banking_language.py', 0o644),
+        REPO / 'erpnext/controllers/accounts_controller.py': ('home/frappe/frappe-bench/apps/erpnext/erpnext/controllers/accounts_controller.py', 0o644),
+        REPO / 'erpnext/controllers/print_settings.py': ('home/frappe/frappe-bench/apps/erpnext/erpnext/controllers/print_settings.py', 0o644),
+        REPO / 'erpnext/templates/print_formats/includes/item_table_uom.html': ('home/frappe/frappe-bench/apps/erpnext/erpnext/templates/print_formats/includes/item_table_uom.html', 0o644),
     }
     frontend = REPO / 'erpnext/public/banking'
     if not (frontend / 'index.html').is_file():
@@ -49,7 +62,8 @@ def package(rootfs, config, destination):
             overlays[path] = ('home/frappe/frappe-bench/apps/erpnext/erpnext/public/banking/' + str(path.relative_to(frontend)), 0o644)
     # Docker rejects duplicate archive paths. Replace upstream files while
     # flattening instead of appending another copy of their tar entries.
-    overlay_names = {name for name, _ in overlays.values()}
+    translations = image_files()
+    overlay_names = {name for name, _ in overlays.values()} | translations.keys()
     clean_rootfs = rootfs.with_suffix('.clean.tar')
     with tarfile.open(rootfs, 'r') as original, tarfile.open(clean_rootfs, 'w') as archive:
         members = {member.name.removeprefix('./').rstrip('/'): member for member in original.getmembers()}
@@ -64,6 +78,13 @@ def package(rootfs, config, destination):
             info.mode = mode
             with path.open('rb') as stream:
                 archive.addfile(info, stream)
+        for name, data in translations.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            info.uid = info.gid = 1000
+            info.uname = info.gname = 'frappe'
+            info.mode = 0o644
+            archive.addfile(info, io.BytesIO(data))
     clean_rootfs.replace(rootfs)
     layer_hash = sha256(rootfs)
     config = dict(config)

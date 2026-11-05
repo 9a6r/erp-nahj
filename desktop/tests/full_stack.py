@@ -123,6 +123,7 @@ def http_checks(server, state):
 def verify(server, state, pending=False):
     topology(server, pending)
     run_test(server, 'integration_verify.py', {**state, 'pending': pending})
+    run_test(server, 'integration_arabic.py', state)
     http_checks(server, state)
 
 

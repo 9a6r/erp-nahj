@@ -10,6 +10,8 @@ def set_print_templates_for_item_table(doc, settings):
 	doc.child_print_templates = {
 		"items": {
 			"qty": "templates/print_formats/includes/item_table_qty.html",
+			"uom": "templates/print_formats/includes/item_table_uom.html",
+			"stock_uom": "templates/print_formats/includes/item_table_uom.html",
 			"serial_and_batch_bundle": "templates/print_formats/includes/serial_and_batch_bundle.html",
 		},
 		"packed_items": {

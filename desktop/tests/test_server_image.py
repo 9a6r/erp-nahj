@@ -18,22 +18,28 @@ class ServerImageTests(unittest.TestCase):
             root = Path(directory)
             repo = root / 'repo'
             for name in ('erpnext/www/banking.py', 'erpnext/www/banking.html',
+                         'erpnext/controllers/accounts_controller.py',
+                         'erpnext/controllers/print_settings.py',
+                         'erpnext/templates/print_formats/includes/item_table_uom.html',
                          'erpnext/tests/test_banking_language.py', 'erpnext/public/banking/index.html'):
                 path = repo / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(b'new verified source')
             rootfs = root / 'rootfs.tar'
             replaced = 'home/frappe/frappe-bench/apps/erpnext/erpnext/www/banking.py'
+            locale = 'home/frappe/frappe-bench/assets/locale/ar/LC_MESSAGES/erpnext.mo'
             with tarfile.open(rootfs, 'w') as archive:
-                for name, data in ((replaced, b'upstream'), (replaced, b'old duplicate'), ('etc/test', b'preserve')):
+                for name, data in ((replaced, b'upstream'), (replaced, b'old duplicate'),
+                                   (locale, b'old catalogue'), ('etc/test', b'preserve')):
                     builder.add_bytes(archive, name, data)
             destination = root / 'server.tar.gz'
-            with patch.object(builder, 'REPO', repo):
+            with patch.object(builder, 'REPO', repo), patch.object(builder, 'image_files', return_value={locale: b'compiled Arabic'}):
                 metadata = builder.package(rootfs, {'architecture': 'amd64', 'os': 'linux', 'config': {}}, destination)
             with tarfile.open(rootfs) as layer:
                 self.assertEqual(len(layer.getnames()), len(set(layer.getnames())))
                 self.assertEqual(layer.extractfile(replaced).read(), b'new verified source')
                 self.assertEqual(layer.extractfile('etc/test').read(), b'preserve')
+                self.assertEqual(layer.extractfile(locale).read(), b'compiled Arabic')
             with tarfile.open(destination) as archive:
                 manifest = json.load(archive.extractfile('manifest.json'))[0]
                 config_bytes = archive.extractfile(manifest['Config']).read()

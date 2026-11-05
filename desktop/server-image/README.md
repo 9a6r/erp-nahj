@@ -4,7 +4,8 @@ The desktop's managed server is based on the official Frappe ERPNext image. The
 upstream source versions, commits and amd64 manifest digest are in `upstream.json`.
 The image contains the complete upstream ERPNext/Frappe applications; the overlay
 adds Nahj banking assets, the language endpoint, a non-destructive entrypoint and
-the external MariaDB TLS preflight. No company records or site credentials are
+the external MariaDB TLS preflight, complete Arabic catalogues and print-language
+amount-in-words rendering. No company records or site credentials are
 included.
 
 Build the banking assets, then use Google's open-source
@@ -15,7 +16,9 @@ cd banking
 yarn install --frozen-lockfile
 yarn build
 cd ..
-python3 desktop/server-image/build.py --crane crane \
+python3 -m venv work/build-env
+work/build-env/bin/pip install --require-hashes -r desktop/server-image/requirements.txt
+work/build-env/bin/python desktop/server-image/build.py --crane crane \
   --work-dir ./work/image-build \
   --output ./work/nahj-server-0.3.1-rc1-amd64.tar.gz
 ```

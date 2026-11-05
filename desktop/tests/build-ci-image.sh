@@ -5,10 +5,12 @@ repo=$(cd "$(dirname "$0")/../.." && pwd)
 work=${RUNNER_TEMP:?Disposable CI runner required}/nahj-build
 mkdir -p "$work"
 cd "$work"
+python3 -m venv "$work/build-env"
+"$work/build-env/bin/pip" install --require-hashes -r "$repo/desktop/server-image/requirements.txt"
 curl --fail --location --retry 3 -o crane.tar.gz https://github.com/google/go-containerregistry/releases/download/v0.22.1/go-containerregistry_Linux_x86_64.tar.gz
 printf '%s  crane.tar.gz\n' 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0 | sha256sum --check
 tar -xzf crane.tar.gz crane
-python3 "$repo/desktop/server-image/build.py" --crane "$work/crane" \
+"$work/build-env/bin/python" "$repo/desktop/server-image/build.py" --crane "$work/crane" \
     --work-dir "$work" --output "$work/nahj-server-0.3.1-rc1-amd64.tar.gz"
 # Do not silently substitute a rebuilt image for the pinned release artifact.
 python3 - "$repo" "$work" <<'PY'

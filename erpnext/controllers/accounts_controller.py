@@ -880,6 +880,10 @@ class AccountsController(TransactionBase):
 
 	def before_print(self, settings=None):
 		self.set_missing_terms()
+		# Amount-in-words is stored in the language used when saving. Render it
+		# afresh for the requested print language without changing posted data.
+		if self.meta.get_field("in_words") or self.meta.get_field("base_in_words"):
+			self.set_total_in_words()
 
 		if self.doctype in [
 			"Purchase Order",

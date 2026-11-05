@@ -2,9 +2,42 @@
 
 **Release status: not published; not yet approved for company production use.**
 The stable server passes real business, persistence and recovery checks. The
-desktop passes the native Arch/Linux Zen checks described below. Full ERP
-deployment under rootless Podman still needs validation, and the upstream Arabic
-catalogues are incomplete.
+desktop and full ERP deployment pass the native Arch/Linux Zen checks described
+below, including rootless Podman backup/recovery and a complete VM reboot.
+The completed Arabic catalogues are embedded in a newly rebuilt, unpublished
+image; its full native lifecycle revalidation is pending.
+
+## Full rootless ERP follow-up — 5 November 2026
+
+The full-stack workflow rebuilds the server from the pinned source and checks
+its image ID, archive SHA256 and size against the existing release manifest.
+This reproduction **passed** in CI; no different server artifact was substituted.
+The first real rootless attempt provisioned MariaDB and installed ERPNext, then
+exposed an image-ID representation bug: Podman returned the verified digest
+without `sha256:`, while the start guard expected that prefix. Commit
+`c4723711df3d` canonicalizes the verified ID and reads equivalent saved profiles
+without permitting a different image. The added regression failed before the
+fix; all 40 desktop tests pass with it.
+
+The next run reached recovery activation but exposed stale frontend upstream
+resolution after backend/WebSocket restart. Commit `6eebbb24cc` restarts the
+frontend after those services. The [full-stack run at that commit](https://github.com/9a6r/erp-nahj/actions/runs/42028088123)
+**passed** on 5 November 2026 under Linux `7.2.14-zen1-1-zen`:
+
+- Actual Server controller with eight separate rootless Podman containers.
+- Submitted sales/purchase/payment records, balanced ledger, stock quantity 11,
+  attachment hashes, restricted-user denial and encrypted canary decryption.
+- Actual HTTP login/denial, private-file authorization, saved Arabic/English
+  preference, banking assets and generated invoice PDF.
+- Real Arabic SMTP delivery and signed webhook from the worker to isolated
+  receivers on the private service network, before and after recovery.
+- Backup and independent restore, review mode with worker/scheduler paused,
+  explicit activation and verified data/permissions after activation.
+- Complete Zen VM shutdown/boot, then verification of both original and restored
+  full stacks, including business data, files, encryption and HTTP/PDF checks.
+
+The run reproduced the old pinned server archive exactly. It does not validate
+the later Arabic catalogue changes or the user's actual compositor/hardware.
 
 ## Follow-up validation — 5 November 2026
 
@@ -71,8 +104,8 @@ after the follow-up testing request on 5 November.
 
 This successful workflow does not exercise a complete ERP service deployment or
 every native file-dialog interaction. Its reboot persistence check uses Redis;
-it is not an ERP database recovery test. The separate real ERP recovery results
-above ran on Docker.
+the separate full rootless ERP recovery/reboot result is recorded at the top of
+this report.
 
 The local extracted WebKit runtime could not launch its subprocesses within this
 managed workspace; no sandbox bypass was used. The screenshot evidence is GTK
@@ -84,14 +117,21 @@ on Debian/X11; the native Arch result comes from the independent VM run above.
 - ERPNext: stable **16.53.0**, upstream `9cd11b19575bfc34f092a24f6c8b368c4dd69481`.
 - Frappe: stable **16.54.0**, upstream `2fcb9397a1f1da353b21e53d2f97ec56653acd02`.
 - Official amd64 base manifest: `sha256:8f454efa71e9ffad9de4b9ccf377566134d285612f19e1e12e8a43fe7bf0db75`.
-- Nahj image: `sha256:787360f503b4c1cac2167d3ceb1210fa4a8a9ae6f5c931759f1d2a893558af25`.
-- Archive: `nahj-server-0.3.1-rc1-amd64.tar.gz`, **1,091,060,459 bytes**.
-- Archive SHA256: `dd571a8003e208f521b3edd121fd1343a7b0eab360b16475b28b11034d50c9d0`.
+- Current Arabic image: `sha256:dd42ba26bfb096e4079ad6bd71ea4bd1ee60293cfc8d6bbf67d3da977d161127`.
+- Archive: `nahj-server-0.3.1-rc1-amd64.tar.gz`, **1,091,253,026 bytes**.
+- Archive SHA256: `fb02ce817ec842551cb670e2caa88ccebc783fcbaced97f406a235a1aca34163`.
 
-The large diff against develop replaces the development snapshot with the exact
-stable upstream tree. Relative to the stable ERPNext tree, business application
-code changes are limited to the existing banking language endpoint and its test;
-the Nahj frontend customization and desktop live separately. This does not strip
+The earlier full-stack run at `6eebbb24cc` used image
+`sha256:787360f503b4c1cac2167d3ceb1210fa4a8a9ae6f5c931759f1d2a893558af25`,
+archive SHA256 `dd571a8003e208f521b3edd121fd1343a7b0eab360b16475b28b11034d50c9d0`
+(1,091,060,459 bytes). That result must not be substituted for validation of the
+new Arabic image. Neither candidate has been published; automatic migration of
+existing profiles/backups across image identities remains unsupported.
+
+The original stabilization replaced the development snapshot with the stable
+upstream tree. The overlays add the banking language endpoint/frontend, Arabic
+catalogues and print-language formatting described above; the desktop lives
+separately. This does not strip
 upstream ERPNext modules or replace accounting/stock logic with demonstrations.
 The runtime printing bridge is shipped in the desktop package and mounted by the
 controller; it is not an unrecorded change to the image archive.
@@ -158,26 +198,37 @@ Historical Zen screenshots and 0.3.0 checks remain available in
 
 ## Arabic coverage and remaining release gates
 
-Catalogue audit of the pinned sources found:
+The pinned sources originally had 664 missing ERPNext entries and 1,846 missing
+Frappe entries. The Nahj source now fills all of them, repairs broken placeholders
+and removes repeated English suffixes in legacy error translations. Three runtime
+Egyptian currency strings are also included. Source catalogue checks now report:
 
 | Catalogue | Entries | Translated | Untranslated |
 | --- | ---: | ---: | ---: |
-| ERPNext Arabic | 11,102 | 10,438 | 664 |
-| Frappe Arabic | 7,937 | 6,091 | 1,846 |
+| ERPNext Arabic | 11,105 | 11,105 | 0 |
+| Frappe Arabic | 7,937 | 7,937 | 0 |
 
-These are catalogue counts, not a visual or linguistic quality score. Matching
-translations from the available upstream development catalogues did not fill the
-remaining entries. Nahj lifecycle messages and integration navigation have Arabic
-labels, but **the entire ERP is not fully translated**.
+These are catalogue counts, not a visual or linguistic quality score. The builder
+checks missing/fuzzy messages, interpolation, HTML/Jinja tokens and actual compiled
+gettext lookup, including message contexts. It embeds both PO and MO files in the
+server image. Brand names and executable examples intentionally retain their
+spelling; user-entered text and third-party app messages are not rewritten.
+
+On the disposable recovered Docker site, actual Frappe lookups and Standard print
+HTML passed. Sales invoices, purchase invoices and payment entries rendered their
+amount-in-words in Arabic and English while stored posted records stayed unchanged.
+The real PDF was regenerated and [visually inspected](screenshots/0.3.1/invoice-ar-completed.png):
+Arabic amount/unit labels, translated units, Egyptian currency symbol and Arabic
+amount-in-words are visible. This is not a visual review of all forms/reports.
+The rebuilt image must repeat the full Arch/Zen lifecycle checks before publication.
 
 Before publication:
 
-1. Validate a full ERP deployment on Arch/Linux Zen using rootless Podman and
-   separate application services, including backup/recovery and reboot of that
-   complete stack. Validate the user's actual compositor/GPU and remaining file
-   dialogs. The native desktop/package/Redis-volume checks above have passed.
-2. Review the remaining Arabic catalogue entries, terminology, forms, reports,
-   print layouts and mixed Arabic/English data visually.
+1. Repeat full rootless ERP validation for each new server artifact. The complete
+   stack at `6eebbb24cc` passed backup/recovery and reboot above. Validate the
+   user's actual compositor/GPU and remaining file dialogs separately.
+2. Continue linguistic and visual review of terminology, forms, reports, print
+   layouts and mixed Arabic/English data; catalogue coverage alone is insufficient.
 3. Validate the organization's chosen external providers, SMTP/OAuth/SSO flows,
    roles, backup destination and operational recovery procedure with its actual
    configuration. No provider integration was claimed merely from displaying
