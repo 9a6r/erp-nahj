@@ -5,6 +5,41 @@ The stable server now passes real business, persistence and recovery checks. The
 current desktop package still needs native Arch/Linux Zen validation, and the
 upstream Arabic catalogues are incomplete.
 
+## Follow-up validation — 5 November 2026
+
+The recovery/language implementation was merged in PR #3 (`5168d00df91b`),
+and the [seven current screenshots](screenshots/0.3.1/README.md) in PR #4
+(`5e056863103d`). The server image and archive identity below are unchanged.
+
+| Additional check | Result |
+| --- | --- |
+| Desktop Python regression suite | **40 passed**, including backup validation and real HTTPS certificate/hostname rejection |
+| Controller-driven recovery | Restored the verified SQL, public/private files and original encryption material into a separate local project; posted invoices, zero outstanding balance, stock quantity 11, attachment contents and original Administrator login verified |
+| Recovery activation | Scheduler and outbound email paused for review; explicit activation enabled them and a real worker completed a queued job; records and attachment contents survived stop/start |
+| Persistent Desk language | Authenticated user preference changed Arabic → English → Arabic through Frappe's actual API; subsequent Desk boot used the saved language each time |
+| Banking database tests | **4 passed** again against the recovered site |
+| Email and webhook | Actual Frappe Email Account delivered an Arabic MIME message to a loopback SMTP receiver; an actual document event and worker sent an Arabic webhook with a verified HMAC signature |
+| GTK settings | Native GTK settings and language controls passed on Debian; captures include both connection languages and recovery/external-database controls |
+| Documentation regression checks | **3 passed**; GitHub documentation and desktop/banking workflows passed for screenshot commit `646e68f074cb` |
+
+The service tests use only disposable data and local receivers, not a live mail
+provider or a customer's webhook. They do not validate every external provider.
+The real backend checks still use the consolidated Docker validation topology
+described below. They are not full rootless Podman topology validation.
+
+The native Arch/Zen workflow runs a separate Arch VM, boots an installed Zen
+kernel, and checks X11/Wayland WebKit, package lifecycle and rootless volume
+persistence across reboot. Its result is tracked in
+[the native test run](https://github.com/9a6r/erp-nahj/actions/runs/41937584475).
+At this report update it is still pending; no native success is claimed. The
+first attempt was cancelled when PR #3 merged and was rerun after that merge.
+Even a successful run of this workflow does not exercise a complete ERP service
+deployment or all native file-dialog interactions.
+
+The local extracted WebKit runtime could not launch its subprocesses within this
+managed workspace; no sandbox bypass was used. The screenshot evidence is GTK
+on Debian/X11, not a replacement for the native Arch test.
+
 ## Source and artifact identity
 
 - Review base: merged PR #1, `adb2b243ad1816843f7c8497b93b31f34d2e7b29`.
