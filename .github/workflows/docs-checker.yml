@@ -27,4 +27,5 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           pip install requests --quiet
+          python -m unittest discover -s .github/helper -p test_documentation.py
           python $GITHUB_WORKSPACE/.github/helper/documentation.py $PR_NUMBER
