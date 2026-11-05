@@ -2,9 +2,18 @@ name: Nahj native Arch and Linux Zen
 
 on:
   workflow_dispatch:
+  push:
+    branches: [develop]
+    paths:
+      - 'desktop/**'
+      - '!desktop/**/*.md'
+      - '!desktop/screenshots/**'
+      - '.github/workflows/nahj-arch.yml'
   pull_request:
     paths:
       - 'desktop/**'
+      - '!desktop/**/*.md'
+      - '!desktop/screenshots/**'
       - '.github/workflows/nahj-arch.yml'
 
 permissions:

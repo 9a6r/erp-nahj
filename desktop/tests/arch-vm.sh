@@ -6,7 +6,9 @@ work=${RUNNER_TEMP:?Run this script on a disposable CI runner}/nahj-arch
 mkdir -p "$work/results"
 cd "$work"
 sudo apt-get update -qq
-sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils
+sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils acl
+# Only this disposable CI runner: use hardware acceleration when it is exposed.
+if [[ -e /dev/kvm ]]; then sudo setfacl -m "u:$(id -un):rw" /dev/kvm; fi
 image=Arch-Linux-x86_64-cloudimg-20261101.620452.qcow2
 base=https://fastly.mirror.pkgbuild.com/images/v20261101.620452
 curl --fail --location --retry 3 -o "$image" "$base/$image"
@@ -35,6 +37,7 @@ ssh_options=(-i "$work/test-key" -p 22222 -o BatchMode=yes -o ConnectTimeout=5
 remote() { ssh "${ssh_options[@]}" nahj@127.0.0.1 "$@"; }
 copy_to_guest() { scp -q -i "$work/test-key" -P 22222 -o BatchMode=yes -o UserKnownHostsFile="$work/known_hosts" "$1" "nahj@127.0.0.1:$2"; }
 vm_pid=
+boot_number=0
 stop_vm() {
     if [[ -n "$vm_pid" ]] && kill -0 "$vm_pid" 2>/dev/null; then
         remote sudo poweroff || true
@@ -46,20 +49,28 @@ stop_vm() {
 }
 trap stop_vm EXIT
 boot() {
+    boot_number=$((boot_number + 1))
     accel=(-accel tcg,thread=multi -cpu max)
     if [[ -r /dev/kvm && -w /dev/kvm ]]; then accel=(-accel kvm -cpu host); fi
+    echo "Boot $boot_number using ${accel[*]}" | tee -a results/boots.log
     qemu-system-x86_64 "${accel[@]}" -m 4096 -smp 2 -display none -monitor none \
-        -serial "file:$work/results/serial.log" \
+        -serial "file:$work/results/serial-$boot_number.log" \
         -drive "file=$work/$image,if=virtio,format=qcow2" \
         -drive "file=$work/seed.img,if=virtio,format=raw" \
         -netdev user,id=net0,hostfwd=tcp:127.0.0.1:22222-:22 -device virtio-net-pci,netdev=net0 "$@" &
     vm_pid=$!
-    for _ in {1..120}; do
-        if remote true 2>/dev/null; then return; fi
+    for attempt in {1..120}; do
+        if remote true 2>results/last-ssh-error.log; then return; fi
         kill -0 "$vm_pid"
+        if (( attempt % 6 == 0 )); then
+            echo "Waiting for SSH on boot $boot_number, attempt $attempt/120"
+            tail -n 3 "results/serial-$boot_number.log"
+        fi
         sleep 5
     done
     echo 'Arch guest did not become ready' >&2
+    cat results/last-ssh-error.log >&2
+    tail -n 80 "results/serial-$boot_number.log" >&2
     return 1
 }
 boot
@@ -75,8 +86,8 @@ boot -kernel "$work/vmlinuz-linux-zen" -initrd "$work/initramfs-linux-zen.img" -
 remote 'uname -r | tee kernel.txt; uname -r | grep -q zen'
 tar --exclude=desktop/dist --exclude=__pycache__ --exclude=desktop/screenshots -C "$repo" -czf desktop-test.tar.gz desktop license.txt
 copy_to_guest desktop-test.tar.gz /home/nahj/desktop-test.tar.gz
-remote 'mkdir -p source; tar -xzf desktop-test.tar.gz -C source; bash source/desktop/tests/arch-guest.sh' | tee results/native-tests.log
+remote 'set -e; mkdir -p source; tar -xzf desktop-test.tar.gz -C source; bash source/desktop/tests/arch-guest.sh' 2>&1 | tee results/native-tests.log
 stop_vm
 boot -kernel "$work/vmlinuz-linux-zen" -initrd "$work/initramfs-linux-zen.img" -append "root=UUID=$root_uuid rw console=ttyS0"
-remote 'podman start nahj-arch-persistence; test "$(podman exec nahj-arch-persistence redis-cli GET nahj-persistence)" = survives-reboot; podman stop nahj-arch-persistence; echo "PASS: rootless volume data survived a full Zen VM reboot"' | tee results/reboot.log
+remote 'set -e; podman start nahj-arch-persistence; test "$(podman exec nahj-arch-persistence redis-cli GET nahj-persistence)" = survives-reboot; podman stop nahj-arch-persistence; echo "PASS: rootless volume data survived a full Zen VM reboot"' 2>&1 | tee results/reboot.log
 remote 'uname -a; pacman -Q linux-zen python gtk4 webkitgtk-6.0 podman podman-compose; podman info --format "rootless={{.Host.Security.Rootless}} storage={{.Store.GraphDriverName}}"' > results/environment.txt
