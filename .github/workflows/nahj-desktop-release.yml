@@ -1,0 +1,67 @@
+name: Publish tested Nahj desktop prerelease
+
+on:
+  push:
+    tags: ['desktop-v0.3.1-rc1']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nahj-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native:
+    uses: ./.github/workflows/nahj-arch.yml
+  erp:
+    uses: ./.github/workflows/nahj-full-stack.yml
+  publish:
+    needs: [native, erp]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: nahj-arch-package
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: nahj-server-archive
+          path: release
+      - name: Verify release identity and generate checksums
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          expected = json.loads(Path('desktop/nahj_desktop/server_release.json').read_text())
+          assert os.environ['RELEASE_TAG'] == 'desktop-v' + expected['version']
+          assert expected['published'] is True
+          archive = Path('release') / expected['archive']
+          assert archive.stat().st_size == expected['size']
+          with archive.open('rb') as stream:
+              assert hashlib.file_digest(stream, 'sha256').hexdigest() == expected['sha256']
+          assert len(list(Path('release').glob('*.pkg.tar.zst'))) == 1
+          Path('release/server_release.json').write_text(json.dumps(expected, indent=2) + '\n')
+          PY
+          cp desktop/UPSTREAM-AUDIT.md release/
+          cd release
+          sha256sum *.pkg.tar.zst *.tar.gz server_release.json UPSTREAM-AUDIT.md > SHA256SUMS
+      - name: Publish only after both real Arch test jobs pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft > existing-release.json 2>/dev/null; then
+            python3 -c 'import json; assert json.load(open("existing-release.json"))["isDraft"], "Refusing to replace an already published release"'
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --target "$RELEASE_SHA" --draft --prerelease \
+              --title 'Nahj Desktop 0.3.1-rc1 — Arch / Linux Zen' --notes-file desktop/RELEASE-0.3.1.md
+          fi
+          gh release upload "$RELEASE_TAG" release/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease

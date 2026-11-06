@@ -4,10 +4,14 @@ set -euo pipefail
 cd "$HOME/source/desktop"
 [[ $(id -u) != 0 ]]
 uname -r | grep -q zen
-if ! grep -q "^$(id -un):" /etc/subuid; then
-    sudo usermod --add-subuids 200000-265535 --add-subgids 200000-265535 "$(id -un)"
-fi
+# This disposable user has no containers yet. Exercise the actual installer
+# starting without subordinate IDs, as on a newly prepared desktop account.
+sudo sed -i '/^nahj:/d' /etc/subuid /etc/subgid
+bash install.sh --with-server --yes
 test "$(podman info --format '{{.Host.Security.Rootless}}')" = true
+test -s /usr/share/applications/io.nahj.Desktop.desktop
+test -s /usr/share/icons/hicolor/scalable/apps/io.nahj.Desktop.svg
+echo 'PASS: actual Arch installer configured rootless Podman and installed the desktop launcher'
 PYTHONPATH=. python -m unittest discover -s tests -p 'test_*.py' -v
 export PYTHONPATH=.
 export WEBKIT_DISABLE_DMABUF_RENDERER=1
@@ -31,7 +35,7 @@ python tests/smoke_language.py
 '
 bash package.sh
 cd dist
-makepkg --noconfirm
+makepkg --force --noconfirm
 package=$(find . -maxdepth 1 -name '*.pkg.tar.zst' -print -quit)
 sudo pacman -U --noconfirm "$package"
 nahj-desktop --check

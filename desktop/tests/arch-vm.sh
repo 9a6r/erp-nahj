@@ -3,7 +3,7 @@
 set -euo pipefail
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 work=${RUNNER_TEMP:?Run this script on a disposable CI runner}/nahj-arch
-mkdir -p "$work/results"
+mkdir -p "$work/results" "$work/packages"
 cd "$work"
 sudo apt-get update -qq
 sudo apt-get install -y --no-install-recommends qemu-system-x86 qemu-utils cloud-image-utils acl
@@ -98,6 +98,8 @@ if [[ ${NAHJ_FULL_STACK:-0} == 1 ]]; then
     remote 'cd source/desktop; PYTHONPATH=. python tests/full_stack.py prepare' 2>&1 | tee results/full-stack.log
 else
     remote 'bash source/desktop/tests/arch-guest.sh' 2>&1 | tee results/native-tests.log
+    scp -q -i "$work/test-key" -P 22222 -o BatchMode=yes -o UserKnownHostsFile="$work/known_hosts" \
+        'nahj@127.0.0.1:source/desktop/dist/*.pkg.tar.zst' "$work/packages/"
 fi
 stop_vm
 boot -kernel "$work/vmlinuz-linux-zen" -initrd "$work/initramfs-linux-zen.img" -append "$zen_cmdline"

@@ -2,6 +2,7 @@ name: Nahj full ERP on rootless Arch Zen
 
 on:
   workflow_dispatch:
+  workflow_call:
   push:
     branches: [develop]
     paths:
@@ -29,6 +30,11 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v6
+      - name: Verify upstream ERPNext structure
+        run: |
+          upstream=$(python3 -c 'import json; print(json.load(open("desktop/server-image/upstream.json"))["erpnext_commit"])')
+          git fetch --no-tags --depth=1 origin "$upstream"
+          python3 desktop/tests/audit_upstream.py
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
@@ -41,6 +47,15 @@ jobs:
         env:
           NAHJ_FULL_STACK: '1'
         run: bash desktop/tests/arch-vm.sh
+      - name: Keep verified server archive for release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: nahj-server-archive
+          compression-level: 0
+          retention-days: 3
+          path: ${{ runner.temp }}/nahj-build/nahj-server-0.3.1-rc1-amd64.tar.gz
+          if-no-files-found: error
       - name: Keep test evidence only
         if: always()
         uses: actions/upload-artifact@v4

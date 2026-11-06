@@ -5,7 +5,7 @@ version=0.3.1rc1
 mkdir -p dist
 # The archive contains source and documentation only; no local state or sessions.
 tar --exclude=__pycache__ --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-    -cf - nahj_desktop nahj-desktop Makefile io.nahj.Desktop.desktop io.nahj.Desktop.svg README.md DEVELOPMENT.md SERVER.md \
+    -cf - nahj_desktop nahj-desktop setup_rootless.py Makefile io.nahj.Desktop.desktop io.nahj.Desktop.svg README.md DEVELOPMENT.md SERVER.md \
     -C .. license.txt | gzip -n > "dist/nahj-desktop-$version.tar.gz"
 checksum=$(sha256sum "dist/nahj-desktop-$version.tar.gz" | cut -d' ' -f1)
 cat > dist/PKGBUILD <<EOF

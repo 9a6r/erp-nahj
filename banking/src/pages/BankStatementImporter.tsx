@@ -260,10 +260,10 @@ const StatementImportLog = () => {
                         {data?.map((item) => (
                             <TableRow key={item.name} onClick={() => onViewDetails(item.name)} className="cursor-pointer hover:bg-surface-gray-2">
                                 <TableCell>{formatDate(item.creation, 'Do MMM YYYY')}</TableCell>
-                                <TableCell><Badge theme={item.status === "Completed" ? "green" : "gray"}>{item.status}</Badge></TableCell>
+                                <TableCell><Badge theme={item.status === "Completed" ? "green" : "gray"}>{_(item.status)}</Badge></TableCell>
                                 <TableCell>
                                     {item.start_date && item.end_date ? (
-                                        <span>{formatDate(item.start_date, 'Do MMM YYYY')} to {formatDate(item.end_date, 'Do MMM YYYY')}</span>
+                                        <span>{formatDate(item.start_date, 'Do MMM YYYY')} {_("to")} {formatDate(item.end_date, 'Do MMM YYYY')}</span>
                                     ) : (
                                         <span>-</span>
                                     )}

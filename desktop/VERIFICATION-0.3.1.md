@@ -249,7 +249,7 @@ The rebuilt image subsequently passed the full Arch/Zen lifecycle checks recorde
 at the top of this report. The local suite now has 42 passing tests, including
 wrapped helper error translation and preservation of unknown technical diagnostics.
 
-Before publication:
+Before production adoption (the tested candidate may be published as a prerelease):
 
 1. Repeat full rootless ERP validation for each new server artifact. The complete
    stack at `6eebbb24cc` passed backup/recovery and reboot above. Validate the
@@ -260,6 +260,24 @@ Before publication:
    roles, backup destination and operational recovery procedure with its actual
    configuration. No provider integration was claimed merely from displaying
    an API-key input.
-4. Publish only the archive matching `server_release.json` after those gates
-   pass. Keep `published: false` until then. Never downgrade an existing ERPNext
+4. Publish only the archive matching `server_release.json` after automated native
+   and full ERP checks pass. The release workflow gates publication on both jobs.
+   Organization-specific checks above remain requirements before production
+   adoption, not claims made by a prerelease. Never downgrade an existing ERPNext
    17 database to this stable 16 image.
+
+## Source audit and installation follow-up
+
+The new source audit is recorded in [UPSTREAM-AUDIT.md](UPSTREAM-AUDIT.md).
+The local suite has 44 passing tests. Banking Vite build and TypeScript checking
+passed after translating remaining reconciliation/import controls and accessibility
+labels. The real Subcontracting Receipt print regression was reproduced before
+the fix and passed afterward on the disposable Frappe site.
+
+The new artifact uses image ID
+`sha256:ac36bee5c50b0393741e099389e2a111b23f86e49c6f8bf22091be84d8842ad9`,
+archive SHA256 `b24f5975c43cae48bc323c7e3eb4029e5739f8bf53a172861293cad503cee98b`,
+and size 1,091,253,572 bytes. Previous image checks above are historical evidence;
+the tag-triggered release must independently reproduce and validate this artifact.
+Native validation now also exercises the actual installer, including subordinate
+ID allocation on a fresh account. Publication remains gated on both CI jobs.

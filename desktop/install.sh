@@ -15,11 +15,16 @@ if [[ -e /var/lib/pacman/db.lck ]]; then
 fi
 
 dependencies=(base-devel python python-gobject gtk4 webkitgtk-6.0 gst-plugins-good noto-fonts adwaita-icon-theme)
-case "${1:-}" in
-    --with-server) dependencies+=(podman podman-compose slirp4netns fuse-overlayfs) ;;
-    '') ;;
-    *) printf 'Usage: %s [--with-server]\n' "$0" >&2; exit 2 ;;
-esac
+with_server=false
+confirm=()
+for option in "$@"; do
+    case "$option" in
+        --with-server) with_server=true ;;
+        --yes) confirm=(--noconfirm) ;;
+        *) printf 'Usage: %s [--with-server] [--yes]\n' "$0" >&2; exit 2 ;;
+    esac
+done
+if $with_server; then dependencies+=(podman podman-compose slirp4netns fuse-overlayfs); fi
 missing=()
 for dependency in "${dependencies[@]}"; do
     if ! pacman -Q "$dependency" >/dev/null 2>&1; then
@@ -30,7 +35,7 @@ if (( ${#missing[@]} )); then
     printf 'Installing missing dependencies: %s\n' "${missing[*]}"
     # Use the existing sync databases. Never refresh them without a full upgrade.
     # System upgrades are a separate, deliberate operation owned by the user.
-    if sudo pacman -S --needed "${missing[@]}"; then
+    if sudo pacman -S --needed "${confirm[@]}" "${missing[@]}"; then
         :
     else
         status=$?
@@ -42,10 +47,17 @@ if (( ${#missing[@]} )); then
         exit "$status"
     fi
 fi
+if $with_server; then
+    sudo /usr/bin/python3 ./setup_rootless.py "$(id -un)"
+    if ! podman info --format '{{.Host.Security.Rootless}}' | grep -qx true; then
+        printf 'Podman is not ready for this user. Review its error above.\nIf this user had initialized Podman before its ID ranges were configured, stop its containers deliberately and run: podman system migrate\nNo containers have been stopped by this installer.\n' >&2
+        exit 1
+    fi
+fi
 printf 'Building and installing Nahj Desktop.\n'
 ./package.sh
 cd dist
-if makepkg --install --force; then
+if makepkg --install --force "${confirm[@]}"; then
     :
 else
     status=$?

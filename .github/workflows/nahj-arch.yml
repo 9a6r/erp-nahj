@@ -2,6 +2,7 @@ name: Nahj native Arch and Linux Zen
 
 on:
   workflow_dispatch:
+  workflow_call:
   push:
     branches: [develop]
     paths:
@@ -31,6 +32,12 @@ jobs:
       - uses: actions/checkout@v6
       - name: Boot Arch, install Zen, and run native lifecycle tests
         run: bash desktop/tests/arch-vm.sh
+      - name: Keep tested Arch package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nahj-arch-package
+          path: ${{ runner.temp }}/nahj-arch/packages/*.pkg.tar.zst
+          if-no-files-found: error
       - name: Keep test evidence
         if: always()
         uses: actions/upload-artifact@v4

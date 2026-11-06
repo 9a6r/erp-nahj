@@ -56,6 +56,12 @@ def main():
     assert '£ or' not in html, 'Upstream descriptive currency symbol leaked into Arabic print'
     for amount in (0, 0.25, 1, 2, 11, 240.25):
         assert re.search(r'[\u0600-\u06ff]', money_in_words(amount, 'EGP'))
+    # This original manufacturing document has in_words but no generator.
+    # Printing must preserve its text instead of calling a nonexistent method.
+    receipt = frappe.new_doc('Subcontracting Receipt')
+    receipt.in_words = 'قيمة محفوظة للمستند'
+    receipt.before_print(frappe.get_cached_doc('Print Settings'))
+    assert receipt.in_words == 'قيمة محفوظة للمستند'
     frappe.db.rollback()
     frappe.destroy()
     print('PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML')
