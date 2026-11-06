@@ -4,8 +4,33 @@
 The stable server passes real business, persistence and recovery checks. The
 desktop and full ERP deployment pass the native Arch/Linux Zen checks described
 below, including rootless Podman backup/recovery and a complete VM reboot.
-The completed Arabic catalogues are embedded in a newly rebuilt, unpublished
-image; its full native lifecycle revalidation is pending.
+The completed Arabic catalogues are embedded in the rebuilt, unpublished image,
+which has now passed the full native lifecycle revalidation below.
+
+## Arabic image revalidation — reviewed 6 November 2026
+
+Source commit `acb567d47d278480e346dc0718eb50b3bbcde9d9` passed both workflows
+on 5 November (logs reviewed on 6 November):
+
+- [Full ERP on rootless Arch/Zen](https://github.com/9a6r/erp-nahj/actions/runs/42079406329),
+  job `127428179959`: CI reproduced the new image ID, archive SHA256 and size
+  exactly. Eight separate services completed the business transactions, access
+  checks, Arabic SMTP/webhook delivery, backup and independent recovery.
+- The actual Arabic gettext and Standard print checks passed on the original
+  site, the restored review site, after recovery activation, and on both sites
+  after a complete Zen VM reboot. Arabic/English amount-in-words did not alter
+  stored posted invoices, purchase invoices or payment entries. HTTP invoice PDFs
+  and attachment authorization passed at each stage.
+- [Native desktop on Arch/Zen](https://github.com/9a6r/erp-nahj/actions/runs/42079406577),
+  job `127428180059`: all 40 then-current unit tests, GTK settings, X11 and Wayland
+  WebKit, saved Arabic/English language with session/CSRF, native download/save/
+  cancellation, pacman install/reinstall/remove and rootless volume persistence
+  across reboot passed.
+
+This evidence covers the current server image identity below. It does not certify
+the user's physical GPU/compositor, every ERP form/report or live third-party
+provider configuration. The later desktop-only diagnostic translation change
+adds coverage for wrapped helper errors without changing the server image.
 
 ## Full rootless ERP follow-up — 5 November 2026
 
@@ -124,8 +149,8 @@ on Debian/X11; the native Arch result comes from the independent VM run above.
 The earlier full-stack run at `6eebbb24cc` used image
 `sha256:787360f503b4c1cac2167d3ceb1210fa4a8a9ae6f5c931759f1d2a893558af25`,
 archive SHA256 `dd571a8003e208f521b3edd121fd1343a7b0eab360b16475b28b11034d50c9d0`
-(1,091,060,459 bytes). That result must not be substituted for validation of the
-new Arabic image. Neither candidate has been published; automatic migration of
+(1,091,060,459 bytes). The new image has its own passing run recorded above.
+Neither candidate has been published; automatic migration of
 existing profiles/backups across image identities remains unsupported.
 
 The original stabilization replaced the development snapshot with the stable
@@ -220,7 +245,9 @@ amount-in-words in Arabic and English while stored posted records stayed unchang
 The real PDF was regenerated and [visually inspected](screenshots/0.3.1/invoice-ar-completed.png):
 Arabic amount/unit labels, translated units, Egyptian currency symbol and Arabic
 amount-in-words are visible. This is not a visual review of all forms/reports.
-The rebuilt image must repeat the full Arch/Zen lifecycle checks before publication.
+The rebuilt image subsequently passed the full Arch/Zen lifecycle checks recorded
+at the top of this report. The local suite now has 42 passing tests, including
+wrapped helper error translation and preservation of unknown technical diagnostics.
 
 Before publication:
 

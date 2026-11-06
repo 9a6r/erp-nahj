@@ -1,6 +1,21 @@
 """Arabic user-facing lifecycle errors; retain unknown technical diagnostics."""
+import re
 
 ARABIC = {
+    'Managed printing requires the configured local HTTP origin.': 'تتطلب الطباعة عنوان HTTP المحلي المحدد في إعداد الموقع.',
+    'The managed HTTP port must be unprivileged and different from backend port 8000.': 'يجب أن يكون منفذ الموقع متاحًا للمستخدم العادي ومختلفًا عن منفذ الخدمة الداخلية 8000.',
+    'A service command is required.': 'أمر تشغيل الخدمة مطلوب.',
+    'Unsupported language': 'اللغة غير مدعومة.',
+    'Site directory already exists; refusing to overwrite it.': 'مجلد الموقع موجود بالفعل؛ رُفضت الكتابة فوقه لحماية البيانات.',
+    'Enter an Administrator password of at least 12 characters to initialize the site.': 'أدخل كلمة مرور لحساب Administrator تتكون من 12 حرفًا على الأقل لإنشاء الموقع.',
+    'The base site installation is incomplete. Data was retained; restore or repair it before retrying.': 'تثبيت الموقع الأساسي غير مكتمل. البيانات محفوظة؛ استعد الموقع أو أصلحه قبل إعادة المحاولة.',
+    'MariaDB connection is not encrypted; provisioning refused.': 'اتصال MariaDB غير مشفّر؛ رُفض إعداد الموقع.',
+    'External database is not empty; provisioning refused.': 'قاعدة البيانات الخارجية ليست فارغة؛ رُفض إعداد الموقع لحماية بياناتها.',
+    'MariaDB TLS is required.': 'يلزم اتصال مشفّر عبر TLS مع MariaDB.',
+    'MariaDB 10.6 or later is required.': 'يلزم MariaDB بالإصدار 10.6 أو أحدث.',
+    'Recovery target already exists; refusing to overwrite it.': 'وجهة الاستعادة موجودة بالفعل؛ رُفضت الكتابة فوقها لحماية البيانات.',
+    'Partial backups and database downgrades are not supported.': 'النسخ الاحتياطية الجزئية والرجوع إلى إصدار أقدم لقاعدة البيانات غير مدعومين.',
+    'Backup requires additional applications. Recovery remains stopped for inspection.': 'تتطلب النسخة تطبيقات إضافية. تظل الاستعادة متوقفة لحين الفحص.',
     'Backup metadata is too large.': 'حجم بيانات وصف النسخة الاحتياطية أكبر من المسموح.',
     'Invalid backup metadata.': 'بيانات وصف النسخة الاحتياطية غير صالحة.',
     'Unsafe attachment path or file type in backup.': 'تحتوي النسخة على مسار مرفق أو نوع ملف غير آمن.',
@@ -55,8 +70,19 @@ ARABIC = {
 
 
 def translate_error(message):
+    # Subprocess errors wrap helper exceptions and may include a traceback.
+    # Translate known messages at their boundaries, preserving diagnostic names,
+    # paths, exit codes and unknown third-party output verbatim.
+    command = re.fullmatch(r'Command failed \((-?\d+)\): (.*)', message, re.DOTALL)
+    if command:
+        return f'فشل الأمر ({command[1]}): {translate_error(command[2])}'
+    if '\n' in message:
+        return '\n'.join(translate_error(line) for line in message.split('\n'))
     if message in ARABIC:
         return ARABIC[message]
+    exception = re.fullmatch(r'([A-Za-z_][\w.]*(?:Error|Exception)): (.*)', message)
+    if exception:
+        return f'{exception[1]}: {translate_error(exception[2])}'
     for prefix, translated in (
         ('Command failed (', 'فشل الأمر ('),
         ('Incomplete backup: missing ', 'النسخة الاحتياطية غير مكتملة؛ الملف المطلوب غير موجود: '),
