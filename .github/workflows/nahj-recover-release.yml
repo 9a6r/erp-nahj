@@ -1,0 +1,92 @@
+name: Recover verified Nahj release publication
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [develop]
+    paths: ['.github/workflows/nahj-recover-release.yml']
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: nahj-release-desktop-v0.3.1-rc1
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    env:
+      RELEASE_TAG: desktop-v0.3.1-rc1
+      TESTED_SHA: eeadad1f22d6429d9e934b21b0768c9dc90b6fa4
+    steps:
+      - name: Check out the exact already-tested release
+        uses: actions/checkout@v6
+        with:
+          ref: eeadad1f22d6429d9e934b21b0768c9dc90b6fa4
+      - name: Verify successful test jobs and matching package provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$TESTED_SHA"
+          gh api repos/9a6r/erp-nahj/actions/runs/42185207018 > tested-run.json
+          gh api repos/9a6r/erp-nahj/actions/runs/42185207018/jobs > tested-jobs.json
+          gh api repos/9a6r/erp-nahj/actions/artifacts/13487631265 > tested-package.json
+          python3 - <<'PY'
+          import json, os
+          run = json.load(open('tested-run.json'))
+          assert run['head_sha'] == os.environ['TESTED_SHA']
+          assert run['event'] == 'push' and run['head_branch'] == os.environ['RELEASE_TAG']
+          jobs = {j['name']: j for j in json.load(open('tested-jobs.json'))['jobs']}
+          for name in ('native / native', 'erp / full-stack'):
+              assert jobs[name]['conclusion'] == 'success', name
+          artifact = json.load(open('tested-package.json'))
+          assert artifact['name'] == 'nahj-arch-package' and not artifact['expired']
+          assert artifact['workflow_run']['head_sha'] == os.environ['TESTED_SHA']
+          PY
+      - uses: actions/download-artifact@v4
+        with:
+          name: nahj-arch-package
+          run-id: 42185207018
+          github-token: ${{ github.token }}
+          path: release
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: npm install --global yarn@1.22.22
+      - run: yarn install --frozen-lockfile && yarn build
+        working-directory: banking
+      - name: Reproduce the expired server artifact without changing tested code
+        run: bash desktop/tests/build-ci-image.sh
+      - name: Prepare the verified distribution
+        run: |
+          cp "$RUNNER_TEMP/nahj-build/nahj-server-0.3.1-rc1-amd64.tar.gz" release/
+          cp desktop/nahj_desktop/server_release.json desktop/UPSTREAM-AUDIT.md release/
+          cd release
+          sha256sum *.pkg.tar.zst *.tar.gz server_release.json UPSTREAM-AUDIT.md > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nahj-verified-release-files
+          path: release/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+      - name: Publish the existing verified tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft > existing-release.json 2>/dev/null; then
+            python3 -c 'import json; assert json.load(open("existing-release.json"))["isDraft"], "Refusing to overwrite a published release"'
+          else
+            # The tag already exists. Do not request creation of a tag at another
+            # target_commitish: that can require extra workflow-write privileges.
+            gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease \
+              --title 'Nahj Desktop 0.3.1-rc1 — Arch / Linux Zen' --notes-file desktop/RELEASE-0.3.1.md
+          fi
+          gh release upload "$RELEASE_TAG" release/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease

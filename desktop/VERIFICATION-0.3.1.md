@@ -1,11 +1,33 @@
-# Nahj 0.3.1-rc1 — verification, 30 October 2026
+# Nahj 0.3.1-rc1 — verification, reviewed 11 November 2026
 
-**Release status: not published; not yet approved for company production use.**
-The stable server passes real business, persistence and recovery checks. The
-desktop and full ERP deployment pass the native Arch/Linux Zen checks described
-below, including rootless Podman backup/recovery and a complete VM reboot.
-The completed Arabic catalogues are embedded in the rebuilt, unpublished image,
-which has now passed the full native lifecycle revalidation below.
+**Native and full ERP checks passed. Public release publication is being recovered.**
+
+## Audited source and actual Arch installer — 6 November 2026
+
+The [release workflow](https://github.com/9a6r/erp-nahj/actions/runs/42185207018)
+tests source `eeadad1f22d6429d9e934b21b0768c9dc90b6fa4`. The native job
+`127783802068` passed on Linux `7.2.14-zen1-1-zen`, including the actual
+`install.sh --with-server --yes` from a fresh account without subordinate ID
+ranges, the installed desktop launcher, all 44 tests, GTK/WebKit under X11 and
+headless Wayland, language/CSRF, native save/cancel, pacman lifecycle and rootless
+volume persistence across a full VM reboot.
+
+The upstream source audit and exact server archive reproduction also passed in
+the ERP job. A static audit resolved all 33 ERPNext API method names referenced
+by the banking frontend to real function definitions in the pinned source; this
+is not a behavioral test of every banking operation. The full ERP job `127783801927` also passed: actual posted transactions,
+Arabic/English print checks including the manufacturing regression, HTTP/PDF and
+attachment authorization, private SMTP and signed webhook delivery, independent
+restore, review/activation, and both full stacks after a Zen VM reboot.
+
+The publication job failed with GitHub HTTP 403 despite a contents-write token.
+This is a distribution failure, not a failed ERP/native test. The recovery
+workflow verifies both successful jobs, reuses their Arch package, and rebuilds
+the expired server artifact with exact digest/size checks before publication.
+
+The new image identity appears in the final section of this report.
+The earlier runs below document older artifacts and must not be treated as
+validation of a later image.
 
 ## Arabic image revalidation — reviewed 6 November 2026
 
@@ -27,7 +49,8 @@ on 5 November (logs reviewed on 6 November):
   cancellation, pacman install/reinstall/remove and rootless volume persistence
   across reboot passed.
 
-This evidence covers the current server image identity below. It does not certify
+This evidence covers the Arabic image at `acb567d47d` (`sha256:dd42ba26…`),
+not the later audited artifact. It does not certify
 the user's physical GPU/compositor, every ERP form/report or live third-party
 provider configuration. The later desktop-only diagnostic translation change
 adds coverage for wrapped helper errors without changing the server image.
@@ -278,6 +301,6 @@ The new artifact uses image ID
 `sha256:ac36bee5c50b0393741e099389e2a111b23f86e49c6f8bf22091be84d8842ad9`,
 archive SHA256 `b24f5975c43cae48bc323c7e3eb4029e5739f8bf53a172861293cad503cee98b`,
 and size 1,091,253,572 bytes. Previous image checks above are historical evidence;
-the tag-triggered release must independently reproduce and validate this artifact.
+the tag-triggered test jobs reproduced and validated this exact artifact.
 Native validation now also exercises the actual installer, including subordinate
-ID allocation on a fresh account. Publication remains gated on both CI jobs.
+ID allocation on a fresh account. Both test jobs passed; publication remains a separate tracked step.
