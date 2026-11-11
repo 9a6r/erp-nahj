@@ -11,13 +11,19 @@ cp desktop/tests/modules/{prepare.py,run_suite.py,start.sh} "$work/checks/"
 python3 desktop/tests/modules/inventory.py "$repo" > "$work/checks/inventory.json"
 cp "$work/checks/inventory.json" "$work/results/inventory.json"
 python3 - "$work" <<'PY'
-import json, pathlib, sys
+import json, pathlib, sys, tarfile
 from urllib.request import urlretrieve
 work=pathlib.Path(sys.argv[1]);r=json.load(open('desktop/nahj_desktop/server_release.json'))
 urlretrieve(r['url'], work/'server.tar.gz')
 import hashlib
 with (work/'server.tar.gz').open('rb') as f: assert hashlib.file_digest(f,'sha256').hexdigest()==r['sha256']
 assert (work/'server.tar.gz').stat().st_size==r['size']
+with tarfile.open(work/'server.tar.gz', 'r|gz') as archive:
+    first=next(iter(archive))
+    assert first.name==r['image_id'].removeprefix('sha256:')+'.json'
+    config=archive.extractfile(first).read()
+    assert 'sha256:'+hashlib.sha256(config).hexdigest()==r['image_id']
+    (work/'expected-image-config.json').write_bytes(config)
 PY
 docker load -i "$work/server.tar.gz"
 rm "$work/server.tar.gz"
@@ -26,9 +32,16 @@ import json,pathlib,sys,os,subprocess
 sys.path.insert(0,'desktop')
 from nahj_desktop.server import IMAGE_ID,MARIADB_IMAGE,REDIS_IMAGE
 work=pathlib.Path(sys.argv[1])
-actual=subprocess.check_output(['docker','image','inspect',IMAGE_ID,'--format','{{.Id}}'],text=True).strip()
-assert actual==IMAGE_ID
-subprocess.run(['docker','tag',IMAGE_ID,'nahj-module-test:verified'],check=True)
+# Docker's containerd image store may expose a manifest ID instead of the
+# archived config ID. Verify the loaded tag's actual rootfs and runtime config.
+expected=json.loads((work/'expected-image-config.json').read_text())
+actual=json.loads(subprocess.check_output(['docker','image','inspect','nahj-server:0.3.1-rc1'],text=True))[0]
+assert actual['RootFS']['Layers']==expected['rootfs']['diff_ids']
+for key in ('Entrypoint','Cmd','User','WorkingDir','Env','Labels'):
+    assert actual['Config'].get(key)==expected['config'].get(key), key
+assert actual['Architecture']==expected['architecture'] and actual['Os']==expected['os']
+print('PASS: verified archive config digest, loaded rootfs layers and runtime configuration')
+subprocess.run(['docker','tag','nahj-server:0.3.1-rc1','nahj-module-test:verified'],check=True)
 spec={'services':{
  'db':{'image':MARIADB_IMAGE,'environment':{'MARIADB_ROOT_PASSWORD':'disposable-ci-only'},'command':['--character-set-server=utf8mb4','--collation-server=utf8mb4_unicode_ci']},
  'redis':{'image':REDIS_IMAGE},
