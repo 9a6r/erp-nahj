@@ -115,3 +115,22 @@ Before distributing a release, check the following on a supported Arch installat
 - Validate enterprise certificates and any required SSO integration separately. Automatic cross-origin SSO redirects are currently delegated to the organization browser.
 
 The visual palette takes inspiration from the NAHJ Blue Glass Plymouth theme and the Nahj shell: deep-water backgrounds, blue-grey surfaces and ice-blue highlights. No boot theme, compositor configuration, startup animation or system appearance is installed or changed by this application.
+
+## Source integrity and release provenance
+
+From the repository root, `python3 desktop/tests/audit_upstream.py` compares the
+committed ERPNext tree with the pinned upstream commit. Fetch that commit first
+when working from a shallow checkout. See [UPSTREAM-AUDIT.md](UPSTREAM-AUDIT.md)
+for the reviewed overlays and scope.
+
+The native workflow tests the actual Arch installer and retains its pacman
+package. The full ERP workflow separately rebuilds the server, requires the
+exact manifest image ID/archive digest/size, and tests actual accounting, files,
+permissions, language, isolated service delivery, backup/recovery and VM reboot.
+The tag release depends on both workflows. Never publish a different archive
+under the same tag or substitute an untested package.
+
+`nahj-recover-release.yml` is a narrowly scoped recovery for 0.3.1-rc1: it checks
+known successful jobs and package provenance, reproduces an expired archive,
+and publishes the already-existing verified tag. Its successful run is recorded
+in the current verification report. It refuses to overwrite a published release.

@@ -1,3 +1,5 @@
+> Historical report for an earlier release. For the published 0.3.1-rc1 and its current evidence, see [VERIFICATION-0.3.1.md](VERIFICATION-0.3.1.md).
+
 # Nahj Desktop 0.2.1 — verification
 
 Validated on 26 October 2026 using an Arch Linux x86_64 virtual machine under QEMU, with its own Linux 7.2.11 kernel, 2 virtual CPUs and 3 GiB RAM. The runtime was GTK 4.24.1 and WebKitGTK 2.54.2. WebKit sandboxing and TLS verification remained enabled.

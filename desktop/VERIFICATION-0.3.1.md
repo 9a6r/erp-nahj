@@ -1,6 +1,15 @@
 # Nahj 0.3.1-rc1 — verification, reviewed 11 November 2026
 
-**Native and full ERP checks passed. Public release publication is being recovered.**
+**Native and full ERP checks passed. Prerelease published on 11 November 2026.**
+
+## Public download verification — 11 November 2026
+
+The unchanged application downloader fetched the published server archive from
+GitHub, resumed an intentionally interrupted 2 MiB download with HTTP 206,
+verified the pinned SHA256 and size, and removed the partial file. The public
+Arch package, server manifest and upstream audit were also downloaded; every
+entry in the published SHA256SUMS matched. The Arch package SHA256 is
+`908895cb6efd408e8b3364a3355cfa34b4c2c73ae4278cdfc7ddceb0021603b0`.
 
 ## Audited source and actual Arch installer — 6 November 2026
 
@@ -20,10 +29,15 @@ Arabic/English print checks including the manufacturing regression, HTTP/PDF and
 attachment authorization, private SMTP and signed webhook delivery, independent
 restore, review/activation, and both full stacks after a Zen VM reboot.
 
-The publication job failed with GitHub HTTP 403 despite a contents-write token.
-This is a distribution failure, not a failed ERP/native test. The recovery
-workflow verifies both successful jobs, reuses their Arch package, and rebuilds
-the expired server artifact with exact digest/size checks before publication.
+The original publication job failed with GitHub HTTP 403 despite a contents-write
+token. The [recovery run](https://github.com/9a6r/erp-nahj/actions/runs/43081339842)
+passed on 11 November: it verified both successful test jobs, reused their Arch
+package and rebuilt the expired server artifact with exact digest/size checks.
+After the source was pushed to the default branch, publication used the existing
+verified tag without requesting a separate target commit. The public
+[release](https://github.com/9a6r/erp-nahj/releases/tag/desktop-v0.3.1-rc1) contains
+the Arch package, server archive, manifest, upstream audit and SHA256SUMS.
+No tag was moved and no different application artifact was substituted.
 
 The new image identity appears in the final section of this report.
 The earlier runs below document older artifacts and must not be treated as
@@ -303,4 +317,5 @@ archive SHA256 `b24f5975c43cae48bc323c7e3eb4029e5739f8bf53a172861293cad503cee98b
 and size 1,091,253,572 bytes. Previous image checks above are historical evidence;
 the tag-triggered test jobs reproduced and validated this exact artifact.
 Native validation now also exercises the actual installer, including subordinate
-ID allocation on a fresh account. Both test jobs passed; publication remains a separate tracked step.
+ID allocation on a fresh account. Both test jobs passed; the recovery workflow subsequently published these exact
+verified artifacts. Organization-specific production validation remains separate.

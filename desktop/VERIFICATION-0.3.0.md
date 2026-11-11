@@ -1,3 +1,5 @@
+> Historical report for an earlier release. For the published 0.3.1-rc1 and its current evidence, see [VERIFICATION-0.3.1.md](VERIFICATION-0.3.1.md).
+
 # Desktop 0.3.0 validation — in progress
 
 These are independent checks of the recovered implementation. Previous 0.2.1 results are historical, not proof of 0.3.0 server behavior. This report remains incomplete until the server workflows below finish.
