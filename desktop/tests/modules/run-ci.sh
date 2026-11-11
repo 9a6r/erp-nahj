@@ -22,14 +22,17 @@ PY
 docker load -i "$work/server.tar.gz"
 rm "$work/server.tar.gz"
 python3 - "$work" <<'PY'
-import json,pathlib,sys,os
+import json,pathlib,sys,os,subprocess
 sys.path.insert(0,'desktop')
 from nahj_desktop.server import IMAGE_ID,MARIADB_IMAGE,REDIS_IMAGE
 work=pathlib.Path(sys.argv[1])
+actual=subprocess.check_output(['docker','image','inspect',IMAGE_ID,'--format','{{.Id}}'],text=True).strip()
+assert actual==IMAGE_ID
+subprocess.run(['docker','tag',IMAGE_ID,'nahj-module-test:verified'],check=True)
 spec={'services':{
  'db':{'image':MARIADB_IMAGE,'environment':{'MARIADB_ROOT_PASSWORD':'disposable-ci-only'},'command':['--character-set-server=utf8mb4','--collation-server=utf8mb4_unicode_ci']},
  'redis':{'image':REDIS_IMAGE},
- 'tests':{'image':IMAGE_ID,'working_dir':'/home/frappe/frappe-bench',
+ 'tests':{'image':'nahj-module-test:verified','pull_policy':'never','working_dir':'/home/frappe/frappe-bench',
           'environment':{'CI':'1','NAHJ_DISPOSABLE_MODULE_TESTS':'1','NAHJ_TEST_SHARD':os.environ['NAHJ_TEST_SHARD'],'NAHJ_SMOKE_ONLY':os.environ.get('NAHJ_SMOKE_ONLY','0')},
           'networks':{'default':{'aliases':['test_site']}},
           'volumes':[str(work/'checks')+':/checks:ro',str(work/'results')+':/results'],

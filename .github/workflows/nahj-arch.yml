@@ -9,12 +9,14 @@ on:
       - 'desktop/**'
       - '!desktop/**/*.md'
       - '!desktop/screenshots/**'
+      - '!desktop/tests/modules/**'
       - '.github/workflows/nahj-arch.yml'
   pull_request:
     paths:
       - 'desktop/**'
       - '!desktop/**/*.md'
       - '!desktop/screenshots/**'
+      - '!desktop/tests/modules/**'
       - '.github/workflows/nahj-arch.yml'
 
 permissions:

@@ -52,3 +52,40 @@ jobs:
           path: ${{ runner.temp }}/nahj-modules/results/
           include-hidden-files: true
           retention-days: 30
+
+  report:
+    needs: [preflight, modules]
+    if: always() && needs.preflight.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nahj-module-tests-*
+          path: results
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Summarize every module, including failed or incomplete shards
+        run: |
+          python desktop/tests/modules/aggregate.py results
+      - name: Combine measured line and branch coverage
+        if: always()
+        run: |
+          python -m pip install 'coverage~=7.10.0'
+          python -m coverage combine --rcfile=desktop/tests/modules/coverage.ini --keep results/nahj-module-tests-*
+          python -m coverage json --rcfile=desktop/tests/modules/coverage.ini -o results/coverage.json
+          python -m coverage html --rcfile=desktop/tests/modules/coverage.ini -d results/htmlcov
+      - name: Publish the outcome table to the run summary
+        if: always()
+        run: test ! -f results/SUMMARY.md || cat results/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nahj-module-test-report
+          path: |
+            results/SUMMARY.md
+            results/outcomes.json
+            results/coverage.json
+            results/htmlcov/
+          retention-days: 30

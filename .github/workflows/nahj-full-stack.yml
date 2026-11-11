@@ -9,6 +9,7 @@ on:
       - 'desktop/nahj_desktop/**'
       - 'desktop/server-image/**'
       - 'desktop/tests/**'
+      - '!desktop/tests/modules/**'
       - 'banking/**'
       - 'erpnext/www/banking.*'
       - 'erpnext/locale/ar.po'
