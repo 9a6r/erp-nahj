@@ -2,7 +2,7 @@
 
 تطبيق ديسكتوب عربي على Linux مبني على **ERPNext 16.53.0 وFrappe 16.54.0**. يجمع المحاسبة والمبيعات والمشتريات والمخزون والتصنيع وبقية وحدات ERPNext، مع العربية والإنجليزية وزر تبديل اللغة. يستخدم النظام الأصلي وقاعدة بيانات فعلية، ويمكن تشغيله محليًا أو الاتصال بخادم المؤسسة عبر HTTPS.
 
-[دليل التثبيت](desktop/README.md) · [الخادم والنسخ والاستعادة](desktop/SERVER.md) · [نتائج الاختبارات](desktop/VERIFICATION-0.3.1.md) · [مراجعة المصدر](desktop/UPSTREAM-AUDIT.md) · [الصور](desktop/screenshots/0.3.1/README.md)
+[دليل التثبيت](desktop/README.md) · [الخادم والنسخ والاستعادة](desktop/SERVER.md) · [اختبارات الإصدار](desktop/VERIFICATION-0.3.1.md) · [الاختبارات الموسّعة للوحدات](desktop/MODULE-TESTS.md) · [مراجعة المصدر](desktop/UPSTREAM-AUDIT.md) · [الصور](desktop/screenshots/0.3.1/README.md)
 
 ## حالة الإصدار
 
