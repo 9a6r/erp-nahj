@@ -3,6 +3,7 @@
 set -euo pipefail
 : "${RUNNER_TEMP:?Disposable CI runner required}"
 : "${NAHJ_TEST_SHARD:?Select a test shard}"
+export NAHJ_TEST_PROFILE=${NAHJ_TEST_PROFILE:-release}
 repo=$(pwd)
 work="$RUNNER_TEMP/nahj-modules"
 mkdir -p "$work/results" "$work/checks"
@@ -10,6 +11,24 @@ chmod 777 "$work/results"
 cp desktop/tests/modules/{prepare.py,run_suite.py,start.sh} "$work/checks/"
 python3 desktop/tests/modules/inventory.py "$repo" > "$work/checks/inventory.json"
 cp "$work/checks/inventory.json" "$work/results/inventory.json"
+python3 - "$work" <<'PYPROFILE'
+import hashlib, json, os, pathlib, sys, tarfile
+from urllib.request import urlretrieve
+work = pathlib.Path(sys.argv[1])
+profile = os.environ['NAHJ_TEST_PROFILE']
+assert profile in ('release', 'payments')
+provenance = {'profile': profile, 'additional_apps': []}
+if profile == 'payments':
+    lock = json.loads(pathlib.Path('desktop/tests/modules/payments-lock.json').read_text())
+    archive = work / 'payments.tar.gz'
+    urlretrieve(lock['url'], archive)
+    assert hashlib.sha256(archive.read_bytes()).hexdigest() == lock['sha256']
+    with tarfile.open(archive) as source:
+        source.extractall(work / 'checks', filter='data')
+    (work / 'checks' / ('payments-' + lock['commit'])).rename(work / 'checks' / 'payments')
+    provenance['additional_apps'].append(lock)
+(work / 'results' / 'profile.json').write_text(json.dumps(provenance, indent=2))
+PYPROFILE
 python3 - "$work" <<'PY'
 import json, pathlib, sys, tarfile
 from urllib.request import urlretrieve
@@ -46,7 +65,7 @@ spec={'services':{
  'db':{'image':MARIADB_IMAGE,'environment':{'MARIADB_ROOT_PASSWORD':'disposable-ci-only'},'command':['--character-set-server=utf8mb4','--collation-server=utf8mb4_unicode_ci']},
  'redis':{'image':REDIS_IMAGE},
  'tests':{'image':'nahj-module-test:verified','pull_policy':'never','working_dir':'/home/frappe/frappe-bench',
-          'environment':{'CI':'1','TZ':'Asia/Kolkata','NAHJ_DISPOSABLE_MODULE_TESTS':'1','NAHJ_TEST_SHARD':os.environ['NAHJ_TEST_SHARD'],'NAHJ_SMOKE_ONLY':os.environ.get('NAHJ_SMOKE_ONLY','0')},
+          'environment':{'CI':'1','TZ':'Asia/Kolkata','NAHJ_DISPOSABLE_MODULE_TESTS':'1','NAHJ_TEST_PROFILE':os.environ['NAHJ_TEST_PROFILE'],'NAHJ_TEST_SHARD':os.environ['NAHJ_TEST_SHARD'],'NAHJ_SMOKE_ONLY':os.environ.get('NAHJ_SMOKE_ONLY','0')},
           'networks':{'default':{'aliases':['test_site']}},
           'volumes':[str(work/'checks')+':/checks:ro',str(work/'results')+':/results'],
           'command':['bash','/checks/start.sh']}}}

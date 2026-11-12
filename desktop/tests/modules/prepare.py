@@ -22,13 +22,16 @@ config = dict(db_host='db', redis_cache='redis://redis:6379/0', redis_queue='red
               default_site='test_site', serve_default_site=True, developer_mode=1,
               mute_emails=1, chromium_path='/usr/lib/chromium/chromium-headless-shell')
 Path('common_site_config.json').write_text(json.dumps(config))
-Path('apps.txt').write_text('frappe\nerpnext\n')
+profile = os.environ['NAHJ_TEST_PROFILE']
+assert profile in ('release', 'payments')
+apps = ['payments', 'erpnext'] if profile == 'payments' else ['erpnext']
+Path('apps.txt').write_text('\n'.join(['frappe', *apps]) + '\n')
 import frappe
 from frappe.installer import _new_site
 frappe.init('test_site', new_site=True, sites_path='.')
 _new_site(db_name=None, site='test_site', db_type='mariadb', db_host='db', db_root_username='root',
           db_root_password='disposable-ci-only', admin_password='disposable-ci-only',
-          install_apps=['erpnext'], mariadb_user_host_login_scope='%')
+          install_apps=apps, mariadb_user_host_login_scope='%')
 p=Path('test_site/site_config.json'); conf=json.loads(p.read_text())
 conf.update(allow_tests=True, nahj_disposable_test_site=True, mute_emails=1,
             host_name='http://test_site:8000', admin_password='disposable-ci-only',

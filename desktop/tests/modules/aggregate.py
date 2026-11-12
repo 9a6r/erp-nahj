@@ -9,6 +9,13 @@ plans = list(root.glob('*/inventory.json'))
 if not plans:
     raise SystemExit('No inventory artifacts were produced')
 plan = json.loads(plans[0].read_text())
+for path in plans[1:]:
+    if json.loads(path.read_text()) != plan:
+        raise SystemExit('Cannot combine different test inventories')
+profiles = [json.loads(p.read_text()) for p in root.glob('*/profile.json')]
+if profiles and (len(profiles) != len(plans) or any(p != profiles[0] for p in profiles)):
+    raise SystemExit('Cannot combine missing or different dependency profiles')
+profile = profiles[0] if profiles else {'profile': 'release', 'additional_apps': []}
 rows = {m: collections.Counter() for m in plan['modules']}
 labels = {m.lower().replace(' ', '_'): m for m in plan['modules']}
 labels['templates'] = 'Portal'
@@ -64,11 +71,13 @@ for directory in sorted(root.iterdir()):
 missing = sorted(set(range(1, plan['shards']+1)) - seen_shards)
 unexecuted = sorted(x['path'] for x in plan['files'] if x['path'] not in finished)
 result = dict(modules=rows, missing_shards=missing, unfinished_files=unexecuted,
+              dependency_profile=profile,
               module_errors=module_errors, failures=failures,
               complete=not missing and not unexecuted and not module_errors,
               static_test_methods=plan['static_test_methods'])
 (root/'outcomes.json').write_text(json.dumps(result, ensure_ascii=False, indent=2))
 lines = ['# ERPNext upstream test outcomes', '',
+         'Dependency profile: `' + profile['profile'] + '`. See profile.json for pinned additional apps.', '',
          'This is execution of the existing upstream test suite, not proof of every possible business process.',
          'Portal includes website/template tests. Shared components are listed separately.', '',
          '| Module | Files | Declared methods | Executed tests | Passed | Failed/errors | Skipped | Expected failures |',

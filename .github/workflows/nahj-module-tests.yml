@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: nahj-all-modules-${{ github.ref }}
+  group: nahj-all-modules-payments-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   preflight:
@@ -17,15 +17,35 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      - name: Verify real test-site bootstrap and upstream stock tests
+      - name: Verify original stock, PDF and Payments tests before the full suite
         env:
           NAHJ_TEST_SHARD: '1'
           NAHJ_SMOKE_ONLY: '1'
+          NAHJ_TEST_PROFILE: payments
         run: bash desktop/tests/modules/run-ci.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: nahj-module-preflight
+          path: ${{ runner.temp }}/nahj-modules/results/
+          include-hidden-files: true
+          retention-days: 30
+  release-pdf:
+    name: PDF regression on the published image without Payments
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run original stock, quotation PDF and account statement tests
+        env:
+          NAHJ_TEST_SHARD: '1'
+          NAHJ_SMOKE_ONLY: '1'
+          NAHJ_TEST_PROFILE: release
+        run: bash desktop/tests/modules/run-ci.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nahj-module-release-pdf
           path: ${{ runner.temp }}/nahj-modules/results/
           include-hidden-files: true
           retention-days: 30
@@ -40,9 +60,10 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6, 7, 8]
     steps:
       - uses: actions/checkout@v6
-      - name: Run every allocated original test on the verified release
+      - name: Run every original test with the pinned official Payments dependency
         env:
           NAHJ_TEST_SHARD: ${{ matrix.shard }}
+          NAHJ_TEST_PROFILE: payments
         run: bash desktop/tests/modules/run-ci.sh
       - name: Keep all outcomes including skips and import errors
         if: always()

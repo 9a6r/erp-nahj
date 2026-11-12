@@ -13,8 +13,20 @@ shard = int(sys.argv[1])
 out = Path('/results')
 plan = json.loads(Path('/checks/inventory.json').read_text())
 smoke = os.environ.get('NAHJ_SMOKE_ONLY') == '1'
+profile = os.environ['NAHJ_TEST_PROFILE']
+smoke_paths = {
+    'erpnext/stock/doctype/bin/test_bin.py',
+    'erpnext/accounts/doctype/process_statement_of_accounts/test_process_statement_of_accounts.py',
+    'erpnext/buying/doctype/request_for_quotation/test_request_for_quotation.py',
+}
+if profile == 'payments':
+    smoke_paths.update({
+        'erpnext/accounts/doctype/payment_request/test_payment_request.py',
+        'erpnext/selling/doctype/delivery_schedule_item/test_delivery_schedule_item.py',
+        'erpnext/selling/doctype/sms_center/test_sms_center.py',
+    })
 selected = [f for f in plan['files'] if
-            (f['path'] == 'erpnext/stock/doctype/bin/test_bin.py' if smoke else f['shard'] == shard)]
+            (f['path'] in smoke_paths if smoke else f['shard'] == shard)]
 assert selected
 
 os.chdir('/home/frappe/frappe-bench/sites')
@@ -109,7 +121,7 @@ try:
 finally:
     cov.stop()
     cov.save()
-    summary = dict(shard=shard, smoke=smoke, planned_files=len(selected), completed_files=len(completed),
+    summary = dict(shard=shard, smoke=smoke, profile=profile, planned_files=len(selected), completed_files=len(completed),
                    module_errors=module_errors, tests_run=result.testsRun,
                    failures=len(result.failures), errors=len(result.errors),
                    skipped=len(result.skipped), expected_failures=len(result.expectedFailures),
