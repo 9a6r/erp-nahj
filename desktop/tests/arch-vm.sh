@@ -94,7 +94,8 @@ tar --exclude=desktop/dist --exclude=__pycache__ --exclude=desktop/screenshots -
 copy_to_guest desktop-test.tar.gz /home/nahj/desktop-test.tar.gz
 remote 'set -e; mkdir -p source; tar -xzf desktop-test.tar.gz -C source'
 if [[ ${NAHJ_FULL_STACK:-0} == 1 ]]; then
-    copy_to_guest "$RUNNER_TEMP/nahj-build/nahj-server-0.3.1-rc1-amd64.tar.gz" /home/nahj/server.tar.gz
+    archive=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$repo/desktop/nahj_desktop/server_release.json")
+    copy_to_guest "$RUNNER_TEMP/nahj-build/$archive" /home/nahj/server.tar.gz
     remote 'cd source/desktop; PYTHONPATH=. python tests/full_stack.py prepare' 2>&1 | tee results/full-stack.log
 else
     remote 'bash source/desktop/tests/arch-guest.sh' 2>&1 | tee results/native-tests.log

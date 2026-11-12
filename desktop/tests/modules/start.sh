@@ -5,8 +5,18 @@ cd /home/frappe/frappe-bench
 env/bin/python -m ensurepip
 env/bin/python -m pip install 'coverage~=7.10.0' 'Faker~=18.10.1' 'hypothesis~=6.77.0' 'freezegun~=1.5.5' 'responses==0.23.1' 'unittest-xml-reporting~=3.2.0'
 if [ "$NAHJ_TEST_PROFILE" = payments ]; then
-    cp -R /checks/payments apps/payments
-    env/bin/python -m pip install -e apps/payments
+    if [ ! -d apps/payments ]; then
+        cp -R /checks/payments apps/payments
+        env/bin/python -m pip install -e apps/payments
+    fi
+    env/bin/python - <<'PYSOURCE'
+from pathlib import Path
+for source in Path('/checks/payments').rglob('*'):
+    if source.is_file():
+        target = Path('apps/payments') / source.relative_to('/checks/payments')
+        assert target.read_bytes() == source.read_bytes(), str(target)
+print('PASS: every pinned Payments source file matches the official archive')
+PYSOURCE
 fi
 env/bin/python -m pip list --format=json > /results/python-packages.json
 env/bin/python /checks/prepare.py

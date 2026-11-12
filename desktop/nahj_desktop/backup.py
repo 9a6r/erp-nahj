@@ -39,7 +39,7 @@ def attachment_path(member, site, visibility):
     return parts[1:]
 
 
-def inspect_backup(directory, image_id):
+def inspect_backup(directory, image_id, compatible_images=None):
     if not str(directory).strip():
         raise BackupError('Select a backup folder containing manifest.json.')
     root = Path(directory).expanduser()
@@ -51,8 +51,13 @@ def inspect_backup(directory, image_id):
             raise BackupError('Backup must contain only ordinary files, without symbolic links.')
     try:
         manifest = read_json(root / 'manifest.json')
-        if manifest.get('format') != 1 or manifest.get('image') != image_id:
+        compatible = (compatible_images or {}).get(manifest.get('image'))
+        if manifest.get('format') != 1 or (manifest.get('image') != image_id and not compatible):
             raise BackupError('Backup format or server image differs from this release. A tested migration is required.')
+        if manifest.get('image') != image_id and any(
+                not compatible.get(key) or manifest.get(key) != compatible[key]
+                for key in ('erpnext_version', 'frappe_version')):
+            raise BackupError('Backup application versions differ from the tested migration source.')
         site = manifest.get('site', '')
         if not isinstance(site, str) or not re.fullmatch(r'[a-z0-9][a-z0-9.-]{0,100}', site) or '..' in site:
             raise BackupError('Invalid backup site name.')

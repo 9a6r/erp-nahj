@@ -19,7 +19,9 @@ def main():
         raise RuntimeError('Refusing to inspect a non-disposable site')
     frappe.connect()
     frappe.set_user('Administrator')
-    assert set(frappe.get_installed_apps()) == {'frappe', 'erpnext'}
+    inventory = Path('/home/frappe/nahj-apps.json')
+    expected_apps = json.loads(inventory.read_text())['install_order'] if inventory.exists() else ['frappe', 'erpnext']
+    assert set(frappe.get_installed_apps()) == set(expected_apps)
     records = expected['records']
     invoice = frappe.get_doc('Sales Invoice', records['sales_invoice'])
     assert invoice.docstatus == 1 and invoice.grand_total == 240 and invoice.outstanding_amount == 0

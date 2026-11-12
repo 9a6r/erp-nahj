@@ -11,16 +11,20 @@ import sys
 import time
 
 from backup import inspect_backup, extract_attachments, read_json
+from provision import bundled_apps
 
 
 def main():
     import frappe
     import pymysql
-    from frappe.installer import _new_site, is_partial, is_downgrade, validate_database_sql
+    from frappe.installer import _new_site, is_partial, is_downgrade, validate_database_sql, install_app
 
     settings = json.load(sys.stdin)
     source = Path('/run/nahj/backup')
-    report = inspect_backup(source, settings['image'])
+    inventory_path = Path('/home/frappe/nahj-apps.json')
+    inventory = read_json(inventory_path) if inventory_path.exists() else {}
+    report = inspect_backup(source, settings['image'], inventory.get('restore_sources', {}))
+    apps = bundled_apps()
     os.chdir('/home/frappe/frappe-bench/sites')
     site = settings['site']
     if Path(site).exists():
@@ -34,7 +38,7 @@ def main():
                   pause_scheduler=True, mute_emails=True)
     Path('common_site_config.json').write_text(json.dumps(common))
     Path('common_site_config.json').chmod(0o600)
-    Path('apps.txt').write_text('frappe\nerpnext\n')
+    Path('apps.txt').write_text('\n'.join(apps) + '\n')
     frappe.init(site, new_site=True, sites_path='.')
     frappe.conf.db_type = 'mariadb'
     # Preserve upstream database validation as well as our exact-image gate.
@@ -68,7 +72,14 @@ def main():
     frappe.destroy()
     frappe.init(site, sites_path='.')
     frappe.connect()
-    if set(frappe.get_installed_apps()) != {'frappe', 'erpnext'}:
+    installed = set(frappe.get_installed_apps())
+    upgrading = report['manifest']['image'] != settings['image']
+    if upgrading and installed == {'frappe', 'erpnext'} and apps == ['frappe', 'payments', 'erpnext']:
+        # Runs only in the new recovery project, with workers, scheduler and
+        # outbound email paused. The original site's data is never migrated.
+        install_app('payments')
+        installed = set(frappe.get_installed_apps())
+    if installed != set(apps):
         raise RuntimeError('Backup requires additional applications. Recovery remains stopped for inspection.')
     frappe.db.set_single_value('System Settings', 'enable_scheduler', 0)
     frappe.db.commit()

@@ -6,12 +6,23 @@ import sys
 import time
 
 
+def bundled_apps(path=Path('/home/frappe/nahj-apps.json')):
+    """Read only the application inventory baked into the verified image."""
+    if not path.exists():
+        return ['frappe', 'erpnext']  # Published 0.3.1 image.
+    apps = json.loads(path.read_text())['install_order']
+    if apps != ['frappe', 'payments', 'erpnext']:
+        raise RuntimeError('Unsupported bundled application inventory.')
+    return apps
+
+
 def main():
     import pymysql
     import frappe
     from frappe.installer import _new_site, install_app
 
     settings = json.load(sys.stdin)
+    apps = bundled_apps()
     os.chdir('/home/frappe/frappe-bench/sites')
     site = settings['site']
     if (Path(site) / 'site_config.json').is_file():
@@ -20,8 +31,9 @@ def main():
         installed = frappe.get_installed_apps()
         if 'frappe' not in installed:
             raise RuntimeError('The base site installation is incomplete. Data was retained; restore or repair it before retrying.')
-        if 'erpnext' not in installed:
-            install_app('erpnext')
+        for app in apps[1:]:
+            if app not in installed:
+                install_app(app)
         finish(frappe, settings)
         return
     if Path(site).exists():
@@ -65,7 +77,7 @@ def main():
                 if cursor.fetchall():
                     raise RuntimeError('External database is not empty; provisioning refused.')
     Path('common_site_config.json').write_text(json.dumps(common))
-    Path('apps.txt').write_text('frappe\nerpnext\n')
+    Path('apps.txt').write_text('\n'.join(apps) + '\n')
     os.chmod('common_site_config.json', 0o600)
     frappe.init(site, new_site=True, sites_path='.')
     _new_site(
@@ -75,7 +87,7 @@ def main():
         db_password=settings['password'] if external else None,
         db_root_username=None if external else 'root',
         db_root_password=None if external else settings['password'],
-        admin_password=settings['admin_password'], install_apps=['erpnext'],
+        admin_password=settings['admin_password'], install_apps=apps[1:],
         setup_db=not external, mariadb_user_host_login_scope='%',
     )
     frappe.connect()

@@ -320,7 +320,7 @@ class Server:
 
     @staticmethod
     def require_supported_profile(profile):
-        if profile['image'] != IMAGE_ID:
+        if profile['image'] != IMAGE_ID and profile['image'] not in RELEASE.get('restore_sources', {}):
             raise ServerError('This site uses another server image. Automatic upgrades or downgrades are not supported. Back up and arrange a tested migration; existing data was retained.')
 
     def resume(self, admin_password='', db_password=''):
@@ -362,7 +362,7 @@ class Server:
         from .backup import inspect_backup, BackupError
         self.progress('Checking backup files, checksums and attachment paths…')
         try:
-            return inspect_backup(source, IMAGE_ID)
+            return inspect_backup(source, IMAGE_ID, RELEASE.get('restore_sources', {}))
         except BackupError as error:
             raise ServerError(str(error)) from None
 
@@ -494,8 +494,8 @@ frappe.destroy()
                         checksums[file.name] = hashlib.file_digest(stream, 'sha256').hexdigest()
                 private_write(stage / 'manifest.json', json.dumps({
                     'format': 1, 'site': p['site'], 'image': p['image'],
-                    'erpnext_version': RELEASE['erpnext_version'] if p['image'] == IMAGE_ID else None,
-                    'frappe_version': RELEASE['frappe_version'] if p['image'] == IMAGE_ID else None, 'sha256': checksums}, indent=2))
+                    'erpnext_version': (RELEASE if p['image'] == IMAGE_ID else RELEASE.get('restore_sources', {}).get(p['image'], {})).get('erpnext_version'),
+                    'frappe_version': (RELEASE if p['image'] == IMAGE_ID else RELEASE.get('restore_sources', {}).get(p['image'], {})).get('frappe_version'), 'sha256': checksums}, indent=2))
                 final = target / token
                 stage.rename(final)
                 self.progress('Backup exported: ' + str(final))

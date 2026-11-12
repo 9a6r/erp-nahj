@@ -1,0 +1,15 @@
+{
+  "erpnext_version": "16.53.0",
+  "erpnext_commit": "9cd11b19575bfc34f092a24f6c8b368c4dd69481",
+  "frappe_version": "16.54.0",
+  "frappe_commit": "2fcb9397a1f1da353b21e53d2f97ec56653acd02",
+  "platform": "linux/amd64",
+  "image": "registry-1.docker.io/frappe/erpnext@sha256:8f454efa71e9ffad9de4b9ccf377566134d285612f19e1e12e8a43fe7bf0db75",
+  "image_id": "sha256:ac36bee5c50b0393741e099389e2a111b23f86e49c6f8bf22091be84d8842ad9",
+  "archive": "nahj-server-0.3.1-rc1-amd64.tar.gz",
+  "sha256": "b24f5975c43cae48bc323c7e3eb4029e5739f8bf53a172861293cad503cee98b",
+  "size": 1091253572,
+  "version": "0.3.1-rc1",
+  "published": true,
+  "url": "https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.3.1-rc1/nahj-server-0.3.1-rc1-amd64.tar.gz"
+}

@@ -64,6 +64,24 @@ class BackupTests(unittest.TestCase):
         with self.assertRaisesRegex(BackupError, 'differ'):
             inspect_backup(self.source, IMAGE_ID)
 
+    def test_cross_image_restore_requires_explicit_source_and_matching_versions(self):
+        old = 'sha256:' + 'a' * 64
+        self.manifest(image=old)
+        path = self.source / 'manifest.json'
+        data = json.loads(path.read_text())
+        versions = {'erpnext_version': '16.53.0', 'frappe_version': '16.54.0'}
+        with self.assertRaisesRegex(BackupError, 'versions'):
+            inspect_backup(self.source, IMAGE_ID, {old: versions})
+        data.update(versions)
+        path.write_text(json.dumps(data))
+        self.assertEqual(inspect_backup(self.source, IMAGE_ID, {old: versions})['manifest']['image'], old)
+        data['erpnext_version'] = '17.0.0'
+        path.write_text(json.dumps(data))
+        with self.assertRaisesRegex(BackupError, 'versions'):
+            inspect_backup(self.source, IMAGE_ID, {old: versions})
+        with self.assertRaisesRegex(BackupError, 'server image'):
+            inspect_backup(self.source, IMAGE_ID)
+
     def test_rejects_traversal_links_devices_and_cross_visibility(self):
         for name, kind in [
             ('original.localhost/public/files/../../escape', tarfile.REGTYPE),
