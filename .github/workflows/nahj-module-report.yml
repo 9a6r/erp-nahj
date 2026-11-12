@@ -1,0 +1,55 @@
+name: Nahj recover measured module coverage
+on:
+  workflow_dispatch:
+  push:
+    branches: [develop]
+    paths: ['.github/workflows/nahj-module-report.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Analyze the exact source used by the completed suite.
+          ref: a2aef0b7a29ee3b663aa1400ae3bcee0eda0d178
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 43171916832
+          github-token: ${{ github.token }}
+          pattern: nahj-module-tests-*
+          path: results
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Preserve the original failed outcomes
+        continue-on-error: true
+        run: python desktop/tests/modules/aggregate.py results
+      - name: Check completeness and publish measured coverage
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result = json.loads(Path('results/outcomes.json').read_text())
+          assert result['complete'], 'Refusing to publish a complete-suite report from incomplete evidence'
+          assert len(list(Path('results').glob('nahj-module-tests-*/.coverage'))) == 8
+          print('Original failed cases retained:', len(result['failures']))
+          PY
+          python -m pip install 'coverage~=7.10.0'
+          python -m coverage combine --rcfile=desktop/tests/modules/coverage.ini --keep results/nahj-module-tests-*/.coverage
+          python -m coverage json --rcfile=desktop/tests/modules/coverage.ini -o results/coverage.json
+          python -m coverage html --rcfile=desktop/tests/modules/coverage.ini -d results/htmlcov
+          cat results/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
+          echo 'This job publishes evidence. The upstream suite retains its two failed budget tests.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nahj-module-coverage-43171916832
+          path: |
+            results/SUMMARY.md
+            results/outcomes.json
+            results/coverage.json
+            results/htmlcov/
+          retention-days: 30
