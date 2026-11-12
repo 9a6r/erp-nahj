@@ -1,0 +1,218 @@
+{
+  "modules": {
+    "Accounts": {
+      "files": 153,
+      "declared_methods": 1560,
+      "passed": 1556,
+      "executed": 1558,
+      "completed_files": 153,
+      "failed": 2
+    },
+    "CRM": {
+      "files": 19,
+      "declared_methods": 79,
+      "passed": 79,
+      "executed": 79,
+      "completed_files": 19
+    },
+    "Buying": {
+      "files": 21,
+      "declared_methods": 209,
+      "executed": 209,
+      "completed_files": 21,
+      "passed": 209
+    },
+    "Projects": {
+      "files": 15,
+      "declared_methods": 141,
+      "passed": 141,
+      "executed": 141,
+      "completed_files": 15
+    },
+    "Selling": {
+      "files": 37,
+      "declared_methods": 391,
+      "passed": 391,
+      "executed": 391,
+      "completed_files": 37
+    },
+    "Setup": {
+      "files": 27,
+      "declared_methods": 80,
+      "executed": 80,
+      "completed_files": 27,
+      "passed": 80
+    },
+    "Manufacturing": {
+      "files": 44,
+      "declared_methods": 773,
+      "passed": 773,
+      "executed": 773,
+      "completed_files": 44
+    },
+    "Stock": {
+      "files": 101,
+      "declared_methods": 1685,
+      "passed": 1685,
+      "executed": 1685,
+      "completed_files": 101
+    },
+    "Support": {
+      "files": 10,
+      "declared_methods": 113,
+      "passed": 113,
+      "executed": 113,
+      "completed_files": 10
+    },
+    "Utilities": {
+      "files": 5,
+      "declared_methods": 25,
+      "passed": 25,
+      "executed": 25,
+      "completed_files": 5
+    },
+    "Assets": {
+      "files": 15,
+      "declared_methods": 131,
+      "passed": 131,
+      "executed": 131,
+      "completed_files": 15
+    },
+    "Portal": {
+      "files": 4,
+      "declared_methods": 13,
+      "passed": 13,
+      "executed": 13,
+      "completed_files": 4
+    },
+    "Maintenance": {
+      "files": 2,
+      "declared_methods": 32,
+      "passed": 32,
+      "executed": 32,
+      "completed_files": 2
+    },
+    "Regional": {
+      "files": 11,
+      "declared_methods": 52,
+      "passed": 52,
+      "executed": 52,
+      "completed_files": 11
+    },
+    "ERPNext Integrations": {
+      "files": 1,
+      "declared_methods": 9,
+      "passed": 9,
+      "executed": 9,
+      "completed_files": 1
+    },
+    "Quality Management": {
+      "files": 10,
+      "declared_methods": 25,
+      "passed": 25,
+      "executed": 25,
+      "completed_files": 10
+    },
+    "Communication": {
+      "files": 1,
+      "declared_methods": 3,
+      "passed": 3,
+      "executed": 3,
+      "completed_files": 1
+    },
+    "Telephony": {
+      "files": 4,
+      "declared_methods": 21,
+      "passed": 21,
+      "executed": 21,
+      "completed_files": 4
+    },
+    "Bulk Transaction": {
+      "files": 2,
+      "declared_methods": 12,
+      "passed": 12,
+      "executed": 12,
+      "completed_files": 2
+    },
+    "Subcontracting": {
+      "files": 4,
+      "declared_methods": 179,
+      "passed": 179,
+      "executed": 179,
+      "completed_files": 4
+    },
+    "EDI": {
+      "files": 3,
+      "declared_methods": 22,
+      "passed": 22,
+      "executed": 22,
+      "completed_files": 3
+    },
+    "Shared: controllers": {
+      "files": 19,
+      "declared_methods": 170,
+      "passed": 170,
+      "executed": 170,
+      "completed_files": 19
+    },
+    "Shared: patches": {
+      "files": 1,
+      "declared_methods": 6,
+      "passed": 6,
+      "executed": 6,
+      "completed_files": 1
+    },
+    "Shared: startup": {
+      "files": 1,
+      "declared_methods": 1,
+      "passed": 1,
+      "executed": 1,
+      "completed_files": 1
+    },
+    "Shared: tests": {
+      "files": 11,
+      "declared_methods": 32,
+      "passed": 31,
+      "executed": 31,
+      "completed_files": 11
+    },
+    "Shared: www": {
+      "files": 1,
+      "declared_methods": 1,
+      "passed": 1,
+      "executed": 1,
+      "completed_files": 1
+    }
+  },
+  "missing_shards": [],
+  "unfinished_files": [],
+  "dependency_profile": {
+    "profile": "payments",
+    "additional_apps": [
+      {
+        "repository": "https://github.com/frappe/payments",
+        "branch": "version-16",
+        "commit": "9e842a473a8f4ec70a9ff06a3e067d10f98d26ed",
+        "url": "https://codeload.github.com/frappe/payments/tar.gz/9e842a473a8f4ec70a9ff06a3e067d10f98d26ed",
+        "sha256": "b18d672b65ffd98d3763419523158adecfbcb1a30ea11de52e49b5cd460520dd"
+      }
+    ]
+  },
+  "module_errors": [],
+  "failures": [
+    {
+      "module": "erpnext/accounts/doctype/budget/test_budget.py",
+      "test": "erpnext.accounts.doctype.budget.test_budget.TestBudget.test_monthly_budget_on_cancellation1",
+      "status": "failed",
+      "detail": "Traceback (most recent call last):\n  File \"/home/frappe/frappe-bench/apps/erpnext/erpnext/accounts/doctype/budget/test_budget.py\", line 435, in test_monthly_budget_on_cancellation1\n    self.assertRaises(BudgetError, jv.cancel)\n    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^\n    _i = 9\n    budget = <Budget: doctype=Budget BUDGET-00000001 docstatus=1>\n    jv = <JournalEntry: doctype=Journal Entry ACC-JV-2026-00010 docstatus=2>\n    month = 9\n    self = <erpnext.accounts.doctype.budget.test_budget.TestBudget testMethod=test_monthly_budget_on_cancellation1>\nAssertionError: BudgetError not raised by cancel\n"
+    },
+    {
+      "module": "erpnext/accounts/doctype/budget/test_budget.py",
+      "test": "erpnext.accounts.doctype.budget.test_budget.TestBudget.test_monthly_budget_on_cancellation2",
+      "status": "failed",
+      "detail": "Traceback (most recent call last):\n  File \"/home/frappe/frappe-bench/apps/erpnext/erpnext/accounts/doctype/budget/test_budget.py\", line 466, in test_monthly_budget_on_cancellation2\n    self.assertRaises(BudgetError, jv.cancel)\n    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^\n    _i = 9\n    budget = <Budget: doctype=Budget BUDGET-00000001 docstatus=1>\n    jv = <JournalEntry: doctype=Journal Entry ACC-JV-2026-00010 docstatus=2>\n    month = 9\n    project = 'PROJ-0001'\n    self = <erpnext.accounts.doctype.budget.test_budget.TestBudget testMethod=test_monthly_budget_on_cancellation2>\nAssertionError: BudgetError not raised by cancel\n"
+    }
+  ],
+  "complete": true,
+  "static_test_methods": 5765
+}

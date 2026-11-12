@@ -94,7 +94,7 @@ jobs:
         if: always()
         run: |
           python -m pip install 'coverage~=7.10.0'
-          python -m coverage combine --rcfile=desktop/tests/modules/coverage.ini --keep results/nahj-module-tests-*
+          python -m coverage combine --rcfile=desktop/tests/modules/coverage.ini --keep results/nahj-module-tests-*/.coverage
           python -m coverage json --rcfile=desktop/tests/modules/coverage.ini -o results/coverage.json
           python -m coverage html --rcfile=desktop/tests/modules/coverage.ini -d results/htmlcov
       - name: Publish the outcome table to the run summary

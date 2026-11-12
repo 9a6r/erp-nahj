@@ -1,0 +1,25 @@
+{
+  "tool": "coverage.py 7.10.7",
+  "reconstructed_from_run": 43171916832,
+  "includes_fixture_setup": true,
+  "totals": {
+    "covered_lines": 81204,
+    "num_statements": 98036,
+    "percent_covered": 79.72359938764905,
+    "percent_covered_display": "80",
+    "missing_lines": 16832,
+    "excluded_lines": 9490,
+    "num_branches": 44366,
+    "num_partial_branches": 6394,
+    "covered_branches": 32324,
+    "missing_branches": 12042
+  },
+  "files": 1826,
+  "line_percent": 82.8307968501367,
+  "branch_percent": 72.85759365279719,
+  "omit": [
+    "*/test_*.py",
+    "*/tests/*",
+    "*/patches/*"
+  ]
+}
