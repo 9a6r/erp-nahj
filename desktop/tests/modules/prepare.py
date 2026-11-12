@@ -26,11 +26,14 @@ Path('apps.txt').write_text('frappe\nerpnext\n')
 import frappe
 from frappe.installer import _new_site
 frappe.init('test_site', new_site=True, sites_path='.')
-_new_site(site='test_site', db_type='mariadb', db_host='db', db_root_username='root',
+_new_site(db_name=None, site='test_site', db_type='mariadb', db_host='db', db_root_username='root',
           db_root_password='disposable-ci-only', admin_password='disposable-ci-only',
           install_apps=['erpnext'], mariadb_user_host_login_scope='%')
 p=Path('test_site/site_config.json'); conf=json.loads(p.read_text())
-conf.update(allow_tests=True, nahj_disposable_test_site=True, mute_emails=1, host_name='http://test_site:8000')
+conf.update(allow_tests=True, nahj_disposable_test_site=True, mute_emails=1,
+            host_name='http://test_site:8000', admin_password='disposable-ci-only',
+            root_login='root', root_password='disposable-ci-only',
+            auto_email_id='test@example.com', throttle_user_limit=100)
 p.write_text(json.dumps(conf));p.chmod(0o600)
 frappe.destroy()
 print('PASS: fresh disposable ERPNext test site created')

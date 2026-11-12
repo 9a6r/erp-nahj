@@ -46,7 +46,7 @@ spec={'services':{
  'db':{'image':MARIADB_IMAGE,'environment':{'MARIADB_ROOT_PASSWORD':'disposable-ci-only'},'command':['--character-set-server=utf8mb4','--collation-server=utf8mb4_unicode_ci']},
  'redis':{'image':REDIS_IMAGE},
  'tests':{'image':'nahj-module-test:verified','pull_policy':'never','working_dir':'/home/frappe/frappe-bench',
-          'environment':{'CI':'1','NAHJ_DISPOSABLE_MODULE_TESTS':'1','NAHJ_TEST_SHARD':os.environ['NAHJ_TEST_SHARD'],'NAHJ_SMOKE_ONLY':os.environ.get('NAHJ_SMOKE_ONLY','0')},
+          'environment':{'CI':'1','TZ':'Asia/Kolkata','NAHJ_DISPOSABLE_MODULE_TESTS':'1','NAHJ_TEST_SHARD':os.environ['NAHJ_TEST_SHARD'],'NAHJ_SMOKE_ONLY':os.environ.get('NAHJ_SMOKE_ONLY','0')},
           'networks':{'default':{'aliases':['test_site']}},
           'volumes':[str(work/'checks')+':/checks:ro',str(work/'results')+':/results'],
           'command':['bash','/checks/start.sh']}}}
