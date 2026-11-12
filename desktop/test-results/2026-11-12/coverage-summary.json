@@ -3,11 +3,11 @@
   "reconstructed_from_run": 43171916832,
   "includes_fixture_setup": true,
   "totals": {
-    "covered_lines": 81204,
-    "num_statements": 98036,
-    "percent_covered": 79.72359938764905,
+    "covered_lines": 81170,
+    "num_statements": 97995,
+    "percent_covered": 79.7226768567234,
     "percent_covered_display": "80",
-    "missing_lines": 16832,
+    "missing_lines": 16825,
     "excluded_lines": 9490,
     "num_branches": 44366,
     "num_partial_branches": 6394,
@@ -15,11 +15,15 @@
     "missing_branches": 12042
   },
   "files": 1826,
-  "line_percent": 82.8307968501367,
+  "line_percent": 82.83075667125874,
   "branch_percent": 72.85759365279719,
   "omit": [
     "*/test_*.py",
     "*/tests/*",
     "*/patches/*"
-  ]
+  ],
+  "analysis_python": "3.14.10",
+  "recovery_run_id": 43265957542,
+  "recovery_artifact_id": 13966476896,
+  "recovery_artifact_sha256": "5ebb94c12b72ccee522163896976a567696965e639907a0ab25a933db934a049"
 }

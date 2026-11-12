@@ -1,0 +1,44 @@
+{
+  "upstream_version": "16.53.0",
+  "upstream_commit": "9cd11b19575bfc34f092a24f6c8b368c4dd69481",
+  "audited_ref": "f69c7ba3048cdf6afac5ecff7b3965a0f32f07a7",
+  "original_app_files": 5360,
+  "unchanged_app_files": 5356,
+  "deleted": [],
+  "unchanged_doctype_definitions": 531,
+  "unchanged_report_definitions": 186,
+  "modules": [
+    "Accounts",
+    "CRM",
+    "Buying",
+    "Projects",
+    "Selling",
+    "Setup",
+    "Manufacturing",
+    "Stock",
+    "Support",
+    "Utilities",
+    "Assets",
+    "Portal",
+    "Maintenance",
+    "Regional",
+    "ERPNext Integrations",
+    "Quality Management",
+    "Communication",
+    "Telephony",
+    "Bulk Transaction",
+    "Subcontracting",
+    "EDI"
+  ],
+  "reviewed_changes": {
+    "erpnext/controllers/accounts_controller.py": "Print-language amount-in-words only",
+    "erpnext/controllers/print_settings.py": "Translated units in printed item tables",
+    "erpnext/locale/ar.po": "Arabic catalogue completion and corrections",
+    "erpnext/www/banking.py": "Authenticated language preference and language-aware boot"
+  },
+  "added": [
+    "erpnext/templates/print_formats/includes/item_table_uom.html",
+    "erpnext/tests/test_banking_language.py"
+  ],
+  "root_build_metadata_unchanged": true
+}
