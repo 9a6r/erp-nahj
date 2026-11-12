@@ -1,0 +1,204 @@
+name: Nahj Payments candidate acceptance
+on:
+  workflow_dispatch:
+  push:
+    branches: [develop]
+    paths: ['.github/workflows/nahj-payments-candidate.yml']
+permissions:
+  contents: read
+concurrency:
+  group: nahj-payments-candidate-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build from the verified previous release and pinned official Payments
+        run: python3 desktop/server-image/build_candidate.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nahj-payments-candidate
+          path: |
+            ${{ runner.temp }}/nahj-candidate/nahj-server-0.3.2-rc1-amd64.tar.gz
+            ${{ runner.temp }}/nahj-candidate/server_release.json
+            ${{ runner.temp }}/nahj-candidate/apps.json
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error
+  preflight:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: nahj-payments-candidate
+          path: ${{ runner.temp }}/nahj-build
+      - name: Verify bundled Payments, printing and stock before the full suite
+        env:
+          NAHJ_TEST_PROFILE: payments
+          NAHJ_TEST_SHARD: '1'
+          NAHJ_SMOKE_ONLY: '1'
+          NAHJ_SERVER_ARCHIVE: ${{ runner.temp }}/nahj-build/nahj-server-0.3.2-rc1-amd64.tar.gz
+        run: |
+          cp "$RUNNER_TEMP/nahj-build/server_release.json" desktop/nahj_desktop/server_release.json
+          bash desktop/tests/modules/run-ci.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nahj-candidate-preflight
+          path: ${{ runner.temp }}/nahj-modules/results/
+          include-hidden-files: true
+  native:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: nahj-payments-candidate
+          path: ${{ runner.temp }}/nahj-build
+      - name: Test installer, package, native desktop and persistence on Arch Zen
+        run: |
+          cp "$RUNNER_TEMP/nahj-build/server_release.json" desktop/nahj_desktop/server_release.json
+          bash desktop/tests/arch-vm.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nahj-candidate-native
+          path: |
+            ${{ runner.temp }}/nahj-arch/results/
+            ${{ runner.temp }}/nahj-arch/packages/
+  erp:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: nahj-payments-candidate
+          path: ${{ runner.temp }}/nahj-build
+      - name: Test real ERP, Payments, backup, isolated recovery and reboot on Arch Zen
+        env:
+          NAHJ_FULL_STACK: '1'
+        run: |
+          cp "$RUNNER_TEMP/nahj-build/server_release.json" desktop/nahj_desktop/server_release.json
+          bash desktop/tests/arch-vm.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nahj-candidate-erp
+          path: ${{ runner.temp }}/nahj-arch/results/
+  modules:
+    needs: preflight
+    name: Candidate upstream tests ${{ matrix.shard }}/8
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    # Keep failed test outcomes; the report rejects missing evidence or any
+    # failure beyond the two separately diagnosed upstream calendar fixtures.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: nahj-payments-candidate
+          path: ${{ runner.temp }}/nahj-build
+      - name: Execute every allocated original test against the exact candidate
+        env:
+          NAHJ_TEST_PROFILE: payments
+          NAHJ_TEST_SHARD: ${{ matrix.shard }}
+          NAHJ_SERVER_ARCHIVE: ${{ runner.temp }}/nahj-build/nahj-server-0.3.2-rc1-amd64.tar.gz
+        run: |
+          cp "$RUNNER_TEMP/nahj-build/server_release.json" desktop/nahj_desktop/server_release.json
+          bash desktop/tests/modules/run-ci.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nahj-module-tests-${{ matrix.shard }}
+          path: ${{ runner.temp }}/nahj-modules/results/
+          include-hidden-files: true
+  budget:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          name: nahj-payments-candidate
+          path: ${{ runner.temp }}/nahj-build
+      - name: Recheck actual budget boundaries for all twelve months
+        env:
+          NAHJ_TEST_PROFILE: payments
+          NAHJ_TEST_SHARD: '1'
+          NAHJ_SERVER_ARCHIVE: ${{ runner.temp }}/nahj-build/nahj-server-0.3.2-rc1-amd64.tar.gz
+        run: |
+          cp "$RUNNER_TEMP/nahj-build/server_release.json" desktop/nahj_desktop/server_release.json
+          cp .github/diagnostics/budget_calendar.py desktop/tests/modules/run_suite.py
+          bash desktop/tests/modules/run-ci.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nahj-candidate-budget
+          path: ${{ runner.temp }}/nahj-modules/results/
+          include-hidden-files: true
+  report:
+    needs: [modules, budget, erp, native]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nahj-module-tests-*
+          path: results
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Preserve every original test failure in the public outcome report
+        continue-on-error: true
+        run: python desktop/tests/modules/aggregate.py results
+      - name: Reject incomplete evidence, new regressions or failed acceptance jobs
+        env:
+          BUDGET_RESULT: ${{ needs.budget.result }}
+          ERP_RESULT: ${{ needs.erp.result }}
+          NATIVE_RESULT: ${{ needs.native.result }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          data = json.loads(Path('results/outcomes.json').read_text())
+          assert data['complete'], 'Incomplete upstream suite'
+          known = {'erpnext.accounts.doctype.budget.test_budget.TestBudget.test_monthly_budget_on_cancellation1',
+                   'erpnext.accounts.doctype.budget.test_budget.TestBudget.test_monthly_budget_on_cancellation2'}
+          assert all(f['test'] in known and f['status'] == 'failed' and
+                     'AssertionError: BudgetError not raised by cancel' in f['detail'] for f in data['failures'])
+          assert all(os.environ[k] == 'success' for k in ('BUDGET_RESULT', 'ERP_RESULT', 'NATIVE_RESULT'))
+          assert sum(r.get('executed', 0) for r in data['modules'].values()) == 5762
+          print('No new regressions; original budget fixture failures retained:', len(data['failures']))
+          PY
+      - name: Combine candidate coverage
+        if: always()
+        run: |
+          python -m pip install 'coverage~=7.10.0'
+          python -m coverage combine --rcfile=desktop/tests/modules/coverage.ini --keep results/nahj-module-tests-*/.coverage
+          python -m coverage json --rcfile=desktop/tests/modules/coverage.ini -o results/coverage.json
+          test ! -f results/SUMMARY.md || cat results/SUMMARY.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nahj-candidate-report
+          path: |
+            results/SUMMARY.md
+            results/outcomes.json
+            results/coverage.json
