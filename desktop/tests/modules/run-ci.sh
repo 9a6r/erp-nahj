@@ -53,7 +53,15 @@ spec={'services':{
 (work/'compose.json').write_text(json.dumps(spec))
 PY
 compose=(docker compose -p "nahj-module-$NAHJ_TEST_SHARD" -f "$work/compose.json")
-trap '"${compose[@]}" down --volumes' EXIT
+cleanup() {
+    status=$?
+    "${compose[@]}" down --volumes || true
+    # The image runs as uid 1000 with a private umask; the artifact uploader
+    # runs as the host runner. Transfer only this disposable result directory.
+    sudo chown -R "$(id -u):$(id -g)" "$work/results"
+    exit "$status"
+}
+trap cleanup EXIT
 "${compose[@]}" up -d db redis
 # Preserve the real test exit status through tee; failed shards still upload evidence.
 "${compose[@]}" run --rm --use-aliases tests 2>&1 | tee "$work/results/tests.log"
