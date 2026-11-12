@@ -17,6 +17,7 @@ selected = [f for f in plan['files'] if
             (f['path'] == 'erpnext/stock/doctype/bin/test_bin.py' if smoke else f['shard'] == shard)]
 assert selected
 
+os.chdir('/home/frappe/frappe-bench/sites')
 import coverage
 cov = coverage.Coverage(data_file=str(out / '.coverage'), source=['erpnext'], branch=True,
                         omit=['*/test_*.py', '*/tests/*', '*/patches/*'])
@@ -25,7 +26,6 @@ import frappe
 from frappe.parallel_test_runner import ParallelTestRunner
 from frappe.testing.result import TestResult
 
-os.chdir('/home/frappe/frappe-bench/sites')
 frappe.init('test_site', sites_path='.')
 assert frappe.conf.nahj_disposable_test_site and frappe.conf.allow_tests
 frappe.connect()

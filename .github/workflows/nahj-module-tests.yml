@@ -10,7 +10,7 @@ permissions:
   contents: read
 concurrency:
   group: nahj-all-modules-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   preflight:
     runs-on: ubuntu-latest
