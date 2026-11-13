@@ -23,11 +23,20 @@ if inventory.exists():
             assert frappe._(source, lang='en') == source
         assert frappe._('Pay {0} {1}', lang='ar').format('12.50', 'EGP') == 'ادفع 12.50 EGP'
         old_lang = frappe.local.lang
-        frappe.local.lang = 'ar'
-        html = frappe.render_template('payments/templates/pages/paytm_checkout.html',
-                                      {'url': 'https://example.invalid/unused', 'payment_details': {}})
-        assert 'يُرجى عدم تحديث هذه الصفحة...' in html and 'صفحة الدفع لدى التاجر' in html
-        frappe.local.lang = old_lang
+        try:
+            from frappe.website.page_renderers.base_template_page import BaseTemplatePage
+            frappe.local.lang = 'ar'
+            # Website templates inherit the base path and settings supplied by
+            # Frappe's page renderer. Render with that real context; provider
+            # account setup/charging is outside this translation assertion.
+            page = BaseTemplatePage('paytm_checkout')
+            page.init_context()
+            page.context.update(url='https://example.invalid/unused', payment_details={})
+            page.post_process_context()
+            html = frappe.render_template('payments/templates/pages/paytm_checkout.html', page.context)
+            assert 'يُرجى عدم تحديث هذه الصفحة...' in html and 'صفحة الدفع لدى التاجر' in html
+        finally:
+            frappe.local.lang = old_lang
         print('PASS: real Arabic/English Payments translations, preserved amount/currency and rendered Paytm checkout')
     # This is a saved configuration record, not an advertised provider adapter.
     name = 'Nahj Acceptance Gateway'
