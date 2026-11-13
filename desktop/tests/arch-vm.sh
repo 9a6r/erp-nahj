@@ -96,7 +96,14 @@ remote 'set -e; mkdir -p source; tar -xzf desktop-test.tar.gz -C source'
 if [[ ${NAHJ_FULL_STACK:-0} == 1 ]]; then
     archive=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive"])' "$repo/desktop/nahj_desktop/server_release.json")
     copy_to_guest "$RUNNER_TEMP/nahj-build/$archive" /home/nahj/server.tar.gz
-    remote 'cd source/desktop; PYTHONPATH=. python tests/full_stack.py prepare' 2>&1 | tee results/full-stack.log
+    if [[ ${NAHJ_UPGRADE_VALIDATION:-0} == 1 ]]; then
+        copy_to_guest "$RUNNER_TEMP/nahj-build/nahj-server-0.3.1-rc1-amd64.tar.gz" /home/nahj/legacy-server.tar.gz
+        remote 'set -e; cp -a source legacy-source; cp legacy-source/desktop/server-image/base-release-0.3.1.json legacy-source/desktop/nahj_desktop/server_release.json'
+        remote 'cd legacy-source/desktop; PYTHONPATH=. python tests/upgrade_validation.py source' 2>&1 | tee results/upgrade-source.log
+        remote 'cd source/desktop; PYTHONPATH=. python tests/upgrade_validation.py restore' 2>&1 | tee results/upgrade-restore.log
+    else
+        remote 'cd source/desktop; PYTHONPATH=. python tests/full_stack.py prepare' 2>&1 | tee results/full-stack.log
+    fi
 else
     remote 'bash source/desktop/tests/arch-guest.sh' 2>&1 | tee results/native-tests.log
     scp -q -i "$work/test-key" -P 22222 -o BatchMode=yes -o UserKnownHostsFile="$work/known_hosts" \
@@ -105,7 +112,11 @@ fi
 stop_vm
 boot -kernel "$work/vmlinuz-linux-zen" -initrd "$work/initramfs-linux-zen.img" -append "$zen_cmdline"
 if [[ ${NAHJ_FULL_STACK:-0} == 1 ]]; then
-    remote 'cd source/desktop; PYTHONPATH=. python tests/full_stack.py after-reboot' 2>&1 | tee results/full-stack-reboot.log
+    if [[ ${NAHJ_UPGRADE_VALIDATION:-0} == 1 ]]; then
+        remote 'cd source/desktop; PYTHONPATH=. python tests/upgrade_validation.py after-reboot' 2>&1 | tee results/upgrade-reboot.log
+    else
+        remote 'cd source/desktop; PYTHONPATH=. python tests/full_stack.py after-reboot' 2>&1 | tee results/full-stack-reboot.log
+    fi
 else
     remote 'set -e; podman start nahj-arch-persistence; test "$(podman exec nahj-arch-persistence redis-cli GET nahj-persistence)" = survives-reboot; podman stop nahj-arch-persistence; echo "PASS: rootless volume data survived a full Zen VM reboot"' 2>&1 | tee results/reboot.log
 fi

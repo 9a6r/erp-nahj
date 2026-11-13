@@ -69,7 +69,7 @@ assert actual['Architecture']==expected['architecture'] and actual['Os']==expect
 print('PASS: verified archive config digest, loaded rootfs layers and runtime configuration')
 subprocess.run(['docker','tag',tag,'nahj-module-test:verified'],check=True)
 spec={'services':{
- 'db':{'image':MARIADB_IMAGE,'environment':{'MARIADB_ROOT_PASSWORD':'disposable-ci-only'},'command':['--character-set-server=utf8mb4','--collation-server=utf8mb4_unicode_ci']},
+ 'db':{'image':MARIADB_IMAGE,'environment':{'MARIADB_ROOT_PASSWORD':'disposable-ci-only','TZ':'Asia/Kolkata'},'command':['--character-set-server=utf8mb4','--collation-server=utf8mb4_unicode_ci','--default-time-zone=+05:30']},
  'redis':{'image':REDIS_IMAGE},
  'tests':{'image':'nahj-module-test:verified','pull_policy':'never','working_dir':'/home/frappe/frappe-bench',
           'environment':{'CI':'1','TZ':'Asia/Kolkata','NAHJ_DISPOSABLE_MODULE_TESTS':'1','NAHJ_TEST_PROFILE':os.environ['NAHJ_TEST_PROFILE'],'NAHJ_TEST_SHARD':os.environ['NAHJ_TEST_SHARD'],'NAHJ_SMOKE_ONLY':os.environ.get('NAHJ_SMOKE_ONLY','0')},

@@ -128,7 +128,7 @@ def verify(server, state, pending=False):
     http_checks(server, state)
 
 
-def prepare():
+def prepare_source():
     if ROOT.exists():
         raise RuntimeError('Refusing to overwrite previous validation data')
     ROOT.mkdir(mode=0o700)
@@ -166,6 +166,11 @@ print(Path('sites/nahj-validation.localhost/private/nahj-acceptance.json').read_
     backup = original.backup(backups)
     original.verify_backup(backup)
     original.stop()
+    return original, state, backup
+
+
+def prepare():
+    original, state, backup = prepare_source()
     restored = controller('restored')
     restored.restore(backup, {'mode': 'local', 'site': 'nahj-validation-restored.localhost',
                               'port': 18090, 'language': 'ar'}, str(ARCHIVE))
