@@ -45,8 +45,14 @@ def main():
         archive.extractall(work, filter='data')
     (work / ('payments-' + lock['commit'])).rename(work / 'payments')
     source.unlink()
+    build_python = work / 'build-tools/bin/python'
+    subprocess.run(['python3', '-m', 'venv', str(work / 'build-tools')], check=True)
+    subprocess.run([str(build_python), '-m', 'pip', 'install', '--require-hashes',
+                    '-r', str(HERE / 'requirements.txt')], check=True)
+    localization = json.loads(subprocess.check_output([str(build_python), str(HERE / 'payments_localization.py'),
+                              str(work / 'payments'), str(work)], text=True))
     restore_sources = {base['image_id']: {k: base[k] for k in ('erpnext_version', 'frappe_version')}}
-    inventory = dict(install_order=['frappe', 'payments', 'erpnext'], payments=lock,
+    inventory = dict(install_order=['frappe', 'payments', 'erpnext'], payments=lock, localization=localization,
                      restore_sources=restore_sources)
     (work / 'apps.json').write_text(json.dumps(inventory, indent=2))
     for name in ('Payments.Dockerfile', 'payments-constraints.txt'):
@@ -73,7 +79,7 @@ def main():
     release = {**base, 'version': VERSION, 'archive': destination.name,
                'image_id': 'sha256:' + hashlib.sha256(config_bytes).hexdigest(),
                'sha256': digest(destination), 'size': destination.stat().st_size,
-               'published': False, 'apps': inventory['install_order'], 'payments': lock,
+               'published': False, 'apps': inventory['install_order'], 'payments': lock, 'payments_localization': localization,
                'restore_sources': restore_sources,
                'url': f'https://github.com/9a6r/erp-nahj/releases/download/desktop-v{VERSION}/{destination.name}',
                'candidate_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()}

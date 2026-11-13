@@ -9,6 +9,7 @@ work="$RUNNER_TEMP/nahj-modules"
 mkdir -p "$work/results" "$work/checks"
 chmod 777 "$work/results"
 cp desktop/tests/modules/{prepare.py,run_suite.py,start.sh} "$work/checks/"
+cp desktop/server-image/payments_localization.py "$work/checks/"
 python3 desktop/tests/modules/inventory.py "$repo" > "$work/checks/inventory.json"
 cp "$work/checks/inventory.json" "$work/results/inventory.json"
 python3 - "$work" <<'PYPROFILE'

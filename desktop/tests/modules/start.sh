@@ -11,11 +11,20 @@ if [ "$NAHJ_TEST_PROFILE" = payments ]; then
     fi
     env/bin/python - <<'PYSOURCE'
 from pathlib import Path
+import json, sys
+sys.path.insert(0, '/checks')
+from payments_localization import localize_checkout
+inventory = Path('/home/frappe/nahj-apps.json')
+localized = inventory.exists() and 'localization' in json.loads(inventory.read_text())
 for source in Path('/checks/payments').rglob('*'):
     if source.is_file():
-        target = Path('apps/payments') / source.relative_to('/checks/payments')
-        assert target.read_bytes() == source.read_bytes(), str(target)
-print('PASS: every pinned Payments source file matches the official archive')
+        relative = source.relative_to('/checks/payments')
+        target = Path('apps/payments') / relative
+        expected = source.read_bytes()
+        if localized and str(relative) == 'payments/templates/pages/paytm_checkout.html':
+            expected = localize_checkout(expected.decode()).encode()
+        assert target.read_bytes() == expected, str(target)
+print('PASS: every pinned Payments source file matches the official archive or the three reviewed Paytm translation wrappers')
 PYSOURCE
 fi
 env/bin/python -m pip list --format=json > /results/python-packages.json

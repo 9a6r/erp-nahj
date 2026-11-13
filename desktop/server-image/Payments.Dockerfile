@@ -4,6 +4,7 @@ WORKDIR /home/frappe/frappe-bench
 COPY --chown=1000:1000 payments/ apps/payments/
 COPY --chown=1000:1000 payments-constraints.txt /tmp/nahj-payments-constraints.txt
 COPY --chown=1000:1000 apps.json /home/frappe/nahj-apps.json
+COPY --chown=1000:1000 payments.mo /home/frappe/frappe-bench/assets/locale/ar/LC_MESSAGES/payments.mo
 RUN env/bin/python -m ensurepip && \
     env/bin/python -m pip install --no-cache-dir --no-compile \
       --constraint /tmp/nahj-payments-constraints.txt \
