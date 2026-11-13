@@ -1,0 +1,115 @@
+name: Publish verified localized Payments release
+on:
+  workflow_dispatch:
+  push:
+    branches: [develop]
+    paths: ['.github/workflows/nahj-promote-payments.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: nahj-release-desktop-v0.3.2-rc1
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: desktop-v0.3.2-rc1
+    steps:
+      - uses: actions/checkout@v6
+      - name: Require successful acceptance and exact tested runtime sources
+        run: |
+          python - <<'PY'
+          import json,subprocess
+          checks={
+            43398733279:('71ac05a3cb0a84eaf43009a585303efbb3f45d10',{'build','preflight','native','budget'}),
+            43401088645:('e35166b270a784c52200129a8f3cc1026df62b86',{'native'}),
+            43443753874:('c7644b75772bea92307c71d6c6f51ea262c76af8',{'erp','upgrade'}),
+          }
+          evidence=[]
+          for run_id,(sha,required) in checks.items():
+            base=f'repos/9a6r/erp-nahj/actions/runs/{run_id}'
+            run=json.loads(subprocess.check_output(['gh','api',base]))
+            assert run['head_sha']==sha and run['status']=='completed'
+            jobs=json.loads(subprocess.check_output(['gh','api',base+'/jobs?per_page=100']))['jobs']
+            by_name={j['name']:j for j in jobs}
+            for name in required: assert by_name[name]['conclusion']=='success',(run_id,name)
+            evidence.append({'run_id':run_id,'head_sha':sha,'required_jobs':sorted(required),'jobs':[
+              {'id':j['id'],'name':j['name'],'conclusion':j['conclusion']} for j in jobs]})
+          open('acceptance-provenance.json','w').write(json.dumps(evidence,indent=2)+'\n')
+          PY
+          git fetch --depth=1 origin 71ac05a3cb0a84eaf43009a585303efbb3f45d10 c7644b75772bea92307c71d6c6f51ea262c76af8 "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$GITHUB_SHA"
+          git diff --exit-code 71ac05a3cb0a84eaf43009a585303efbb3f45d10 HEAD -- erpnext banking desktop/nahj_desktop desktop/server-image desktop/install.sh desktop/package.sh desktop/setup_rootless.py desktop/Makefile desktop/nahj-desktop desktop/io.nahj.Desktop.desktop desktop/io.nahj.Desktop.svg ':(exclude)desktop/nahj_desktop/server_release.json' ':(exclude)desktop/server-image/README.md'
+          git diff --exit-code c7644b75772bea92307c71d6c6f51ea262c76af8 HEAD -- desktop/tests/integration_payments.py desktop/tests/full_stack.py desktop/tests/upgrade_validation.py desktop/tests/arch-vm.sh
+      - uses: actions/download-artifact@v4
+        with:
+          name: nahj-payments-candidate
+          run-id: 43398733279
+          github-token: ${{ github.token }}
+          path: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: nahj-final-native
+          run-id: 43401088645
+          github-token: ${{ github.token }}
+          path: native
+      - uses: actions/download-artifact@v4
+        with:
+          name: nahj-candidate-report
+          run-id: 43398733279
+          github-token: ${{ github.token }}
+          path: upstream-report
+      - name: Preserve original failures and reject missing or changed evidence
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('upstream-report/outcomes.json')
+          assert p.read_bytes()==Path('desktop/test-results/2026-11-13/outcomes.json').read_bytes()
+          d=json.loads(p.read_text());assert d['complete']
+          assert sum(r.get('executed',0) for r in d['modules'].values())==5762
+          assert sum(r.get('passed',0) for r in d['modules'].values())==5760
+          assert sum(r.get('skipped',0) for r in d['modules'].values())==0
+          expected={'erpnext.accounts.doctype.budget.test_budget.TestBudget.test_monthly_budget_on_cancellation1',
+                    'erpnext.accounts.doctype.budget.test_budget.TestBudget.test_monthly_budget_on_cancellation2'}
+          assert len(d['failures'])==2 and {f['test'] for f in d['failures']}==expected
+          assert all(f['status']=='failed' and 'AssertionError: BudgetError not raised by cancel' in f['detail'] for f in d['failures'])
+          r=json.loads(Path('desktop/nahj_desktop/server_release.json').read_text())
+          assert d['dependency_profile']['image_id']==r['image_id']
+          assert d['dependency_profile']['bundled_apps']==['frappe','payments','erpnext']
+          print('5760 passed; two separately diagnosed original budget fixture failures preserved')
+          PY
+          cp native/packages/*.pkg.tar.zst release/
+          python desktop/tests/verify_distribution.py release
+          cp acceptance-provenance.json desktop/UPSTREAM-AUDIT.md desktop/VERIFICATION-0.3.2.md release/
+          cp desktop/test-results/2026-11-13/{outcomes.json,coverage-summary.json,budget-diagnostic.json,source-audit.json} release/
+          cd release
+          sha256sum *.pkg.tar.zst *.tar.gz *.json *.md > SHA256SUMS
+      - name: Publish the tested archive and package without replacing an existing release
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft > existing-release.json 2>/dev/null; then
+            python -c 'import json; assert json.load(open("existing-release.json"))["isDraft"], "Refusing to replace a public release"'
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --prerelease \
+              --title 'Nahj Desktop 0.3.2-rc1 — Arabic Payments / Arch Zen' --notes-file desktop/RELEASE-0.3.2.md
+          fi
+          gh release upload "$RELEASE_TAG" release/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --prerelease
+      - name: Verify the actual public URL with the production download and resume code
+        run: PYTHONPATH=desktop python desktop/tests/verify_public_download.py "$RUNNER_TEMP/public-download"
+      - name: Publish the download verification evidence
+        run: gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/public-download/public-download-proof.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nahj-publication-evidence
+          path: |
+            acceptance-provenance.json
+            ${{ runner.temp }}/public-download/public-download-proof.json
+          retention-days: 30
