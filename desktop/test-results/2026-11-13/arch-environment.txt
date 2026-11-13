@@ -1,0 +1,8 @@
+Linux nahj-arch-test 7.3.4-zen2-1-zen #1 ZEN SMP PREEMPT_DYNAMIC Wed, 11 Nov 2026 19:02:29 +0000 x86_64 GNU/Linux
+linux-zen 7.3.4.zen2-1
+python 3.14.10-1
+gtk4 1:4.24.1-1
+webkitgtk-6.0 2.54.2-1
+podman 6.2.0-1
+podman-compose 1.6.0-1
+rootless=true storage=overlay

@@ -1,0 +1,290 @@
+{
+  "run_id": 43398733279,
+  "artifacts": [
+    {
+      "id": 14025735741,
+      "name": "nahj-module-tests-4",
+      "size_in_bytes": 1106994,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025735741",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025735741/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:28:21Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:28:21Z",
+      "digest": "sha256:f16468c3243a6a0cdb79987d2c36e884a553194019e049157cfdd4463df1e7c1",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14025565843,
+      "name": "nahj-module-tests-3",
+      "size_in_bytes": 1374462,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025565843",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025565843/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:26:09Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:26:09Z",
+      "digest": "sha256:8e3127b0477accf5d7abae39d4e97a676c46c3d92c3a28b027d249372be4c551",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14025526772,
+      "name": "nahj-module-tests-7",
+      "size_in_bytes": 1154596,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025526772",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025526772/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:25:09Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:25:09Z",
+      "digest": "sha256:13ee8134abb57cde9bba5e6711a13ff010ca2f8668fd81ce3d8500e49eeee286",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14025397258,
+      "name": "nahj-module-tests-6",
+      "size_in_bytes": 1214060,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025397258",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025397258/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:33:11Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:33:11Z",
+      "digest": "sha256:6b13b4de7e0ca8e1b9ce365d80c94e3fbe36e2e7fcb6489b5da59e304dd0e63a",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14025192357,
+      "name": "nahj-candidate-native",
+      "size_in_bytes": 102764,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025192357",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025192357/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:24:16Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:24:16Z",
+      "digest": "sha256:d939a0ad0a0c6fb7768627a99c432bbeb6079cea8882dc49a5fbec07143df2c5",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14025072509,
+      "name": "nahj-module-tests-5",
+      "size_in_bytes": 1301212,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025072509",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14025072509/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:27:30Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:27:30Z",
+      "digest": "sha256:ed15b29a873976c1699c755e813ac2249150f6143d62fee88acd50f47efbadef",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14024950032,
+      "name": "nahj-payments-candidate",
+      "size_in_bytes": 1098369565,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024950032",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024950032/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:11:17Z",
+      "expires_at": "2026-11-27T09:11:06Z",
+      "updated_at": "2026-11-13T09:11:17Z",
+      "digest": "sha256:2d221722cf893386ce2d86e4c6e02665194af13050b0ea47e8b95cf74891c8b9",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14024904419,
+      "name": "nahj-candidate-upgrade",
+      "size_in_bytes": 26670,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024904419",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024904419/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:32:00Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:32:00Z",
+      "digest": "sha256:d5a3009b263294347eb7d50bb2cf8cd7b66bfa1a10a12ac35a9cd40b4b139061",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14024833330,
+      "name": "nahj-candidate-budget",
+      "size_in_bytes": 36529,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024833330",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024833330/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:19:43Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:19:43Z",
+      "digest": "sha256:621dd40d1b0c89a3bb34ba825d7078d00b3eb3fb6e9e824986dff5d43eec99d9",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14024668486,
+      "name": "nahj-module-tests-1",
+      "size_in_bytes": 1147077,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024668486",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024668486/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:28:04Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:28:04Z",
+      "digest": "sha256:c9856c79c92eecd2ff723166c5bfce775fa0279d552c6480b09a267a04b7d03f",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14024519571,
+      "name": "nahj-candidate-report",
+      "size_in_bytes": 1025936,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024519571",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024519571/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:33:48Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:33:48Z",
+      "digest": "sha256:e58502eb491299d5fce5297b9300654240148b6e84913d74555a7ced16a453bb",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14024468707,
+      "name": "nahj-candidate-erp",
+      "size_in_bytes": 25855,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024468707",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024468707/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:24:21Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:24:21Z",
+      "digest": "sha256:a070cf5eae5a38490ce0f46f7b5c1ab037062b5798853645bee91feea89def8c",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14024443735,
+      "name": "nahj-module-tests-8",
+      "size_in_bytes": 1271813,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024443735",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024443735/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:23:50Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:23:50Z",
+      "digest": "sha256:1c9b55f5c410e2eb2941dea0e5f83adb3da729204d7543a52935dd44586b56d9",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14024204353,
+      "name": "nahj-module-tests-2",
+      "size_in_bytes": 1416012,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024204353",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024204353/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:24:43Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:24:43Z",
+      "digest": "sha256:28553a4a7963ce423875bb3a7d4f5d88ee8e9b14635d3b8181d57f6594a82744",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    },
+    {
+      "id": 14023778657,
+      "name": "nahj-candidate-preflight",
+      "size_in_bytes": 740900,
+      "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14023778657",
+      "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14023778657/zip",
+      "expired": false,
+      "created_at": "2026-11-13T09:15:47Z",
+      "expires_at": "2027-02-11T09:07:49Z",
+      "updated_at": "2026-11-13T09:15:47Z",
+      "digest": "sha256:ea1badd489bf44d97f57f14a4fe515f05bd77bcb88373091262e10150a075902",
+      "workflow_run": {
+        "id": 43398733279,
+        "repository_id": 1432747117,
+        "head_repository_id": 1432747117,
+        "head_branch": "develop",
+        "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
+      }
+    }
+  ]
+}

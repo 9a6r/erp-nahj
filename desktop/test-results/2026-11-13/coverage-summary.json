@@ -1,0 +1,26 @@
+{
+  "run_id": 43398733279,
+  "candidate_commit": "71ac05a3cb0a84eaf43009a585303efbb3f45d10",
+  "image_id": "sha256:a816a120a85ebde7b2ed96056a45cc4e170e0782b6543b5025883476a23a1c22",
+  "meta": {
+    "format": 3,
+    "version": "7.10.7",
+    "timestamp": "2026-11-13T09:33:33.672840",
+    "branch_coverage": true,
+    "show_contexts": false
+  },
+  "totals": {
+    "covered_lines": 81168,
+    "num_statements": 97995,
+    "percent_covered": 79.72056953800549,
+    "percent_covered_display": "80",
+    "missing_lines": 16827,
+    "excluded_lines": 9490,
+    "num_branches": 44366,
+    "num_partial_branches": 6395,
+    "covered_branches": 32323,
+    "missing_branches": 12043
+  },
+  "line_percent": 82.82871575080361,
+  "branch_percent": 72.85533967452554
+}

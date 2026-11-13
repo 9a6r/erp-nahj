@@ -1,0 +1,783 @@
+{
+  "original": [
+    {
+      "month": 1,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 1,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 2,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 2,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 3,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 3,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 4,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 4,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 5,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 5,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 6,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 6,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 7,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 7,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 8,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 8,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 9,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 9,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 10,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 10,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [],
+      "errors": [],
+      "successful": true
+    },
+    {
+      "month": 11,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [
+        "Traceback (most recent call last):\n  File \"/home/frappe/frappe-bench/apps/erpnext/erpnext/accounts/doctype/budget/test_budget.py\", line 435, in test_monthly_budget_on_cancellation1\n    self.assertRaises(BudgetError, jv.cancel)\n    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: BudgetError not raised by cancel\n"
+      ],
+      "errors": [],
+      "successful": false
+    },
+    {
+      "month": 11,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [
+        "Traceback (most recent call last):\n  File \"/home/frappe/frappe-bench/apps/erpnext/erpnext/accounts/doctype/budget/test_budget.py\", line 466, in test_monthly_budget_on_cancellation2\n    self.assertRaises(BudgetError, jv.cancel)\n    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: BudgetError not raised by cancel\n"
+      ],
+      "errors": [],
+      "successful": false
+    },
+    {
+      "month": 12,
+      "test": "test_monthly_budget_on_cancellation1",
+      "tests": 1,
+      "failures": [
+        "Traceback (most recent call last):\n  File \"/home/frappe/frappe-bench/apps/erpnext/erpnext/accounts/doctype/budget/test_budget.py\", line 435, in test_monthly_budget_on_cancellation1\n    self.assertRaises(BudgetError, jv.cancel)\n    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: BudgetError not raised by cancel\n"
+      ],
+      "errors": [],
+      "successful": false
+    },
+    {
+      "month": 12,
+      "test": "test_monthly_budget_on_cancellation2",
+      "tests": 1,
+      "failures": [
+        "Traceback (most recent call last):\n  File \"/home/frappe/frappe-bench/apps/erpnext/erpnext/accounts/doctype/budget/test_budget.py\", line 466, in test_monthly_budget_on_cancellation2\n    self.assertRaises(BudgetError, jv.cancel)\n    ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: BudgetError not raised by cancel\n"
+      ],
+      "errors": [],
+      "successful": false
+    }
+  ],
+  "boundaries": [
+    {
+      "month": 1,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-01-12",
+      "limit": 16666.667,
+      "remaining_after_cancel": 16665.667,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 1,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-01-12",
+      "limit": 16666.667,
+      "remaining_after_cancel": 16667.667,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 1,
+      "against": "Project",
+      "over": false,
+      "date": "2026-01-12",
+      "limit": 16666.667,
+      "remaining_after_cancel": 16665.667,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 1,
+      "against": "Project",
+      "over": true,
+      "date": "2026-01-12",
+      "limit": 16666.667,
+      "remaining_after_cancel": 16667.667,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 2,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-02-12",
+      "limit": 33333.334,
+      "remaining_after_cancel": 33332.334,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 2,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-02-12",
+      "limit": 33333.334,
+      "remaining_after_cancel": 33334.334,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 2,
+      "against": "Project",
+      "over": false,
+      "date": "2026-02-12",
+      "limit": 33333.334,
+      "remaining_after_cancel": 33332.334,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 2,
+      "against": "Project",
+      "over": true,
+      "date": "2026-02-12",
+      "limit": 33333.334,
+      "remaining_after_cancel": 33334.334,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 3,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-03-12",
+      "limit": 50000.001,
+      "remaining_after_cancel": 49999.001,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 3,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-03-12",
+      "limit": 50000.001,
+      "remaining_after_cancel": 50001.001,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 3,
+      "against": "Project",
+      "over": false,
+      "date": "2026-03-12",
+      "limit": 50000.001,
+      "remaining_after_cancel": 49999.001,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 3,
+      "against": "Project",
+      "over": true,
+      "date": "2026-03-12",
+      "limit": 50000.001,
+      "remaining_after_cancel": 50001.001,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 4,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-04-12",
+      "limit": 66666.668,
+      "remaining_after_cancel": 66665.668,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 4,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-04-12",
+      "limit": 66666.668,
+      "remaining_after_cancel": 66667.668,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 4,
+      "against": "Project",
+      "over": false,
+      "date": "2026-04-12",
+      "limit": 66666.668,
+      "remaining_after_cancel": 66665.668,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 4,
+      "against": "Project",
+      "over": true,
+      "date": "2026-04-12",
+      "limit": 66666.668,
+      "remaining_after_cancel": 66667.668,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 5,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-05-12",
+      "limit": 83333.335,
+      "remaining_after_cancel": 83332.335,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 5,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-05-12",
+      "limit": 83333.335,
+      "remaining_after_cancel": 83334.335,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 5,
+      "against": "Project",
+      "over": false,
+      "date": "2026-05-12",
+      "limit": 83333.335,
+      "remaining_after_cancel": 83332.335,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 5,
+      "against": "Project",
+      "over": true,
+      "date": "2026-05-12",
+      "limit": 83333.335,
+      "remaining_after_cancel": 83334.335,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 6,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-06-12",
+      "limit": 100000.002,
+      "remaining_after_cancel": 99999.002,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 6,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-06-12",
+      "limit": 100000.002,
+      "remaining_after_cancel": 100001.002,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 6,
+      "against": "Project",
+      "over": false,
+      "date": "2026-06-12",
+      "limit": 100000.002,
+      "remaining_after_cancel": 99999.002,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 6,
+      "against": "Project",
+      "over": true,
+      "date": "2026-06-12",
+      "limit": 100000.002,
+      "remaining_after_cancel": 100001.002,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 7,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-07-12",
+      "limit": 116666.669,
+      "remaining_after_cancel": 116665.669,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 7,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-07-12",
+      "limit": 116666.669,
+      "remaining_after_cancel": 116667.669,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 7,
+      "against": "Project",
+      "over": false,
+      "date": "2026-07-12",
+      "limit": 116666.669,
+      "remaining_after_cancel": 116665.669,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 7,
+      "against": "Project",
+      "over": true,
+      "date": "2026-07-12",
+      "limit": 116666.669,
+      "remaining_after_cancel": 116667.669,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 8,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-08-12",
+      "limit": 133333.336,
+      "remaining_after_cancel": 133332.336,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 8,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-08-12",
+      "limit": 133333.336,
+      "remaining_after_cancel": 133334.336,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 8,
+      "against": "Project",
+      "over": false,
+      "date": "2026-08-12",
+      "limit": 133333.336,
+      "remaining_after_cancel": 133332.336,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 8,
+      "against": "Project",
+      "over": true,
+      "date": "2026-08-12",
+      "limit": 133333.336,
+      "remaining_after_cancel": 133334.336,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 9,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-09-12",
+      "limit": 150000.003,
+      "remaining_after_cancel": 149999.003,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 9,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-09-12",
+      "limit": 150000.003,
+      "remaining_after_cancel": 150001.003,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 9,
+      "against": "Project",
+      "over": false,
+      "date": "2026-09-12",
+      "limit": 150000.003,
+      "remaining_after_cancel": 149999.003,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 9,
+      "against": "Project",
+      "over": true,
+      "date": "2026-09-12",
+      "limit": 150000.003,
+      "remaining_after_cancel": 150001.003,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 10,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-10-12",
+      "limit": 166666.67,
+      "remaining_after_cancel": 166665.67,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 10,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-10-12",
+      "limit": 166666.67,
+      "remaining_after_cancel": 166667.67,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 10,
+      "against": "Project",
+      "over": false,
+      "date": "2026-10-12",
+      "limit": 166666.67,
+      "remaining_after_cancel": 166665.67,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 10,
+      "against": "Project",
+      "over": true,
+      "date": "2026-10-12",
+      "limit": 166666.67,
+      "remaining_after_cancel": 166667.67,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 11,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-11-12",
+      "limit": 183333.337,
+      "remaining_after_cancel": 183332.337,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 11,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-11-12",
+      "limit": 183333.337,
+      "remaining_after_cancel": 183334.337,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 11,
+      "against": "Project",
+      "over": false,
+      "date": "2026-11-12",
+      "limit": 183333.337,
+      "remaining_after_cancel": 183332.337,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 11,
+      "against": "Project",
+      "over": true,
+      "date": "2026-11-12",
+      "limit": 183333.337,
+      "remaining_after_cancel": 183334.337,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 12,
+      "against": "Cost Center",
+      "over": false,
+      "date": "2026-12-12",
+      "limit": 200000.004,
+      "remaining_after_cancel": 199999.004,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 12,
+      "against": "Cost Center",
+      "over": true,
+      "date": "2026-12-12",
+      "limit": 200000.004,
+      "remaining_after_cancel": 200001.004,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 12,
+      "against": "Project",
+      "over": false,
+      "date": "2026-12-12",
+      "limit": 200000.004,
+      "remaining_after_cancel": 199999.004,
+      "should_block": false,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    },
+    {
+      "month": 12,
+      "against": "Project",
+      "over": true,
+      "date": "2026-12-12",
+      "limit": 200000.004,
+      "remaining_after_cancel": 200001.004,
+      "should_block": true,
+      "successful": true,
+      "failures": [],
+      "errors": []
+    }
+  ],
+  "changes_to_erpnext_source": false
+}
