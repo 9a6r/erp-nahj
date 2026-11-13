@@ -20,7 +20,7 @@ jobs:
       - name: Run unchanged original cases and real budget boundaries across all twelve months
         env:
           NAHJ_TEST_SHARD: '1'
-          NAHJ_TEST_PROFILE: release
+          NAHJ_TEST_PROFILE: payments
         run: |
           # Replace only the disposable harness entrypoint, never ERPNext code.
           cp .github/diagnostics/budget_calendar.py desktop/tests/modules/run_suite.py

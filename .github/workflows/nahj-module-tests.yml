@@ -31,11 +31,13 @@ jobs:
           include-hidden-files: true
           retention-days: 30
   release-pdf:
-    name: PDF regression on the published image without Payments
+    name: PDF regression on retained 0.3.1 without Payments
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+      - name: Keep the legacy baseline pinned when the current release changes
+        run: cp desktop/server-image/base-release-0.3.1.json desktop/nahj_desktop/server_release.json
       - name: Run original stock, quotation PDF and account statement tests
         env:
           NAHJ_TEST_SHARD: '1'
