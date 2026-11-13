@@ -82,8 +82,10 @@ a disposable site with `nahj_disposable_test_site` explicitly enabled. Set
 `NAHJ_ACCEPTANCE_SITE` to that site and run it with the bench virtualenv Python
 from the bench's `sites` directory. Never run it against company data.
 
-The `Nahj full ERP on rootless Arch Zen` workflow builds the pinned server archive
+The `Nahj full ERP on rootless Arch Zen` workflow obtains the pinned server archive
 and requires its image ID, checksum and size to match the release manifest.
+For 0.3.1 it reproduces the original build; for Payments releases it downloads
+the exact published archive without resolving dependencies again.
 It then runs `tests/full_stack.py` as an ordinary user in a disposable Zen VM.
 The real `Server` controller creates separate database, Redis, backend, frontend,
 WebSocket, worker and scheduler containers. The test posts business transactions,
@@ -124,7 +126,7 @@ when working from a shallow checkout. See [UPSTREAM-AUDIT.md](UPSTREAM-AUDIT.md)
 for the reviewed overlays and scope.
 
 The native workflow tests the actual Arch installer and retains its pacman
-package. The full ERP workflow separately rebuilds the server, requires the
+package. The full ERP workflow verifies the server archive, requires the
 exact manifest image ID/archive digest/size, and tests actual accounting, files,
 permissions, language, isolated service delivery, backup/recovery and VM reboot.
 The tag release depends on both workflows. Never publish a different archive
@@ -134,3 +136,15 @@ under the same tag or substitute an untested package.
 known successful jobs and package provenance, reproduces an expired archive,
 and publishes the already-existing verified tag. Its successful run is recorded
 in the current verification report. It refuses to overwrite a published release.
+
+The 0.3.2 Payments candidate is built once by `nahj-payments-candidate.yml`.
+Its eight shards run the original 522 ERPNext test files without edits. The
+report rejects incomplete evidence and new failures; the two known calendar
+fixtures remain recorded as failures, with separate real budget boundary tests
+for all twelve months. MariaDB and the fixture site both use Asia/Kolkata; the
+heatmap diagnostic checks the date boundary with actual stock entries.
+
+`tests/upgrade_validation.py` creates transactions and a backup on the exact
+published 0.3.1 image, restores them into a separate 0.3.2 database, installs
+Payments there, and verifies both sites before and after a Zen VM reboot.
+Never run these disposable acceptance scripts against an existing business site.

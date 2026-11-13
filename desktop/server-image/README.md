@@ -1,5 +1,30 @@
 # Stable server image
 
+## Payments candidate 0.3.2
+
+`build_candidate.py` adds the official Payments app at the commit and source
+archive digest in `payments-lock.json` to the verified, published 0.3.1 image.
+It installs the versions in `payments-constraints.txt`, runs `pip check`, records
+the installed dependencies, and bakes the supported application inventory into
+`/home/frappe/nahj-apps.json`. This inventory also identifies the single legacy
+image eligible for restoration into a separate new site.
+
+`payments_localization.py` validates and compiles 150 Arabic messages and wraps
+three existing Paytm template strings in gettext. The inventory records the
+catalogue hash and the original/localized template hashes. Provider payment
+logic remains from the pinned official source. A complete static catalogue does
+not establish that every externally hosted checkout page is translated.
+
+The candidate workflow builds the archive **once** and runs the native Arch/Zen,
+real ERP, independent recovery, legacy migration and original module suites
+against that exact archive. Publication promotes those tested bytes; dependency
+resolution is not repeated. Constraints pin package versions, but are not a
+claim that arbitrary future rebuilds will be byte-identical. After publication,
+`tests/build-ci-image.sh` downloads and verifies the published archive for later
+acceptance runs. No production data or site credentials are included.
+
+## Reproducing the retained 0.3.1 base
+
 The desktop's managed server is based on the official Frappe ERPNext image. The
 upstream source versions, commits and amd64 manifest digest are in `upstream.json`.
 The image contains the complete upstream ERPNext/Frappe applications; the overlay

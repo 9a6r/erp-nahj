@@ -42,7 +42,7 @@ jobs:
       - run: npm install --global yarn@1.22.22
       - run: yarn install --frozen-lockfile && yarn build
         working-directory: banking
-      - name: Reproduce the pinned server archive
+      - name: Prepare and verify the pinned release archive
         run: bash desktop/tests/build-ci-image.sh
       - name: Provision, transact, back up, restore and reboot full ERP on Zen
         env:
@@ -55,7 +55,7 @@ jobs:
           name: nahj-server-archive
           compression-level: 0
           retention-days: 14
-          path: ${{ runner.temp }}/nahj-build/nahj-server-0.3.1-rc1-amd64.tar.gz
+          path: ${{ runner.temp }}/nahj-build/nahj-server-*-amd64.tar.gz
           if-no-files-found: error
       - name: Keep test evidence only
         if: always()

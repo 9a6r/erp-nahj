@@ -6,14 +6,14 @@
 
 ### حالة الإصدار
 
-الإصدار **0.3.1-rc1** مبني على ERPNext 16.53.0 وFrappe 16.54.0. حزمة Arch وصورة الخادم متاحتان في [صفحة الإصدار](https://github.com/9a6r/erp-nahj/releases/tag/desktop-v0.3.1-rc1)؛ نُشرتا في 11 نوفمبر 2026 بعد نجاح اختبارات المثبّت والنظام الكامل على Arch/Zen. هو إصدار تجريبي؛ اختبر إعداد شركتك والاستعادة والتوافق على جهازك قبل الاعتماد الإنتاجي. راجع [مراجعة بنية المصدر وحدود الاختبارات](UPSTREAM-AUDIT.md).
+الإصدار **0.3.2-rc1** مبني على ERPNext 16.53.0 وFrappe 16.54.0 مع إضافة Payments الرسمية واعتمادياتها. راجع [صفحة الإصدار](https://github.com/9a6r/erp-nahj/releases/tag/desktop-v0.3.2-rc1) للحصول على الحزمة وصورة الخادم ونتائج التحقق عند اكتمال النشر. هو مرشح إصدار؛ اختبر إعداد شركتك والاستعادة والتوافق على جهازك قبل الاعتماد الإنتاجي. راجع [مراجعة بنية المصدر وحدود الاختبارات](UPSTREAM-AUDIT.md).
 
-لا يدعم هذا المسار خفض إصدار قواعد ERPNext 17 إلى 16. يحتفظ التطبيق بالموقع القديم ويرفض استكماله بصورة مختلفة؛ راجع [دليل الخادم](SERVER.md).
+يمكن للواجهة الجديدة تشغيل صورة 0.3.1 المحفوظة كما هي، أو استعادة نسخة موثوقة منها إلى موقع مستقل يستخدم 0.3.2. لا تُرقَّى قاعدة العمل تلقائيًا، ولا يدعم هذا المسار خفض ERPNext 17 إلى 16. راجع [دليل الخادم](SERVER.md).
 
 ### البناء من المصدر
 
 ```bash
-git clone --depth 1 --branch desktop-v0.3.1-rc1 https://github.com/9a6r/erp-nahj.git
+git clone --depth 1 --branch desktop-v0.3.2-rc1 https://github.com/9a6r/erp-nahj.git
 cd erp-nahj
 ./desktop/install.sh --with-server
 nahj-desktop
@@ -72,7 +72,7 @@ journalctl -k -b --no-pager | tail -n 80
 
 ```bash
 git fetch --tags origin
-git switch --detach desktop-v0.3.1-rc1
+git switch --detach desktop-v0.3.2-rc1
 ./desktop/install.sh --with-server
 ```
 
