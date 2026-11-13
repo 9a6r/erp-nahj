@@ -1,0 +1,45 @@
+Run: https://github.com/9a6r/erp-nahj/actions/runs/43443753874/job/131947735331
+Artifact: 14049045608
+Artifact SHA256: de55992e36186a62294c4c2fa87c053d908c95fc3a03f3a9154e4e529b35ebcd
+
+full-stack.log
+
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: real Arabic/English Payments translations, preserved amount/currency and rendered Paytm checkout
+PASS: bundled Payments imports and real gateway configuration survive restoration/reboot; live provider charging requires credentials
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: real Frappe Email Account delivered Arabic MIME to the isolated SMTP receiver
+PASS: real document event and worker sent an Arabic webhook with a valid HMAC signature
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, websocket
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: real Arabic/English Payments translations, preserved amount/currency and rendered Paytm checkout
+PASS: bundled Payments imports and real gateway configuration survive restoration/reboot; live provider charging requires credentials
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: real Arabic/English Payments translations, preserved amount/currency and rendered Paytm checkout
+PASS: bundled Payments imports and real gateway configuration survive restoration/reboot; live provider charging requires credentials
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: real Frappe Email Account delivered Arabic MIME to the isolated SMTP receiver
+PASS: real document event and worker sent an Arabic webhook with a valid HMAC signature
+PASS: full ERP created, transacted, backed up and recovered using the actual rootless controller
+full-stack-reboot.log
+
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: real Arabic/English Payments translations, preserved amount/currency and rendered Paytm checkout
+PASS: bundled Payments imports and real gateway configuration survive restoration/reboot; live provider charging requires credentials
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: real Arabic/English Payments translations, preserved amount/currency and rendered Paytm checkout
+PASS: bundled Payments imports and real gateway configuration survive restoration/reboot; live provider charging requires credentials
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: original and restored full ERP stacks retain business data and secrets after a complete Zen VM reboot

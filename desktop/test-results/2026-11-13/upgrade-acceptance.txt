@@ -1,0 +1,54 @@
+Run: https://github.com/9a6r/erp-nahj/actions/runs/43443753874/job/131947734767
+Artifact: 14048378665
+Artifact SHA256: afa7f80c3833f22df0c7c1feeea126eb2a81dbaeedf2cd9a247c5f1609f80845
+
+upgrade-source.log
+
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: legacy image retains its original application inventory
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: real Frappe Email Account delivered Arabic MIME to the isolated SMTP receiver
+PASS: real document event and worker sent an Arabic webhook with a valid HMAC signature
+PASS: legacy image created real transactions and a verified backup
+upgrade-restore.log
+
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: legacy image retains its original application inventory
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, websocket
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: real Arabic/English Payments translations, preserved amount/currency and rendered Paytm checkout
+PASS: bundled Payments imports and real gateway configuration survive restoration/reboot; live provider charging requires credentials
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: real Arabic/English Payments translations, preserved amount/currency and rendered Paytm checkout
+PASS: bundled Payments imports and real gateway configuration survive restoration/reboot; live provider charging requires credentials
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: legacy image retains its original application inventory
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: old site unchanged; independent upgraded site retains business data, files, permissions and encryption and adds real Payments
+upgrade-reboot.log
+
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: real Arabic/English Payments translations, preserved amount/currency and rendered Paytm checkout
+PASS: bundled Payments imports and real gateway configuration survive restoration/reboot; live provider charging requires credentials
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: separate rootless containers: backend, db, frontend, redis-cache, redis-queue, scheduler, websocket, worker
+PASS: submitted transactions, balanced ledger, payment, stock, attachments, encrypted secret, permissions and recovery state
+PASS: actual Arabic gettext, preserved template variables, Arabic/English invoice/purchase/payment words, unchanged posted data and Standard print HTML
+PASS: legacy image retains its original application inventory
+PASS: real HTTP login/denial, file authorization, persistent language, banking assets and invoice PDF
+PASS: both old and upgraded sites remain usable after a complete Zen reboot

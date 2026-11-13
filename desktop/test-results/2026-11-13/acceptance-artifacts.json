@@ -1,0 +1,67 @@
+{
+  "native": {
+    "artifacts": [
+      {
+        "id": 14024594670,
+        "name": "nahj-final-native",
+        "size_in_bytes": 103668,
+        "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024594670",
+        "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14024594670/zip",
+        "expired": false,
+        "created_at": "2026-11-13T09:29:40Z",
+        "expires_at": "2026-11-27T09:29:39Z",
+        "updated_at": "2026-11-13T09:29:40Z",
+        "digest": "sha256:69d04b564d73eb4dd51328e1e02c758d71d6147fc8ad5765d5ca74808fae67fc",
+        "workflow_run": {
+          "id": 43401088645,
+          "repository_id": 1432747117,
+          "head_repository_id": 1432747117,
+          "head_branch": "develop",
+          "head_sha": "e35166b270a784c52200129a8f3cc1026df62b86"
+        }
+      }
+    ]
+  },
+  "localized_recovery": {
+    "artifacts": [
+      {
+        "id": 14049045608,
+        "name": "nahj-candidate-erp",
+        "size_in_bytes": 31392,
+        "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14049045608",
+        "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14049045608/zip",
+        "expired": false,
+        "created_at": "2026-11-13T14:53:23Z",
+        "expires_at": "2027-02-11T14:32:57Z",
+        "updated_at": "2026-11-13T14:53:23Z",
+        "digest": "sha256:de55992e36186a62294c4c2fa87c053d908c95fc3a03f3a9154e4e529b35ebcd",
+        "workflow_run": {
+          "id": 43443753874,
+          "repository_id": 1432747117,
+          "head_repository_id": 1432747117,
+          "head_branch": "develop",
+          "head_sha": "c7644b75772bea92307c71d6c6f51ea262c76af8"
+        }
+      },
+      {
+        "id": 14048378665,
+        "name": "nahj-candidate-upgrade",
+        "size_in_bytes": 31983,
+        "url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14048378665",
+        "archive_download_url": "https://api.github.com/repos/9a6r/erp-nahj/actions/artifacts/14048378665/zip",
+        "expired": false,
+        "created_at": "2026-11-13T15:02:19Z",
+        "expires_at": "2027-02-11T14:32:57Z",
+        "updated_at": "2026-11-13T15:02:19Z",
+        "digest": "sha256:afa7f80c3833f22df0c7c1feeea126eb2a81dbaeedf2cd9a247c5f1609f80845",
+        "workflow_run": {
+          "id": 43443753874,
+          "repository_id": 1432747117,
+          "head_repository_id": 1432747117,
+          "head_branch": "develop",
+          "head_sha": "c7644b75772bea92307c71d6c6f51ea262c76af8"
+        }
+      }
+    ]
+  }
+}

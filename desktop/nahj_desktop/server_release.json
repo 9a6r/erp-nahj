@@ -5,11 +5,40 @@
   "frappe_commit": "2fcb9397a1f1da353b21e53d2f97ec56653acd02",
   "platform": "linux/amd64",
   "image": "registry-1.docker.io/frappe/erpnext@sha256:8f454efa71e9ffad9de4b9ccf377566134d285612f19e1e12e8a43fe7bf0db75",
-  "image_id": "sha256:ac36bee5c50b0393741e099389e2a111b23f86e49c6f8bf22091be84d8842ad9",
-  "archive": "nahj-server-0.3.1-rc1-amd64.tar.gz",
-  "sha256": "b24f5975c43cae48bc323c7e3eb4029e5739f8bf53a172861293cad503cee98b",
-  "size": 1091253572,
-  "version": "0.3.1-rc1",
+  "image_id": "sha256:a816a120a85ebde7b2ed96056a45cc4e170e0782b6543b5025883476a23a1c22",
+  "archive": "nahj-server-0.3.2-rc1-amd64.tar.gz",
+  "sha256": "36509722db27633ae1c65dc4d994e2ac68e0b3b6954adc81e7b5753c7c9f5105",
+  "size": 1098366254,
+  "version": "0.3.2-rc1",
   "published": true,
-  "url": "https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.3.1-rc1/nahj-server-0.3.1-rc1-amd64.tar.gz"
+  "url": "https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.3.2-rc1/nahj-server-0.3.2-rc1-amd64.tar.gz",
+  "apps": [
+    "frappe",
+    "payments",
+    "erpnext"
+  ],
+  "payments": {
+    "repository": "https://github.com/frappe/payments",
+    "branch": "version-16",
+    "commit": "9e842a473a8f4ec70a9ff06a3e067d10f98d26ed",
+    "url": "https://codeload.github.com/frappe/payments/tar.gz/9e842a473a8f4ec70a9ff06a3e067d10f98d26ed",
+    "sha256": "b18d672b65ffd98d3763419523158adecfbcb1a30ea11de52e49b5cd460520dd"
+  },
+  "payments_localization": {
+    "arabic_messages": 150,
+    "catalogue_sha256": "31aac7c8f9e1f06cc98b78fabc76ebd1e3568c0aa48d980349c38def30dc50e9",
+    "source_overlays": {
+      "payments/templates/pages/paytm_checkout.html": {
+        "original_sha256": "c1ea2643c8c650f0f0e4200e5ea26ec9c7493588b94a474546f3c6fa6f285f30",
+        "localized_sha256": "8e57055b065fc32bff7399acc52c4b382b406722bc03a2ddc42f9fba6d074815"
+      }
+    }
+  },
+  "restore_sources": {
+    "sha256:ac36bee5c50b0393741e099389e2a111b23f86e49c6f8bf22091be84d8842ad9": {
+      "erpnext_version": "16.53.0",
+      "frappe_version": "16.54.0"
+    }
+  },
+  "candidate_commit": "71ac05a3cb0a84eaf43009a585303efbb3f45d10"
 }
