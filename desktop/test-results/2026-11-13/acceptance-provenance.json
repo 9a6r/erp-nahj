@@ -1,0 +1,123 @@
+[
+  {
+    "run_id": 43398733279,
+    "head_sha": "71ac05a3cb0a84eaf43009a585303efbb3f45d10",
+    "required_jobs": [
+      "budget",
+      "build",
+      "native",
+      "preflight"
+    ],
+    "jobs": [
+      {
+        "id": 131795959567,
+        "name": "build",
+        "conclusion": "success"
+      },
+      {
+        "id": 131797585777,
+        "name": "preflight",
+        "conclusion": "success"
+      },
+      {
+        "id": 131799653829,
+        "name": "budget",
+        "conclusion": "success"
+      },
+      {
+        "id": 131799653849,
+        "name": "native",
+        "conclusion": "success"
+      },
+      {
+        "id": 131799653859,
+        "name": "erp",
+        "conclusion": "failure"
+      },
+      {
+        "id": 131799653955,
+        "name": "Candidate upstream tests 2/8",
+        "conclusion": "success"
+      },
+      {
+        "id": 131799653971,
+        "name": "Candidate upstream tests 3/8",
+        "conclusion": "success"
+      },
+      {
+        "id": 131799653977,
+        "name": "Candidate upstream tests 1/8",
+        "conclusion": "failure"
+      },
+      {
+        "id": 131799654057,
+        "name": "Candidate upstream tests 5/8",
+        "conclusion": "success"
+      },
+      {
+        "id": 131799654064,
+        "name": "upgrade",
+        "conclusion": "failure"
+      },
+      {
+        "id": 131799654068,
+        "name": "Candidate upstream tests 8/8",
+        "conclusion": "success"
+      },
+      {
+        "id": 131799654078,
+        "name": "Candidate upstream tests 7/8",
+        "conclusion": "success"
+      },
+      {
+        "id": 131799654081,
+        "name": "Candidate upstream tests 4/8",
+        "conclusion": "success"
+      },
+      {
+        "id": 131799654315,
+        "name": "Candidate upstream tests 6/8",
+        "conclusion": "success"
+      },
+      {
+        "id": 131807769616,
+        "name": "report",
+        "conclusion": "failure"
+      }
+    ]
+  },
+  {
+    "run_id": 43401088645,
+    "head_sha": "e35166b270a784c52200129a8f3cc1026df62b86",
+    "required_jobs": [
+      "native"
+    ],
+    "jobs": [
+      {
+        "id": 131803816344,
+        "name": "native",
+        "conclusion": "success"
+      }
+    ]
+  },
+  {
+    "run_id": 43443753874,
+    "head_sha": "c7644b75772bea92307c71d6c6f51ea262c76af8",
+    "required_jobs": [
+      "erp",
+      "upgrade"
+    ],
+    "jobs": [
+      {
+        "id": 131947734767,
+        "name": "upgrade",
+        "conclusion": "success"
+      },
+      {
+        "id": 131947735331,
+        "name": "erp",
+        "conclusion": "success"
+      }
+    ]
+  }
+]

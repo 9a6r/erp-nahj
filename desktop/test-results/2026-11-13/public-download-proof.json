@@ -1,0 +1,9 @@
+{
+  "url": "https://github.com/9a6r/erp-nahj/releases/download/desktop-v0.3.2-rc1/nahj-server-0.3.2-rc1-amd64.tar.gz",
+  "size": 1098366254,
+  "sha256": "36509722db27633ae1c65dc4d994e2ac68e0b3b6954adc81e7b5753c7c9f5105",
+  "range_status": 206,
+  "seeded_partial_bytes": 2097152,
+  "resumed_with_production_downloader": true,
+  "verified_cache_reused": true
+}
