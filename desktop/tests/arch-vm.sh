@@ -12,7 +12,7 @@ if [[ -e /dev/kvm ]]; then sudo setfacl -m "u:$(id -un):rw" /dev/kvm; fi
 ssh-keygen -q -t ed25519 -N '' -f test-key
 image_format=qcow2
 initial_boot=()
-seed_drive=(-drive "file:$work/seed.img,if=virtio,format=raw")
+seed_drive=(-drive "file=$work/seed.img,if=virtio,format=raw")
 if [[ -n ${NAHJ_DISTRO:-} ]]; then
     source "$repo/desktop/tests/distros/prepare.sh"
 else
