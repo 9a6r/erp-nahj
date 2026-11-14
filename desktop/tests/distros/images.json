@@ -1,0 +1,16 @@
+{
+  "endeavouros": {
+    "id": "endeavouros",
+    "source": "https://endeavouros.com/download/",
+    "url": "https://mirrors.gigenet.com/endeavouros/iso/EndeavourOS_Titan-Nova-2026.08.15.iso",
+    "algorithm": "sha512",
+    "digest": "3f83bd745e9d5d518bdf6fc9a24092fb5347da449a6e109c6572bf999097b8b548c4cf1848fdfb3c7c2823f558c3f5b51a127060d9c5b81b9ad89b4041bee7fa"
+  },
+  "garuda": {
+    "id": "garuda",
+    "source": "https://forum.garudalinux.org/t/garuda-linux-temeraire-260819/48606",
+    "url": "https://r2.garudalinux.org/iso/garuda/kde-lite/260819/garuda-kde-lite-linux-garuda-260819.iso",
+    "algorithm": "sha256",
+    "checksum_url": "https://r2.garudalinux.org/iso/garuda/kde-lite/260819/garuda-kde-lite-linux-garuda-260819.iso.sha256"
+  }
+}
