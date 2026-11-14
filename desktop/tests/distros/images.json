@@ -9,8 +9,8 @@
   "garuda": {
     "id": "garuda",
     "source": "https://forum.garudalinux.org/t/garuda-linux-temeraire-260819/48606",
-    "url": "https://r2.garudalinux.org/iso/garuda/kde-lite/260819/garuda-kde-lite-linux-garuda-260819.iso",
+    "url": "https://downloads.sourceforge.net/project/garuda-linux/garuda/kde-lite/260819/garuda-kde-lite-linux-garuda-260819.iso",
     "algorithm": "sha256",
-    "checksum_url": "https://r2.garudalinux.org/iso/garuda/kde-lite/260819/garuda-kde-lite-linux-garuda-260819.iso.sha256"
+    "checksum_url": "https://downloads.sourceforge.net/project/garuda-linux/garuda/kde-lite/260819/garuda-kde-lite-linux-garuda-260819.iso.sha256"
   }
 }

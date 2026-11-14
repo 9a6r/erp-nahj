@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import urlopen
 r=json.loads(Path(sys.argv[1],'desktop/tests/distros/images.json').read_text())[sys.argv[2]]
+Path('results/iso-request.json').write_text(json.dumps(r,indent=2)+'\n')
 if 'checksum_url' in r:
     with urlopen(r['checksum_url'],timeout=60) as response: checksum=response.read().decode()
     Path('results/vendor-checksum.txt').write_text(checksum)
@@ -34,6 +35,13 @@ sudo cp rootfs/etc/os-release results/iso-os-release.txt
 sudo cp rootfs/etc/pacman.conf results/iso-pacman.conf
 sudo touch rootfs/etc/nahj-disposable-compatibility
 sudo cp "$repo/desktop/tests/distros/boot-files.sh" rootfs/tmp/nahj-boot-files.sh
+# These mounts also provide /dev/null for SSH host-key generation in the ISO
+# filesystem. Unmount before packing; all paths belong to this disposable VM.
+trap 'sudo umount "$work/rootfs/sys" "$work/rootfs/proc" "$work/rootfs/dev" 2>/dev/null || true' EXIT
+sudo mount --bind /dev rootfs/dev
+sudo mount -t proc proc rootfs/proc
+sudo mount --bind /sys rootfs/sys
+sudo mount -o remount,bind,ro rootfs/sys
 # Keep distro packages, repositories and identity intact. Replace only live
 # session/network bootstrap with a locked-down disposable SSH test account.
 sudo chroot rootfs /usr/bin/useradd -m -G wheel -s /bin/bash nahj
@@ -54,13 +62,6 @@ sudo systemctl --root="$work/rootfs" disable NetworkManager.service 2>/dev/null 
 sudo systemctl --root="$work/rootfs" enable sshd.service systemd-networkd.service systemd-resolved.service
 sudo ln -sf /run/systemd/resolve/stub-resolv.conf rootfs/etc/resolv.conf
 sudo truncate -s 0 rootfs/etc/fstab
-# Device and proc mounts exist only for initramfs generation and are unmounted
-# before packing. The host's /sys is read-only; no distro installer is invoked.
-trap 'sudo umount "$work/rootfs/sys" "$work/rootfs/proc" "$work/rootfs/dev" 2>/dev/null || true' EXIT
-sudo mount --bind /dev rootfs/dev
-sudo mount -t proc proc rootfs/proc
-sudo mount --bind /sys rootfs/sys
-sudo mount -o remount,bind,ro rootfs/sys
 if sudo chroot rootfs /bin/bash /tmp/nahj-boot-files.sh any > results/bootstrap-initramfs.log 2>&1; then
     bootstrap_status=0
 else
